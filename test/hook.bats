@@ -272,9 +272,9 @@ stop_reason() {
 
 	ran 'cargo test --workspace wait_github' 0
 	# `cargo fmt` reformats main.rs between its two hooks.
-	about_to 'cargo fmt --all'
+	about_to 'cargo fmt --all && git status --short'
 	echo 'fn main() { }' >repo/main.rs
-	ran 'cargo fmt --all' 0
+	ran 'cargo fmt --all && git status --short' 0
 	run stop_reason
 	assert_output ""
 	# An edit afterwards is still a change.
@@ -288,6 +288,42 @@ stop_reason() {
 	ran 'cargo fmt --all' 0
 	run stop_reason
 	assert_output ""
+}
+
+@test "an edit during a read-only status call still requires a check" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+	ran 'cargo test --workspace' 0
+	jq -cn --arg cwd "$PWD/repo" \
+		'{session_id: "s1", cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git status --short"}}' |
+		jouet hook claude pre-tool-use >/dev/null
+	ran 'git status --short' 0
+	run stop_reason
+	assert_output ""
+	jq -cn --arg cwd "$PWD/repo" \
+		'{session_id: "s1", cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git status --short"}}' |
+		jouet hook claude pre-tool-use >/dev/null
+	# Another process can edit while status is running; that is not formatting.
+	echo 'fn main() { todo!() }' >repo/main.rs
+	ran 'git status --short' 0
+	run stop_reason
+	assert_output --partial 'Files changed after the last test run passed ('
+}
+
+@test "Codex skips formatting snapshots for standalone status calls" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+	codex_before() {
+		jq -cn --arg cwd "$PWD/repo" --arg c "$1" \
+			'{session_id: "s1", cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $c}}' |
+			jouet hook codex pre-tool-use >/dev/null
+	}
+	codex_before 'git status --short'
+	[ ! -e "$XDG_STATE_HOME/jouet/sessions/s1.json" ]
+	codex_before 'cargo fmt --all'
+	[ -f "$XDG_STATE_HOME/jouet/sessions/s1.json" ]
 }
 
 @test "files a jouet commit's hooks rewrote need no second run, whatever else its call ran" {
@@ -823,10 +859,10 @@ claude_payload() {
 	}
 	# Not before a person trusts it: it is text every session reads.
 	run start
-	refute_output --partial "this project's checks"
+	refute_output --partial "prefer these project-specific checks over generic examples when applicable"
 	(cd repo && jouet trust --yes >/dev/null)
 	run start
-	assert_output --partial "jouet: this project's checks (.jouet/project.toml): bats \`jouet test --cmd -- mise run test:bats -- test/NAME.bats\`; full suite \`mise run test\`."
+	assert_output --partial "jouet: prefer these project-specific checks over generic examples when applicable (.jouet/project.toml): bats \`jouet test --cmd -- mise run test:bats -- test/NAME.bats\`; full suite \`mise run test\`."
 }
 
 @test "session-start points at a trusted .jouet/map.md without inlining it" {

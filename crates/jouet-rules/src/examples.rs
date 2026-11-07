@@ -562,6 +562,7 @@ impl Engine {
                 path: case.path.clone(),
                 cwd: None,
                 session: case.session.clone(),
+                agent: None,
                 exit_code: match rule.event {
                     Event::PostToolUse => Some(case.exit_code.unwrap_or(0)),
                     Event::PreToolUse => case.exit_code,

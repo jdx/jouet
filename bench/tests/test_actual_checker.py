@@ -82,6 +82,54 @@ class ActualCheckerTest(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_a_changed_vitest_file_stands_in_for_a_playwright_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            client = root / 'packages/desktop-client'
+            (client / 'src/accounts').mkdir(parents=True)
+            changed = 'packages/desktop-client/src/accounts/balance.test.ts'
+            (root / changed).write_text('test')
+            outcome = {}
+
+            def run(command, **kwargs):
+                report = next(arg for arg in command if arg.startswith('--outputFile='))
+                Path(report.split('=', 1)[1]).write_text(json.dumps({
+                    'success': outcome['success'], 'numPassedTests': 1,
+                    'numFailedTests': 0 if outcome['success'] else 1,
+                    'testResults': [{'name': name if outcome.get('relative') else str(root / name),
+                                     'assertionResults': [{'status': s} for s in outcome['statuses']]}
+                                    for name in outcome['ran']]}))
+                self.assertEqual(Path(kwargs['cwd']), Path('packages/desktop-client'))
+                return subprocess.CompletedProcess([], 0 if outcome['success'] else 1, '', '')
+
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                incomplete = ['changed Vitest test files did not all complete successfully: ' + changed]
+                for success, ran, statuses, relative, expected in [
+                    (True, [changed], ['passed'], False, []),
+                    # Vitest names a suite relative to where it ran, if at all.
+                    (True, ['src/accounts/balance.test.ts'], ['passed'], True, []),
+                    (False, [changed], ['failed'], False, incomplete),
+                    (True, ['packages/desktop-client/src/other.test.ts'], ['passed'], False, incomplete),
+                    # A skipped regression test beside a passing one never ran.
+                    (True, [changed], ['passed', 'skipped'], False, incomplete),
+                    (True, [changed], ['passed', 'todo'], False, incomplete),
+                ]:
+                    outcome.update(success=success, ran=ran, statuses=statuses, relative=relative)
+                    checker = runpy.run_path(str(CHECKER))
+                    checker['UNVERIFIED'].clear()
+                    with contextlib.redirect_stdout(io.StringIO()), \
+                            mock.patch.object(subprocess, 'run', side_effect=run):
+                        checker['check_agent_browser_tests'](['packages/desktop-client/src/accounts/Account.tsx', changed])
+                    self.assertEqual(checker['UNVERIFIED'], expected)
+                checker['UNVERIFIED'].clear()
+                checker['check_agent_browser_tests'](['packages/desktop-client/src/accounts/Account.tsx'])
+                self.assertEqual(checker['UNVERIFIED'], ['no runnable changed Playwright or Vitest test file'])
+            finally:
+                checker['UNVERIFIED'].clear()
+                os.chdir(old_cwd)
+
     def test_requires_the_working_tree_used_by_the_check_to_be_committed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

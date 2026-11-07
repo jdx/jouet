@@ -341,6 +341,12 @@ regexes! {
     VITEST_HEAD = r"^\s*FAIL\s+(.+ > .+|.+ \[ .+ \])$";
     VITEST_END = r"^\s*(⎯|FAIL\s|Test Files\s|Tests\s)";
     VITEST_TESTS = r"^\s*Tests\s+(\d+ .*)$";
+    VITEST_RUN = r"^\s*RUN\s+v\d";
+    VITEST_UNHANDLED = r"^Vitest caught (\d+) unhandled errors? during the test run\.$";
+    VITEST_UNHANDLED_SECTION = r"^\s*⎯+ Unhandled [A-Za-z][A-Za-z ]* ⎯+\s*$";
+    VITEST_SOURCE_ERROR = r"^\s*⎯+ Unhandled Source Error ⎯+\s*$";
+    VITEST_TYPE_ERROR = r"^TypeCheckError: .+$";
+    VITEST_LOCATION = r"^\s*❯ (.+:\d+:\d+)\s*$";
     // A failure's name in a vitest workspace: the project, the file, the rest.
     VITEST_PROJECT = r"^\|([^|]+)\| (.+?)( > .+| \[ .+ \])$";
     // TAP, as bats prints it.
@@ -560,7 +566,10 @@ pub(crate) fn digest(text: &str, failed: bool, budget: usize) -> Digest {
 /// no cap.
 pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Format]) -> Digest {
     let lines = clean(text);
-    let parsed = parse(&lines, formats);
+    let mut parsed = parse(&lines, formats);
+    if failed {
+        vitest_source_errors(&lines, &mut parsed);
+    }
     let mut found = one_per_project(merge(parsed.found));
     // cargo reports a warning once for each target that builds it.
     let mut warnings_all = parsed.warning_names.clone();
@@ -1384,6 +1393,97 @@ fn vitest(lines: &[String], out: &mut Parsed) {
             out.count_words(&c[1]);
         }
     }
+}
+
+/// Show typecheck failures only when every unhandled error can be named.
+/// These are display-only: a partially understood Vitest run must not clear
+/// the verification gate through baseline comparison.
+fn vitest_source_errors(lines: &[String], out: &mut Parsed) {
+    let starts: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, line)| VITEST_RUN.is_match(line).then_some(i))
+        .collect();
+    let mut errors = Vec::new();
+    for (index, start) in starts.iter().copied().enumerate() {
+        let end = starts.get(index + 1).copied().unwrap_or(lines.len());
+        let run = &lines[start..end];
+        let counts: Vec<usize> = run
+            .iter()
+            .filter_map(|line| VITEST_UNHANDLED.captures(line))
+            .filter_map(|c| c[1].parse().ok())
+            .collect();
+        if counts.is_empty() {
+            if run
+                .iter()
+                .any(|line| VITEST_UNHANDLED_SECTION.is_match(line))
+            {
+                vitest_unhandled_fallback(lines, out);
+                return;
+            }
+            continue;
+        }
+        if counts.len() != 1 {
+            vitest_unhandled_fallback(lines, out);
+            return;
+        }
+        let mut found = Vec::new();
+        for (i, line) in run.iter().enumerate() {
+            if VITEST_SOURCE_ERROR.is_match(line) {
+                let block = until(run, i + 1, &VITEST_END);
+                let error = block
+                    .iter()
+                    .position(|line| VITEST_TYPE_ERROR.is_match(line));
+                let location = block.iter().enumerate().find_map(|(at, line)| {
+                    VITEST_LOCATION
+                        .captures(line)
+                        .map(|capture| (at, capture[1].to_string()))
+                });
+                if let (Some(error), Some((at, location))) = (error, location) {
+                    let name = format!("{location}: {}", block[error]);
+                    let details = block
+                        .into_iter()
+                        .enumerate()
+                        .filter(|(index, _)| *index != error && *index != at)
+                        .map(|(_, line)| line)
+                        .collect();
+                    found.push((start + i, name, details));
+                }
+            }
+        }
+        if counts[0] == 0 || found.len() != counts[0] {
+            vitest_unhandled_fallback(lines, out);
+            return;
+        }
+        errors.extend(found);
+    }
+    for (i, name, block) in errors {
+        out.push(i, name, block);
+    }
+}
+
+/// Keep unhandled output visible even when it cannot be named individually.
+fn vitest_unhandled_fallback(lines: &[String], out: &mut Parsed) {
+    if let Some(at) = lines.iter().position(|line| {
+        VITEST_UNHANDLED_SECTION.is_match(line)
+            || VITEST_UNHANDLED.is_match(line)
+            || VITEST_SOURCE_ERROR.is_match(line)
+    }) {
+        out.push(
+            at,
+            "Vitest unhandled errors (details in full log)",
+            lines[at..].to_vec(),
+        );
+    }
+}
+
+/// An unhandled error may be unrelated to the tests Vitest names.
+pub(crate) fn vitest_has_unhandled_errors(text: &str) -> bool {
+    let lines = clean(text);
+    lines.iter().any(|line| VITEST_RUN.is_match(line))
+        && lines
+            .iter()
+            .any(|line| VITEST_UNHANDLED.is_match(line) || VITEST_UNHANDLED_SECTION.is_match(line))
 }
 
 fn playwright(lines: &[String], out: &mut Parsed) {

@@ -286,13 +286,16 @@ fn edit_cost(
 }
 
 /// What the estimates saved less what the costs cost, in input tokens, or
-/// `None` when a cost the net needs could not be priced. A saving that was
-/// refused counts as nothing. A harness with no history before setup is
-/// left out (see [`Cost::outside_net`]).
+/// `None` when a cost the net needs could not be priced, or CI wait savings
+/// have no linked evidence. Other refused savings count as nothing. A harness
+/// with no history before setup is left out (see [`Cost::outside_net`]).
 pub fn net(estimates: &[Estimate], costs: &[Cost]) -> Option<i64> {
-    if costs
+    if estimates
         .iter()
-        .any(|c| !c.outside_net && c.kind.needed() && c.input_tokens.is_none())
+        .any(|e| !e.outside_net && e.kind == Kind::CiWait && e.input_tokens.is_none())
+        || costs
+            .iter()
+            .any(|c| !c.outside_net && c.kind.needed() && c.input_tokens.is_none())
     {
         return None;
     }

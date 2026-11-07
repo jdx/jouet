@@ -371,6 +371,9 @@ fn fired_counts_a_rules_earlier_warnings_and_denials_in_one_session() {
                "decisions": [{"rule": "piped-test-output", "action": "record:test"}]}),
         json!({"ts": 5, "harness": "claude", "session": "s-1", "event": "override",
                "decisions": [{"rule": "piped-test-output", "action": "override"}]}),
+        // A subagent's are its own: the lead was not shown them, nor it the lead's.
+        json!({"ts": 6, "harness": "claude", "session": "s-1", "agent": "a7", "event": "pre-tool-use",
+               "decisions": [{"rule": "piped-test-output", "action": "warn"}]}),
     ];
     let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
     std::fs::write(ledger.path().join("ledger.jsonl"), text).unwrap();
@@ -379,11 +382,13 @@ fn fired_counts_a_rules_earlier_warnings_and_denials_in_one_session() {
         -- The hook writes ids with only letters, digits, `-` and `_`.
         local spelled = jouet.session.fired("piped-test-output", "s-1/")
         local other = jouet.session.fired("scoped-lint", "s-2")
-        return `{mine} {spelled} {other}`
+        local agent = jouet.session.fired("piped-test-output", "s-1", "a7")
+        local fresh = jouet.session.fired("piped-test-output", "s-1", "b2")
+        return `{mine} {spelled} {other} {agent} {fresh}`
     end)()"#;
     let e = engine(expr, Budget::default());
     e.set_probes(Probes::new(None, Some(ledger.path().into()), false));
-    assert_eq!(said(&e), "2 2 0");
+    assert_eq!(said(&e), "2 2 0 1 0");
 
     // No ledger at all: nothing to report, and no error.
     let none = tempfile::tempdir().unwrap();

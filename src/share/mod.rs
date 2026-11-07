@@ -344,7 +344,15 @@ pub(crate) fn check_rule(
     name: &str,
     now: u64,
 ) -> Result<(Evidence, String, RuleText), Vec<String>> {
-    let mut engine = wind::user_engine(&paths.rules);
+    // Sharing is an explicit command, so allow scheduler pauses without
+    // extending the budget used by session hooks.
+    let mut engine = wind::user_engine_with_budget(
+        &paths.rules,
+        jouet_rules::Budget {
+            time: std::time::Duration::from_secs(1),
+            ..jouet_rules::Budget::default()
+        },
+    );
     engine.load_scripts();
     let Some(rule) = engine.rule(name) else {
         return Err(vec![format!("no rule named `{name}`")]);

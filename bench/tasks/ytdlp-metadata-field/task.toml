@@ -11,7 +11,8 @@ prompt = """
 `--parse-metadata playlist_autonumber:track` reports that it could not
 interpret `playlist_autonumber` as `track`, rather than copying the
 playlist number into the track field. This happens when the output is a
-single field name; templated output and explicit regular expressions should
+single field name, which should receive the whole source value, line breaks
+included; templated output and explicit regular expressions should
 continue to work.
 
 Fix the metadata parser in yt-dlp, add tests, and commit your change. The

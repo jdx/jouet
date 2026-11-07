@@ -153,3 +153,79 @@ fn pnpm_vitest_cost_is_recorded_only_when_not_shadowed_by_a_script() {
     run("two.test.ts");
     assert_eq!(git(&["notes", "--ref", "jouet-cost", "show", "HEAD"]), note);
 }
+
+#[cfg(unix)]
+#[test]
+fn npx_jest_cost_is_recorded() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let bin = dir.join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let npx = bin.join("npx");
+    std::fs::write(&npx, "#!/bin/sh\nprintf 'Tests: 1 passed, 1 total\\n'\n").unwrap();
+    std::fs::set_permissions(&npx, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        out.stdout
+    };
+    git(&["init", "-q"]);
+    git(&["commit", "--allow-empty", "-qm", "base"]);
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let out = Command::new(env!("CARGO_BIN_EXE_jouet"))
+        .current_dir(dir)
+        .args([
+            "test",
+            "--cmd",
+            "--",
+            "npx",
+            "jest",
+            "tests/example.test.js",
+        ])
+        .env("PATH", path)
+        .env("HOME", dir)
+        .env("XDG_CONFIG_HOME", dir.join("config"))
+        .env("XDG_STATE_HOME", dir.join("state"))
+        .env_remove("JOUET_COST_RECORD")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let note = git(&["notes", "--ref", "jouet-cost", "show", "HEAD"]);
+    assert!(String::from_utf8_lossy(&note).contains("npx jest tests/example.test.js"));
+}

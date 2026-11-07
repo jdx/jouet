@@ -12,7 +12,8 @@ prompt = """
 command with arguments such as `code --wait` or `vim -n` fails to launch.
 An empty `EDITOR` also tries to run an empty command instead of falling back
 to `VISUAL`. Accept editor commands with arguments and make an empty EDITOR
-fall back to VISUAL. Add tests and commit your fix.
+fall back to VISUAL. Add a Bats regression test for each behavior in
+test/edit.bats, using the standard @test "name" form, and commit your fix.
 """
 
 [source]

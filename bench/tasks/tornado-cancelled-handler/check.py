@@ -33,15 +33,21 @@ def run_tests(workdir: Path, module: str) -> None:
         return
     expect(proc.returncode == 0, f"{module} failed:\n{proc.stdout}{proc.stderr}")
     if proc.returncode == 0:
-        summary = re.search(r"Ran (\d+) tests? in", proc.stdout + proc.stderr)
-        if not summary:
+        output = proc.stdout + proc.stderr
+        summaries = list(re.finditer(r"(?m)^Ran (\d+) tests? in", output))
+        if not summaries:
             UNVERIFIED.append(f"{module} did not report how many tests ran")
-        elif int(summary.group(1)) == 0:
+        elif int(summaries[-1].group(1)) == 0:
             expect(False, f"{module} ran no tests")
         else:
-            skipped = re.search(r"skipped=(\d+)", proc.stdout + proc.stderr)
-            if skipped and int(skipped.group(1)) >= int(summary.group(1)):
-                UNVERIFIED.append(f"{module} skipped all its tests")
+            result = re.search(r"(?m)^OK(?: \(([^\r\n)]*)\))?\s*$", output[summaries[-1].end():])
+            if not result:
+                UNVERIFIED.append(f"{module} did not report a successful test summary")
+            else:
+                for kind in ("skipped", "expected failures"):
+                    incomplete = re.search(rf"\b{kind}=(\d+)", result.group(1) or "")
+                    if incomplete and int(incomplete.group(1)):
+                        UNVERIFIED.append(f"{module} reported {kind}={incomplete.group(1)}")
 
 
 def check_committed(hidden: bool, tests: list[str]) -> None:

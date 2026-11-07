@@ -402,7 +402,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 let ran = digest.passed + digest.failed + digest.skipped;
                 failed.push((
                     job,
-                    baseline::failure_evidence(
+                    baseline::job_evidence(
+                        job,
+                        code,
                         &output,
                         &formats,
                         &root,

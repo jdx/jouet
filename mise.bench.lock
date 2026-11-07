@@ -303,6 +303,12 @@ checksum_source = "mise-versions"
 url = "https://github.com/pnpm/pnpm/releases/download/v10.12.1/pnpm-win-x64.exe"
 url_api = "https://api.github.com/repos/pnpm/pnpm/releases/assets/262048782"
 
+[[tools.prettier]]
+version = "3.8.3"
+aube = { path = ".mise/locks/mise.bench/prettier/3.8.3", digest = "sha256:49e1d4e4d3604357a6fbce102457588e0bb44f3d82385a376d82b3ed5d6f5c88" }
+backend = "npm:prettier"
+specifiers = ["3.8.3"]
+
 [[tools.python]]
 version = "3.13.18"
 backend = "core:python"

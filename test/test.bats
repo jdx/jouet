@@ -872,6 +872,18 @@ SH
 	assert_success
 }
 
+@test "a passing outer test can print a child Vitest error" {
+	mkdir bin
+	cat >bin/cargo <<'SH'
+#!/bin/sh
+printf 'running 1 test\n RUN  v4.1.5 /work\nVitest caught 1 unhandled error during the test run.\n⎯⎯⎯ Unhandled Source Error ⎯⎯⎯\nTypeCheckError: fixture\n ❯ src/checks.ts:4:2\n⎯⎯⎯\ntest child_output ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored\n'
+exit 0
+SH
+	chmod +x bin/cargo
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- cargo test -- --nocapture
+	assert_success
+}
+
 @test "a contradictory merge-base test result is not recorded as a pass" {
 	mkdir bin
 	cat >bin/cargo <<'SH'
@@ -888,6 +900,20 @@ SH
 	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --baseline --cmd -- cargo test
 	assert_failure 1
 	assert_output --partial 'exited 0 but reported failing tests; failures cannot be compared'
+}
+
+@test "a Vitest failure keeps an unhandled error beside a named test failure" {
+	cat >run-tests <<'SH'
+#!/bin/sh
+printf ' RUN  v4.1.5 /repo\n FAIL  test/a.test.ts > fails\nAssertionError: wrong\n⎯⎯⎯ Unhandled Errors ⎯⎯⎯\nVitest caught 1 unhandled error during the test run.\n⎯⎯⎯ Unhandled Rejection ⎯⎯⎯\nError: connection lost\n Test Files  1 failed (1)\n Tests  1 failed (1)\n'
+exit 1
+SH
+	chmod +x run-tests
+	JOUET_TEST_BASELINE=off run --separate-stderr jouet test --cmd -- ./run-tests
+	assert_failure 1
+	assert_output --partial 'FAIL test/a.test.ts > fails'
+	assert_output --partial 'Vitest unhandled errors (details in full log)'
+	assert_output --partial 'Error: connection lost'
 }
 
 @test "a failing run shows each failure up to the budget, then names the rest" {
@@ -980,6 +1006,14 @@ hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload "cargo test | tail" | jq -c '.session_id = "s2"')"
 	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
 	assert_output --partial "Run \`jouet test\` instead of cutting its output with tail."
+
+	# So is a subagent of the warned session, which was never shown the
+	# warning; once warned itself, it is denied.
+	for verdict in warn deny; do
+		run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload "cargo test | tail" | jq -c '.agent_id = "a7"')"
+		run jq -r '.hookSpecificOutput.permissionDecision // "warn"' <<<"$output"
+		assert_output "$verdict"
+	done
 
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'cargo test > out.log 2>&1')"
 	assert_output ""
@@ -1207,6 +1241,47 @@ SH
 	assert_output --partial 'baseline: all 2 failures also fail at'
 }
 
+@test "--baseline compares complete Ruff diagnostics and rejects unexpected output" {
+	printf 'original\n' >reason
+	cat >ruff <<'SH'
+#!/bin/sh
+printf 'F821 Undefined name `x`\n --> a.py:1:7\n  |\n1 | %s\n  |       ^\n\n' "$(cat reason)"
+test ! -f extra || cat extra
+printf 'Found 1 error.\n'
+if test -f unsafe; then
+  printf '1 unsafe fix available with `--fix --unsafe-fixes`.\n'
+else
+  printf '[*] 1 fixable with the `--fix` option.\n'
+fi
+exit 1
+SH
+	chmod +x ruff
+	git add reason ruff
+	git commit -qm base
+	git checkout -qb work
+	printf 'change\n' >changed
+	git add changed
+	git commit -qm change
+
+	run --separate-stderr jouet test --baseline --cmd -- ./ruff check .
+	assert_success
+	assert_output --partial 'matching failure details'
+	touch unsafe
+	run --separate-stderr jouet test --baseline --cmd -- ./ruff check .
+	assert_success
+	assert_output --partial 'matching failure details'
+	rm unsafe
+	printf 'different\n' >reason
+	run --separate-stderr jouet test --baseline --cmd -- ./ruff check .
+	assert_failure 1
+	assert_output --partial 'could not be compared'
+	printf 'original\n' >reason
+	printf 'error: could not read another file\n' >extra
+	run --separate-stderr jouet test --baseline --cmd -- ./ruff check .
+	assert_failure 1
+	assert_output --partial 'could not be compared'
+}
+
 @test "--baseline compares complete remark link warnings with their details" {
 	printf 'missing heading\n' >reason
 	cat >check-command <<'SH'
@@ -1220,7 +1295,9 @@ printf '%s\n' '$ xargs -0 remark --use remark-validate-links --frail --quiet' \
 exit 1
 SH
 	chmod +x check-command
-	git add reason check-command
+	cp check-command check-text
+	cp check-command check-json
+	git add reason check-command check-text check-json
 	git commit -qm base
 	git checkout -qb work
 	printf 'change\n' >changed
@@ -1231,9 +1308,23 @@ SH
 	assert_success
 	assert_output --partial 'remark docs/README.md:1:1-1:2'
 	printf 'different heading\n' >reason
-	run --separate-stderr jouet test --baseline --cmd -- ./check-command
+	run --separate-stderr jouet test --baseline --cmd -- ./check-text
 	assert_failure 1
 	assert_output --partial 'could not be compared'
+	assert_output --partial 'baseline log: '
+	# The baseline log is also available to JSON consumers when the details differ.
+	run --separate-stderr jouet test --baseline --json --cmd -- ./check-json
+	assert_failure 1
+	local baseline_log
+	baseline_log=$(jq -er '.baseline.logs[0]' <<<"$output")
+	[[ -f "$baseline_log" ]]
+	run cat "$baseline_log"
+	assert_output --partial 'missing heading'
+	# Reusing the saved fingerprint does not promise a still-available log.
+	run --separate-stderr jouet test --baseline --json --cmd -- ./check-json
+	assert_failure 1
+	run jq -e '.baseline | has("logs") | not' <<<"$output"
+	assert_success
 	printf 'missing heading\n' >reason
 	printf 'Earlier task failed unexpectedly\n' >earlier
 	run --separate-stderr jouet test --baseline --cmd -- ./check-command

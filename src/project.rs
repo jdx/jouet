@@ -193,16 +193,40 @@ fn line(checks: &Checks) -> Option<String> {
     if parts.is_empty() {
         return None;
     }
-    let text = format!(
-        "jouet: this project's checks (.jouet/project.toml): {}.",
-        parts.join("; ")
-    );
-    Some(if text.chars().count() > LINE_MAX {
-        let cut: String = text.chars().take(LINE_MAX).collect();
-        format!("{cut}… (more in .jouet/project.toml)")
+    let prefix = "jouet: prefer these project-specific checks over generic examples when applicable (.jouet/project.toml):";
+    let full = format!("{prefix} {}.", parts.join("; "));
+    if full.chars().count() <= LINE_MAX {
+        return Some(full);
+    }
+    let mut text = prefix.to_string();
+    let mut shown = 0;
+    for part in &parts {
+        let omitted = parts.len() - shown - 1;
+        let separator = if shown == 0 { " " } else { "; " };
+        let ending = if omitted == 0 {
+            ".".to_string()
+        } else {
+            format!("; … {omitted} more check entries in .jouet/project.toml")
+        };
+        if text.chars().count() + separator.len() + part.chars().count() + ending.chars().count()
+            > LINE_MAX
+        {
+            break;
+        }
+        text.push_str(separator);
+        text.push_str(part);
+        shown += 1;
+    }
+    let omitted = parts.len() - shown;
+    if omitted == 0 {
+        text.push('.');
     } else {
-        text
-    })
+        let separator = if shown == 0 { " " } else { "; " };
+        text.push_str(&format!(
+            "{separator}… {omitted} more check entries in .jouet/project.toml"
+        ));
+    }
+    Some(text)
 }
 
 #[cfg(test)]
@@ -225,9 +249,39 @@ mod tests {
         .unwrap();
         assert_eq!(
             line(&project.checks).unwrap(),
-            "jouet: this project's checks (.jouet/project.toml): bats `jouet test --cmd -- mise run test:bats -- test/NAME.bats`; unit `jouet test --affected`; full suite `mise run test`; before pushing `cargo clippy -- -D warnings`."
+            "jouet: prefer these project-specific checks over generic examples when applicable (.jouet/project.toml): bats `jouet test --cmd -- mise run test:bats -- test/NAME.bats`; unit `jouet test --affected`; full suite `mise run test`; before pushing `cargo clippy -- -D warnings`."
         );
         assert_eq!(line(&Checks::default()), None);
+    }
+
+    #[test]
+    fn long_check_notes_omit_whole_entries_and_report_the_count() {
+        let mut checks = Checks::default();
+        checks.focused.insert("a".into(), "cargo test".into());
+        checks
+            .focused
+            .insert("b".into(), format!("command-{}", "é".repeat(700)));
+        checks.focused.insert("c".into(), "cargo test --all".into());
+        let note = line(&checks).unwrap();
+        assert!(note.chars().count() <= LINE_MAX);
+        assert!(note.contains("a `cargo test`"));
+        assert!(!note.contains("command-"));
+        assert!(!note.contains("cargo test --all"));
+        assert!(note.ends_with("… 2 more check entries in .jouet/project.toml"));
+
+        checks.focused.remove("a");
+        let note = line(&checks).unwrap();
+        assert!(note.chars().count() <= LINE_MAX);
+        assert!(!note.contains("command-"));
+        assert!(note.ends_with("… 2 more check entries in .jouet/project.toml"));
+
+        checks.focused.clear();
+        checks.focused.insert("a".into(), "x".repeat(460));
+        checks.focused.insert("b".into(), "ok".into());
+        let note = line(&checks).unwrap();
+        assert!(note.chars().count() <= LINE_MAX);
+        assert!(note.contains("b `ok`"));
+        assert!(!note.contains("more check entries"));
     }
 
     #[test]
@@ -238,7 +292,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             line(&project.checks).unwrap(),
-            "jouet: this project's checks (.jouet/project.toml): unit `jouet test --affected`; lint `mise run lint`; left to CI, so push and `jouet wait ci` rather than run them here: e2e `mise run test:e2e`; failing here before any change, so not yours to fix unless asked: `mise run lint` (golangci-lint is built with Go 1.26)."
+            "jouet: prefer these project-specific checks over generic examples when applicable (.jouet/project.toml): unit `jouet test --affected`; lint `mise run lint`; left to CI, so push and `jouet wait ci` rather than run them here: e2e `mise run test:e2e`; failing here before any change, so not yours to fix unless asked: `mise run lint` (golangci-lint is built with Go 1.26)."
         );
         let checks = &project.checks;
         let why = Some("golangci-lint is built with Go 1.26");

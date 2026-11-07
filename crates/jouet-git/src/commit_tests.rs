@@ -229,10 +229,63 @@ fn trailers_are_appended_once() {
     assert_eq!(report.subject, "feat: change a");
     assert!(report.message.ends_with("version: 2.1.309"), "{report:?}");
 
-    req.trailers = vec!["not a trailer".into()];
+    // A trailer the message gives in its own words is not added again: a
+    // co-author with the same address, or a second AI disclosure. Another
+    // co-author, or the same name at another address, still is.
     repo.write("a.txt", "a3\n");
-    let err = run(&repo.git_handle(), &req).unwrap_err();
-    assert_eq!(err.exit, Exit::Usage);
+    req.message = "fix: b\n\nCo-Authored-By: Claude Opus 5.5 <NoReply@anthropic.com>\n\
+                   AI-Assisted: Tool: Claude Code; model: anthropic/claude-opus-5-5"
+        .into();
+    req.trailers = vec![
+        "Co-Authored-By: Claude <noreply@anthropic.com>".into(),
+        "AI-Assisted: Tool: Claude Code; model: unavailable; version: 2.1.309".into(),
+        "Co-Authored-By: Claude <claude@example.com>".into(),
+    ];
+    run(&repo.git_handle(), &req).unwrap();
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%B"]),
+        "fix: b\n\n\
+         Co-Authored-By: Claude Opus 5.5 <NoReply@anthropic.com>\n\
+         AI-Assisted: Tool: Claude Code; model: anthropic/claude-opus-5-5\n\
+         Co-Authored-By: Claude <claude@example.com>"
+    );
+    // Only a trailer block counts: a body line that looks like one does not.
+    repo.write("a.txt", "a4\n");
+    req.message = "fix: c\n\nAI-Assisted: is mentioned here.\nAnd this line is prose.".into();
+    req.trailers = vec!["AI-Assisted: Tool: X; model: y".into()];
+    run(&repo.git_handle(), &req).unwrap();
+    assert!(
+        repo.git(&["log", "-1", "--format=%B"])
+            .ends_with("AI-Assisted: Tool: X; model: y")
+    );
+
+    // A subject is not a trailer block, even one shaped like a trailer.
+    repo.write("a.txt", "a5\n");
+    req.message = "AI-Assisted: improve disclosure formatting".into();
+    run(&repo.git_handle(), &req).unwrap();
+    assert!(
+        repo.git(&["log", "-1", "--format=%B"])
+            .ends_with("\n\nAI-Assisted: Tool: X; model: y")
+    );
+    // A CRLF message splits its paragraphs the same way.
+    repo.write("a.txt", "a6\n");
+    req.message = "fix: d\r\n\r\nAI-Assisted: Tool: Claude Code; model: m\r\n".into();
+    run(&repo.git_handle(), &req).unwrap();
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%B"])
+            .matches("AI-Assisted")
+            .count(),
+        1
+    );
+
+    // A bad trailer fails even when the message makes it redundant.
+    req.message = "fix: e\n\nAI-Assisted: Tool: Claude Code; model: m".into();
+    for bad in ["not a trailer", "AI-Assisted:", " AI-Assisted: value"] {
+        req.trailers = vec![bad.into()];
+        repo.write("a.txt", "a7\n");
+        let err = run(&repo.git_handle(), &req).unwrap_err();
+        assert_eq!(err.exit, Exit::Usage, "{bad}");
+    }
 }
 
 #[test]

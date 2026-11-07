@@ -68,6 +68,9 @@ pub(super) struct Baseline {
     /// fewer tests, so a test missing from its failures may not have run.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(super) unknown: Vec<String>,
+    /// Logs of fresh baseline runs that produced uncomparable failures.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) logs: Vec<PathBuf>,
 }
 
 impl Baseline {
@@ -93,7 +96,7 @@ impl Baseline {
             };
             format!("{}{more}", shown.join(", "))
         };
-        if self.none_new() {
+        let mut text = if self.none_new() {
             let all = match self.pre_existing.len() {
                 1 => "the failure also fails".to_string(),
                 n => format!("all {n} failures also fail"),
@@ -140,7 +143,11 @@ impl Baseline {
                 ));
             }
             text
+        };
+        for log in &self.logs {
+            text.push_str(&format!("  baseline log: {}\n", log.display()));
         }
+        text
     }
 }
 
@@ -154,6 +161,10 @@ pub(super) fn failure_names(
     checkout: &Path,
     scoped: bool,
 ) -> Option<BTreeSet<String>> {
+    // Named test failures do not account for Vitest's unhandled errors.
+    if testlog::vitest_has_unhandled_errors(output) {
+        return None;
+    }
     // Not a digest: it names an output it recognises nothing in by a
     // stand-in that would match the merge base's, and shows a vitest test
     // that failed in several projects once.
@@ -207,6 +218,133 @@ pub(super) struct Evidence {
     /// For failures that are all Go tests: each name's packages, from `go
     /// test`'s output, so the merge base can run just those tests.
     go: Option<BTreeMap<String, BTreeSet<String>>>,
+}
+
+/// A Ruff diagnostic is comparable only when the directly executed command
+/// reports every diagnostic in its complete default text format.
+fn ruff_evidence(output: &str, root: &Path) -> Option<Evidence> {
+    static HEADER: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"^([A-Z][A-Z0-9]*[0-9]{3})(?: \[\*\])? .+$")
+            .expect("Ruff diagnostic header")
+    });
+    static LOCATION: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"^\s*--> (.+):(\d+):(\d+)$").expect("Ruff diagnostic location")
+    });
+    static SUMMARY: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"^Found (\d+) errors?\.$").expect("Ruff diagnostic summary")
+    });
+    static FIXABLE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"^(?:\[\*\] \d+ fixable with (?:`--fix`|the `--fix` option)(?: \(\d+ unsafe fix(?:es)? available with `--fix --unsafe-fixes`\))?|\d+ unsafe fix(?:es)? available with `--fix --unsafe-fixes`)\.$")
+            .expect("Ruff fixable summary")
+    });
+    static FRAME: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"^\s*(?:\d+\s*)?[|+-]").expect("Ruff diagnostic frame")
+    });
+    let lines = testlog::clean(output);
+    let summary = lines.iter().position(|line| SUMMARY.is_match(line))?;
+    let count = SUMMARY.captures(&lines[summary])?[1]
+        .parse::<usize>()
+        .ok()?;
+    if count == 0
+        || lines[summary + 1..]
+            .iter()
+            .any(|line| !line.is_empty() && !FIXABLE.is_match(line))
+    {
+        return None;
+    }
+    let mut details = BTreeMap::new();
+    let mut i = 0;
+    while i < summary {
+        if lines[i].is_empty() {
+            i += 1;
+            continue;
+        }
+        let code = HEADER.captures(&lines[i])?.get(1)?.as_str();
+        let location = LOCATION.captures(lines.get(i + 1)?)?;
+        let file = from_root(&location[1], root);
+        let name = format!("ruff {file}:{}:{} {code}", &location[2], &location[3]);
+        let start = i;
+        i += 2;
+        let mut has_frame = false;
+        while i < summary && !HEADER.is_match(&lines[i]) {
+            let line = &lines[i];
+            if FRAME.is_match(line) {
+                has_frame = true;
+            } else if !line.is_empty() && !line.starts_with("help:") && !line.starts_with("note:") {
+                return None;
+            }
+            i += 1;
+        }
+        if !has_frame {
+            return None;
+        }
+        let block = lines[start..i]
+            .iter()
+            .map(|line| from_root(line, root))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let hash = Sha256::digest(block.as_bytes());
+        let hash: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
+        if details.insert(name, hash).is_some() {
+            return None;
+        }
+    }
+    if details.len() != count {
+        return None;
+    }
+    Some(Evidence {
+        names: details.keys().cloned().collect(),
+        details,
+        go: None,
+    })
+}
+
+pub(super) fn job_evidence(
+    job: &Job,
+    code: i32,
+    output: &str,
+    formats: &[Format],
+    root: &Path,
+    scoped: bool,
+) -> Option<Evidence> {
+    let command = jouet_rules::shell::Command {
+        words: job.argv.clone(),
+        ..Default::default()
+    };
+    let argv = command.argv();
+    if argv
+        .first()
+        .is_some_and(|word| jouet_rules::shell::basename(word) == "ruff")
+    {
+        let mut check = 1;
+        loop {
+            match argv.get(check).map(String::as_str) {
+                Some("check") => break,
+                Some("--config" | "--color") if argv.get(check + 1).is_some() => check += 2,
+                Some("--isolated" | "--verbose" | "--quiet" | "--silent" | "-v" | "-q" | "-s") => {
+                    check += 1;
+                }
+                Some(option)
+                    if option.starts_with("--config=") || option.starts_with("--color=") =>
+                {
+                    check += 1;
+                }
+                _ => return None,
+            }
+        }
+        let mutating = argv.iter().skip(check + 1).any(|word| {
+            matches!(
+                word.as_str(),
+                "-" | "--fix" | "--fix-only" | "--diff" | "--watch"
+            ) || ["--fix=", "--fix-only=", "--diff=", "--watch="]
+                .iter()
+                .any(|prefix| word.starts_with(prefix))
+        });
+        return (code == 1 && !scoped && !mutating)
+            .then(|| ruff_evidence(output, root))
+            .flatten();
+    }
+    failure_evidence(output, formats, root, scoped)
 }
 
 /// Only the complete, terminal output of remark's explicit frail link check
@@ -305,6 +443,9 @@ pub(super) fn failure_evidence(
     root: &Path,
     scoped: bool,
 ) -> Option<Evidence> {
+    if testlog::vitest_has_unhandled_errors(output) {
+        return None;
+    }
     let Some(names) = failure_names(output, formats, root, scoped) else {
         return (!scoped).then(|| remark_evidence(output, root)).flatten();
     };
@@ -755,6 +896,7 @@ pub(super) fn compare(
     let mut pre_existing = BTreeSet::new();
     let mut new = BTreeSet::new();
     let mut unknown = BTreeSet::new();
+    let mut logs = Vec::new();
     let mut prepared = false;
     for (i, (job, now, ran, not_failed)) in failed.iter().enumerate() {
         let key = command_key(job, root);
@@ -792,6 +934,7 @@ pub(super) fn compare(
             pre_existing.extend(found);
             continue;
         }
+        let mut run_log = None;
         let outcome = match (kept, mode) {
             (_, Mode::Fresh)
             | (Some(known::Outcome::Unnamed { .. }), Mode::Retry)
@@ -842,6 +985,7 @@ pub(super) fn compare(
                     }
                 })?;
                 let output = std::fs::read(&log).unwrap_or_default();
+                run_log = Some(log.clone());
                 let output = String::from_utf8_lossy(&output);
                 if code == 0
                     && testlog::digest_with(&output, false, 0, formats).failed > 0
@@ -858,7 +1002,8 @@ pub(super) fn compare(
                 let outcome = if code == 0 {
                     known::Outcome::Passed
                 } else {
-                    match failure_evidence(&output, formats, &tree, mode == Mode::Fresh) {
+                    match job_evidence(&at_base, code, &output, formats, &tree, mode == Mode::Fresh)
+                    {
                         Some(evidence) => {
                             let d = testlog::digest_with(&output, false, 0, formats);
                             known::Outcome::Failed {
@@ -952,6 +1097,7 @@ pub(super) fn compare(
         // Far fewer tests at the merge base: one that is not among its
         // failures may never have run there.
         let short = reached.saturating_mul(2) < *ran;
+        let mut job_unknown = false;
         for name in now.iter().flat_map(|e| &e.names) {
             if at_base.contains(name) {
                 let current = now.as_ref().and_then(|e| e.details.get(name));
@@ -959,12 +1105,17 @@ pub(super) fn compare(
                     pre_existing.insert(name.clone());
                 } else {
                     unknown.insert(name.clone());
+                    job_unknown = true;
                 }
             } else if short {
                 unknown.insert(name.clone());
+                job_unknown = true;
             } else {
                 new.insert(name.clone());
             }
+        }
+        if job_unknown && let Some(log) = run_log {
+            logs.push(log);
         }
     }
     drop(checkout);
@@ -973,6 +1124,7 @@ pub(super) fn compare(
         pre_existing: pre_existing.into_iter().collect(),
         new: new.into_iter().collect(),
         unknown: unknown.into_iter().collect(),
+        logs,
     }))
 }
 
@@ -1231,6 +1383,93 @@ mod tests {
     }
 
     #[test]
+    fn ruff_baselines_require_complete_unambiguous_diagnostics() {
+        let output = "F821 Undefined name `x`\n --> /work/a.py:1:7\n  |\n1 | print(x)\n  |       ^\n\nFound 1 error.\n";
+        let ruff = |args: &[&str]| Job {
+            argv: args.iter().map(|word| (*word).to_string()).collect(),
+            env: Vec::new(),
+            dir: PathBuf::from("/work"),
+            exit: Box::new(|_| Exit::Failed),
+        };
+        let wrapped = ruff(&[
+            "env",
+            "MODE=1",
+            "mise",
+            "x",
+            "ruff@0.17",
+            "--",
+            "ruff",
+            "check",
+            ".",
+        ]);
+        let global = ruff(&["ruff", "--color", "never", "check", "."]);
+        assert!(job_evidence(&global, 1, output, &[], Path::new("/work"), false).is_some());
+        let global_fix = ruff(&["ruff", "--color=never", "check", "--fix", "."]);
+        assert!(job_evidence(&global_fix, 1, output, &[], Path::new("/work"), false).is_none());
+        let missing_value = ruff(&["ruff", "--color", "check"]);
+        assert!(job_evidence(&missing_value, 1, output, &[], Path::new("/work"), false).is_none());
+        let evidence = job_evidence(&wrapped, 1, output, &[], Path::new("/work"), false).unwrap();
+        assert_eq!(evidence.names.len(), 1);
+        let other = output.replace("/work/", "/base/");
+        let other = job_evidence(&wrapped, 1, &other, &[], Path::new("/base"), false).unwrap();
+        assert_eq!(evidence.names, other.names);
+        assert_eq!(evidence.details, other.details);
+        for footer in [
+            "[*] 1 fixable with `--fix`.",
+            "[*] 1 fixable with the `--fix` option.",
+            "1 unsafe fix available with `--fix --unsafe-fixes`.",
+            "2 unsafe fixes available with `--fix --unsafe-fixes`.",
+            "[*] 3 fixable with `--fix` (2 unsafe fixes available with `--fix --unsafe-fixes`).",
+        ] {
+            let fixable = format!("{output}{footer}\n");
+            assert!(ruff_evidence(&fixable, Path::new("/work")).is_some());
+        }
+        let changed = output.replace("print(x)", "other(x)");
+        assert_ne!(
+            evidence.details,
+            ruff_evidence(&changed, Path::new("/work")).unwrap().details
+        );
+        for incomplete in [
+            output.replace("Found 1 error.", "Found 2 errors."),
+            output.replace("Found 1 error.\n", ""),
+            format!("{output}unexpected error\n"),
+            output.replace(" --> /work/a.py:1:7", " no location"),
+            output.replace(
+                "Found 1 error.",
+                "error: could not read file\nFound 1 error.",
+            ),
+            output.replace("  |\n1 | print(x)\n  |       ^\n", ""),
+            output.replace("Found 1 error.", "  unrelated failure\nFound 1 error."),
+        ] {
+            assert!(ruff_evidence(&incomplete, Path::new("/work")).is_none());
+        }
+        assert!(
+            job_evidence(
+                &ruff(&["ruff", "check", "--fix", "."]),
+                1,
+                output,
+                &[],
+                Path::new("/work"),
+                false
+            )
+            .is_none()
+        );
+        assert!(
+            job_evidence(
+                &ruff(&["sh", "-c", "ruff check ."]),
+                1,
+                output,
+                &[],
+                Path::new("/work"),
+                false
+            )
+            .is_none()
+        );
+        assert!(job_evidence(&wrapped, 1, output, &[], Path::new("/work"), true).is_none());
+        assert!(job_evidence(&wrapped, 2, output, &[], Path::new("/work"), false).is_none());
+    }
+
+    #[test]
     fn remark_frail_requires_complete_matching_diagnostics() {
         let output = "$ git ls-files '*.md' | xargs -0 remark --use remark-validate-links --frail --quiet\n\
 docs/README.md\n\
@@ -1416,6 +1655,20 @@ docs/README.md\n\
         let repeated = "test same ... FAILED\n---- same stdout ----\nfirst cause\n---- same stdout ----\nsecond cause\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\n";
         let evidence = failure_evidence(repeated, &[], Path::new("/x"), false).unwrap();
         assert!(evidence.details.is_empty());
+    }
+
+    #[test]
+    fn vitest_unhandled_errors_prevent_comparing_named_failures() {
+        let test = " RUN  v4.1.5 /work\n FAIL  test/a.test.ts > fails\nAssertionError: wrong\n\n Tests  1 failed (1)\n";
+        assert!(failure_evidence(test, &[], Path::new("/work"), false).is_some());
+        let mixed = format!(
+            "{test}\n⎯⎯⎯ Unhandled Errors ⎯⎯⎯\nVitest caught 1 unhandled error during the test run.\n"
+        );
+        assert!(failure_names(&mixed, &[], Path::new("/work"), false).is_none());
+        assert!(failure_evidence(&mixed, &[], Path::new("/work"), false).is_none());
+        assert!(failure_evidence(&mixed, &[], Path::new("/work"), true).is_none());
+        let truncated = mixed.replace("Vitest caught 1 unhandled error during the test run.\n", "");
+        assert!(failure_evidence(&truncated, &[], Path::new("/work"), false).is_none());
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! `jouet.ci.last_run()`: the last test, lint or build run the hooks
 //! recorded in the ledger (`<state dir>/ledger/ledger.jsonl`), and
-//! `jouet.session.fired()`: how often a rule already spoke up in a session.
+//! `jouet.session.fired()`: how often a rule already spoke up to an agent in
+//! a session.
 //!
 //! The ledger is written by `jouet hook`; without one there is no last run.
 //! Each post-tool-use entry carries a `record:<kind>` decision for a run a
@@ -78,16 +79,20 @@ pub(crate) fn last_run(
     None
 }
 
-/// How many earlier tool calls in `session` the rule `rule` denied or warned
-/// about, in the end of the ledger. The hook writes a session's id with
-/// only its letters, digits, `-` and `_` (the binary's `ledger::redact_id`),
-/// so `session` is compared the same way.
-pub(crate) fn fired(dir: &Path, rule: &str, session: &str) -> Option<u64> {
-    let session: String = session
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
-        .take(128)
-        .collect();
+/// How many earlier tool calls by `agent` in `session` (None for the
+/// session's own agent, not its subagents) the rule `rule` denied or warned
+/// about, in the end of the ledger. The hook writes ids with only their
+/// letters, digits, `-` and `_` (the binary's `ledger::redact_id`), so
+/// they are compared the same way.
+pub(crate) fn fired(dir: &Path, rule: &str, session: &str, agent: Option<&str>) -> Option<u64> {
+    let redact = |id: &str| -> String {
+        id.chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+            .take(128)
+            .collect()
+    };
+    let session = redact(session);
+    let agent = agent.map(redact);
     let mut file = std::fs::File::open(dir.join("ledger.jsonl")).ok()?;
     let len = file.metadata().ok()?.len();
     let start = len.saturating_sub(TAIL);
@@ -104,6 +109,7 @@ pub(crate) fn fired(dir: &Path, rule: &str, session: &str) -> Option<u64> {
         .filter(|line| line.contains(session.as_str()) && line.contains(rule))
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .filter(|entry| entry["event"] == "pre-tool-use" && entry["session"] == session.as_str())
+        .filter(|entry| entry["agent"].as_str() == agent.as_deref())
         .filter(|entry| {
             entry["decisions"].as_array().is_some_and(|ds| {
                 ds.iter()

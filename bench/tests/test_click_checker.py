@@ -1,16 +1,31 @@
+import importlib.util
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-
+from pathlib import Path
+from unittest import mock
 
 CHECKER = Path(__file__).resolve().parents[1] / "tasks/click-short-help/check.py"
 
 
 class ClickCheckerTest(unittest.TestCase):
+    def test_timeout_keeps_captured_output_and_removes_checkout(self):
+        spec = importlib.util.spec_from_file_location("click_checker", CHECKER)
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        ok = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        timeout = subprocess.TimeoutExpired("pytest", 120, output=b"stdout\xff", stderr=b"stderr\n")
+        with mock.patch.object(checker, "UNVERIFIED", []), \
+                mock.patch.object(checker.subprocess, "run", side_effect=[ok, timeout, ok]) as process:
+            checker.check_committed_tests([])
+            self.assertEqual(len(checker.UNVERIFIED), 1)
+            self.assertIn("timed out", checker.UNVERIFIED[0])
+            self.assertIn("stdout\ufffdstderr", checker.UNVERIFIED[0])
+            self.assertEqual(process.call_count, 3)
+
     def test_ruff_failures_are_compared_and_unavailable_checks_are_unverified(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -37,12 +52,27 @@ class ClickCheckerTest(unittest.TestCase):
             bin_dir.mkdir()
             (bin_dir / "git").symlink_to(shutil.which("git"))
             python = bin_dir / "python3"
-            python.write_text('#!/bin/sh\nexit "${FAKE_BEHAVIOR_EXIT:-0}"\n')
+            python.write_text(
+                '#!/bin/sh\n'
+                'if [ "$1" != -m ]; then exit "${FAKE_BEHAVIOR_EXIT:-0}"; fi\n'
+                'for arg in "$@"; do case "$arg" in --junitxml=*) report=${arg#--junitxml=};; esac; done\n'
+                'case "${FAKE_PYTEST:-pass}" in\n'
+                '  fail) printf \'<testsuite tests="1" failures="1" errors="0" skipped="0"><testcase><failure/></testcase></testsuite>\' > "$report"; exit 1;;\n'
+                '  skip) printf \'<testsuite tests="1" failures="0" errors="0" skipped="1"><testcase><skipped/></testcase></testsuite>\' > "$report"; exit 0;;\n'
+                '  error) printf \'<testsuite tests="1" failures="0" errors="1" skipped="0"><testcase><error/></testcase></testsuite>\' > "$report"; exit 1;;\n'
+                '  empty) printf \'<testsuite tests="0" failures="0" errors="0" skipped="0"></testsuite>\' > "$report"; exit 0;;\n'
+                '  mismatch) printf \'<testsuite tests="2" failures="0" errors="0" skipped="0"><testcase/></testsuite>\' > "$report"; exit 0;;\n'
+                '  missing) exit 0;;\n'
+                '  helper) [ -f tests/helper.py ] || exit 2;;\n'
+                'esac\n'
+                'printf \'<testsuite tests="1" failures="0" errors="0" skipped="0"><testcase/></testsuite>\' > "$report"\n'
+            )
             python.chmod(0o755)
             ruff = bin_dir / "ruff"
             ruff.write_text(
                 '#!/bin/sh\n'
                 '[ "$1" = check ] && exit 0\n'
+                'case "$*" in *tests/test_*) exit 0;; esac\n'
                 'case "$*" in *--stdin-filename*) exit "${FAKE_BASE_EXIT:-0}";; esac\n'
                 'exit "${FAKE_FORMAT_EXIT:-0}"\n'
             )
@@ -51,10 +81,37 @@ class ClickCheckerTest(unittest.TestCase):
 
             def check(**extra):
                 return subprocess.run([sys.executable, "-I", str(CHECKER)], cwd=work,
-                                      env={**env, **extra}, capture_output=True, text=True)
+                                      env={**env, **extra}, capture_output=True, text=True, check=False)
 
             result = check()
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("no committed Python test file", result.stdout)
+            (work / "tests").mkdir()
+            (work / "tests/test_change.py").write_text("def test_change(): pass\n")
+            git("add", "tests/test_change.py")
+            git("commit", "-qm", "test")
+            result = check()
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            result = check(FAKE_PYTEST="fail")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("committed tests failed", result.stdout)
+            for mode in ("skip", "error", "empty", "missing", "mismatch"):
+                result = check(FAKE_PYTEST=mode)
+                self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+            (work / "tests/helper.py").write_text("untracked\n")
+            self.assertEqual(check(FAKE_PYTEST="helper").returncode, 3)
+            test_commit = git("rev-parse", "HEAD")
+            git("mv", "tests/test_change.py", "tests/test_renamed.py")
+            git("commit", "-qm", "rename test")
+            result = check()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            git("rm", "tests/test_renamed.py")
+            git("commit", "-qm", "delete test")
+            result = check()
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("no committed Python test file", result.stdout)
+            git("checkout", test_commit, "--", "tests/test_change.py")
+            git("commit", "-qm", "restore test")
             result = check(FAKE_FORMAT_EXIT="1")
             self.assertEqual(result.returncode, 1)
             self.assertIn("Ruff format fails on source with spaces.py", result.stdout)

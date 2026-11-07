@@ -45,6 +45,10 @@ pub(crate) struct Entry {
     pub harness: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
+    /// The subagent in that session that made the call, as Claude Code's
+    /// `agent_id` names it; None for the session's own agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
     /// The work tree the session runs in, as [`repo_key`]: a hash, never the
     /// path.
     #[serde(default, skip_serializing_if = "Option::is_none")]

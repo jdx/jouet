@@ -84,6 +84,33 @@ RS
 	assert_stderr --partial 'missing1: not searched'
 }
 
+@test "search suggests -g for an unavailable quoted glob path" {
+	run --separate-stderr jouet search download '*.rs'
+	assert_failure 3
+	assert_stderr --partial 'paths are literal: use -g GLOB to filter filenames'
+
+	run --separate-stderr jouet search --json download '*.rs'
+	assert_failure 3
+	assert_equal "$(jq -r '.error.message | contains("use -g GLOB")' <<<"$output")" true
+
+	run --separate-stderr jouet search download src/main.rs '*.rs'
+	assert_failure 3
+	assert_stderr --partial 'use -g GLOB'
+	run --separate-stderr jouet search download src/main.rs './*.rs'
+	assert_failure 3
+	assert_stderr --partial 'use -g GLOB'
+
+	run --separate-stderr jouet search download -g '*.rs'
+	assert_success
+	assert_output --partial 'client.download("index.html");'
+
+	printf 'download literal\n' >'*.rs'
+	run --separate-stderr jouet search download '*.rs'
+	assert_success
+	assert_stderr ''
+	assert_output --partial 'download literal'
+}
+
 @test "search reports an unreadable file without discarding other matches" {
 	printf 'download\n' >unreadable.rs
 	chmod 000 unreadable.rs
@@ -98,6 +125,20 @@ RS
 	assert_equal "$(jq -c '.unsearched' <<<"$output")" '["unreadable.rs"]'
 	assert_equal "$(jq -r '.files_searched' <<<"$output")" '1'
 	assert_stderr ''
+}
+
+@test "search does not suggest a glob for an unreadable literal path" {
+	printf 'download\n' >'[literal].rs'
+	chmod 000 '[literal].rs'
+	if [ -r '[literal].rs' ]; then
+		chmod 600 '[literal].rs'
+		skip 'the test user can read files without permissions'
+	fi
+	run --separate-stderr jouet search download '[literal].rs' src/main.rs
+	chmod 600 '[literal].rs'
+	assert_failure 3
+	assert_stderr --partial '[literal].rs: not searched'
+	refute_stderr --partial 'use -g GLOB'
 }
 
 @test "search reports an unreadable directory without discarding other matches" {

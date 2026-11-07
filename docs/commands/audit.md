@@ -28,14 +28,15 @@ A request to the model re-reads the whole context, so a request avoided saves it
 
 The categories are CI polling, process polling, PR threads, PR status, other GitHub, edits, build/test/lint, reads and searches, git, web, agents, replies and other. A shell command is categorized by what it runs, most specific first, so `sleep 30 && gh pr checks 12` is CI polling. jouet's own test, read, search, graph, edit and commit commands count with the corresponding work rather than as other.
 
-The process-polling category includes blocking waits and other checks. Its attributed tokens and time describe where the session spent them; they are not a count of waste or a claim that a longer wait was possible.
+The process-polling and CI-polling categories include blocking waits and other checks. Their attributed tokens and time describe where the session spent them; they are not a count of waste or a claim that a longer wait was possible.
 
 Recorded shell-call time sums the durations the transcript attributes to shell calls, not necessarily the full lifetime of their processes. If a command yields a background session, later native wait calls are counted as process polling, not shell time. A shell-based process poll, such as `sleep 10`, counts in both the process-polling category and shell-call time. Unobserved or missing durations are not counted. Tool times can overlap, so their sum is not the task's elapsed wall time. In JSON, these totals are `command_ms` and `tool_ms` respectively.
 
 The savings are estimates and are labelled as such:
 
 - **Process waits:** consecutive short, quiet checks of the same linked job, where the previous check reported it was still running. A longer wait might have avoided later checks. Blocking waits, output, user-facing messages and unlinked calls are not counted as savings. The report also counts linked checks and sequences as observations, and shows cached input separately when available.
-- **CI polling, PR threads and PR status:** requests that did the same kind of thing as the request just before them. One `jouet wait`, `pr threads` or `pr status` call might have replaced each run of them.
+- **CI polling:** shown as an observation, with no savings estimate. Adjacent checks can target different runs or already block, and the category does not establish that another request was avoidable.
+- **PR threads and PR status:** requests that did the same kind of thing as the request just before them. One `pr threads` or `pr status` call might have replaced each run of them.
 - **Edits:** requests whose edit failed and had to be redone.
 - **Builds and tests** cost time more than tokens; jouet has no command for them, and the report points to mbx.
 
@@ -70,8 +71,7 @@ Codex: 947 sessions (965 transcripts with subagents), 216,659 requests, 221,424 
   … 8 more categories (--top 0 lists all)
 
   what would cut it:
-  - CI polling (10.0%): jouet wait ci — one call blocks until the checks settle and shows why any failed, instead of a model turn per check (built-in rule `sleep-poll`)
-    estimate: 846.4M tokens (3.1%), counting requests that polled CI right after a request that did; a wait would have made each run of polls one call
+  - CI polling (10.0%): jouet wait ci — can wait for checks and show why one failed; use --all to wait for every check (built-in rule `sleep-poll`)
     top shapes:
       gh run view <n> --json <v> --jq <s> (896 calls, 110.1M tokens)
       gh run view <n> --repo <path> --json <v> --jq <s> (621 calls, 71.5M tokens)
