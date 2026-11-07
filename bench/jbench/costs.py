@@ -153,6 +153,15 @@ def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[
             note = updated
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+        # Keep the checkout if the task put its home or logs inside it.
+        paths = [env.get(name) for name in ("HOME", "XDG_STATE_HOME", "JOUET_LOG_DIR")]
+        if any(value and (workdir / value).resolve().is_relative_to(workdir.resolve()) for value in paths):
+            log(f"    keeping cost seed checkout {workdir}: it contains home or logs")
+        else:
+            try:
+                shutil.rmtree(workdir)
+            except OSError as error:
+                log(f"    could not remove cost seed checkout {workdir}: {error}")
     if incomplete:
         log(f"    {task.name}: runs start without a cost note because the seed is incomplete")
         return None
