@@ -625,6 +625,16 @@ local function top_level(script: { JouetCommand }): { JouetCommand }
 	return top
 end
 
+local function wrapper_changes_dir(given: { string }, argv: { string }): boolean
+	for i = 1, #given - #argv do
+		local word = given[i]
+		if string.sub(word, 1, 2) == "-C" or word == "--cd" or word == "--chdir" or string.sub(word, 1, 8) == "--chdir=" or string.sub(word, 1, 5) == "--cd=" then
+			return true
+		end
+	end
+	return false
+end
+
 local function classify(command: JouetCommand, dir: string | false | nil, cwd: string?, harness: string?): (Kind?, Scope)
 	local program: string = command.program or ""
 	local args: { string } = table.move(command.argv, 2, #command.argv, 1, {})
@@ -642,6 +652,37 @@ local function classify(command: JouetCommand, dir: string | false | nil, cwd: s
 	local playwright_at, workspace = playwright_args(program, args)
 	if playwright_at then
 		return playwright_scope(args, playwright_at, workspace)
+	end
+	-- An explicit npx Jest invocation may be a focused run, a custom config,
+	-- or a different suite from the project's test script. Preserve every
+	-- argument and never let it clear a full-suite or other runner's failure.
+	if program == "npx" then
+		local at = if args[1] == "--no-install" then 2 else 1
+		if args[at] == "jest" then
+			-- The shell parser unwraps `env -C` and `mise x -C`, but does not
+			-- retain the directory they select. Do not attribute such a run to
+			-- the caller's directory.
+			for _, word in command.words do
+				if jouet.basename(word) == "npx" then break end
+				if string.sub(word, 1, 2) == "-C" or word == "--cd" or word == "--chdir"
+					or string.sub(word, 1, 8) == "--chdir=" or string.sub(word, 1, 5) == "--cd=" then
+					return nil, unknown
+				end
+			end
+			local selection = { "@jouet:npx:jest" }
+			for i = at + 1, #args do
+				local arg = args[i]
+				local name = string.match(arg, "^(%-%-?[%w%-]+)=") or arg
+				if arg == "" or INSPECT[name] or string.find(arg, "[^%w%._/%-:=@]")
+					or name == "--showConfig" or name == "--show-config" or name == "--clearCache" or name == "--clear-cache" or name == "--init"
+					or name == "--updateSnapshot" or name == "--update-snapshot" or name == "-u"
+					or name == "--watch" or name == "--watchAll" or name == "--watch-all" then
+					return nil, unknown
+				end
+				table.insert(selection, arg)
+			end
+			return "test", partial(table.concat(selection, " "))
+		end
 	end
 	if program == "pnpm" then
 		local is_test = first == "test" or first == "t" or ((first == "run" or first == "run-script") and (args[2] == "test" or args[2] == "t"))
@@ -723,6 +764,7 @@ local function classify(command: JouetCommand, dir: string | false | nil, cwd: s
 			-- ran go test, and its pass clears that test's failure.
 			local shell = if argv[1] then jouet.basename(argv[1]) else nil
 			if (shell == "sh" or shell == "bash" or shell == "zsh") and argv[2] == "-c" and argv[3] and #argv == 3 then
+				if wrapper_changes_dir(given, argv) then return nil, unknown end
 				local top = top_level(jouet.parse(argv[3], command.status))
 				if #top == 1 then
 					-- Its own status is unknown when the script says nothing
@@ -824,12 +866,7 @@ local function script_commands(command: JouetCommand, dir: string?, cwd: string?
 	end
 	-- A wrapper that changes directory (`env -C`, `mise x -C`) ran the
 	-- script in a work tree the rule cannot name.
-	for i = 1, #given - #argv do
-		local word = given[i]
-		if string.sub(word, 1, 2) == "-C" or word == "--cd" or word == "--chdir" or string.sub(word, 1, 8) == "--chdir=" or string.sub(word, 1, 5) == "--cd=" then
-			return nil
-		end
-	end
+	if wrapper_changes_dir(given, argv) then return nil end
 	-- A command in `$(...)` runs in a subshell: its `cd` moves nothing, and
 	-- it is not one of the script's checks.
 	local script = top_level(jouet.parse(argv[3], command.status))
@@ -864,7 +901,7 @@ local rule: JouetRule = {
 				for _, ran in ipairs(script_commands(command, project_dir, call.cwd, call.harness) or { command }) do
 					local kind, scope = classify(ran, project_dir, call.cwd, call.harness)
 					if kind then
-						if scope.selector and string.sub(scope.selector, 1, 12) == "@jouet:pnpm:" then
+						if scope.selector and (string.sub(scope.selector, 1, 12) == "@jouet:pnpm:" or string.sub(scope.selector, 1, 15) == "@jouet:npx:jest") then
 							-- Identical --dir arguments can refer to different projects
 							-- when calls start in different directories.
 							local cwd = call.cwd or (if call.harness == "test" then "." else "unknown")

@@ -42,6 +42,9 @@ fires = [
   { command = "python3 -m pytest -x", exit_code = 1, kind = "test" },
   { command = "playwright test e2e/account.spec.ts", exit_code = 1, kind = "test", scope = "partial @jouet:playwright e2e/account.spec.ts" },
   { command = "npx playwright test", exit_code = 0, kind = "test", scope = "partial @jouet:playwright" },
+  { command = "npx jest tests/example.test.js", exit_code = 0, kind = "test", scope = "partial @jouet:npx:jest tests/example.test.js" },
+  { command = "cd web && npx jest tests/example.test.js", exit_code = 1, kind = "test", scope = "partial @jouet:cwd=.:cd=web @jouet:npx:jest tests/example.test.js" },
+  { command = "jouet test --cmd -- npx --no-install jest --runInBand tests/example.test.js", exit_code = 0, kind = "test", scope = "partial @jouet:npx:jest --runInBand tests/example.test.js" },
   { command = "npx --no-install playwright test account.spec.ts", exit_code = 1, kind = "test", scope = "partial @jouet:playwright account.spec.ts" },
   { command = "bunx playwright test", exit_code = 0, kind = "test", scope = "partial @jouet:playwright" },
   { command = "pnpm exec playwright test", exit_code = 0, kind = "test", scope = "partial @jouet:playwright" },
@@ -154,6 +157,18 @@ fires = [
   { command = "jouet test --cmd -- python3 -m tornado.test.runtests tornado.test.web_test", exit_code = 1, kind = "test", scope = "partial" },
 ]
 quiet = [
+  { command = "npx jest --listTests", exit_code = 0 },
+  { command = "npx jest --listTests=true", exit_code = 0 },
+  { command = "env -C web npx jest tests/example.test.js", exit_code = 0 },
+  { command = "jouet test --cmd -- env -C web npx jest tests/example.test.js", exit_code = 0 },
+  { command = "jouet test --cmd -- mise x -C web -- npx jest tests/example.test.js", exit_code = 0 },
+  { command = "jouet test --cmd -- env -C web sh -c 'npx jest tests/example.test.js'", exit_code = 0 },
+  { command = "jouet test --cmd -- mise x -C web -- sh -c 'npx jest tests/example.test.js'", exit_code = 0 },
+  { command = "npx jest --updateSnapshot=true", exit_code = 0 },
+  { command = "npx jest --update-snapshot", exit_code = 0 },
+  { command = "npx jest -u=true", exit_code = 0 },
+  { command = "npx jest -t 'two words'", exit_code = 0 },
+  { command = "npx --package other jest", exit_code = 0 },
   # Ruff's fix preview and fix-only modes do not report a complete check.
   { command = "ruff check --diff src/a.py", exit_code = 1 },
   { command = "ruff --isolated --color=never check --diff src/a.py", exit_code = 1 },

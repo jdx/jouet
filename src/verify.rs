@@ -195,6 +195,16 @@ impl Run {
             .any(|word| word.starts_with("@jouet:pnpm:"))
     }
 
+    fn npx_jest_scoped(&self) -> bool {
+        self.selection()
+            .split_whitespace()
+            .any(|word| word == "@jouet:npx:jest")
+    }
+
+    fn isolated_scoped(&self) -> bool {
+        self.pnpm_scoped() || self.npx_jest_scoped()
+    }
+
     /// Whether this pass ran what `failed` selected: the same selection,
     /// the same command over more names (`test:e2e a b` covers `test:e2e
     /// a`), or the same selection without the names after it (`-p a`
@@ -241,6 +251,43 @@ impl Run {
             }
             (Some(_), None) | (None, Some(_)) => return false,
             (None, None) => {}
+        }
+        let npx_jest = |selection: &str| {
+            selection
+                .split_whitespace()
+                .any(|word| word == "@jouet:npx:jest")
+        };
+        match (npx_jest(ran), npx_jest(wanted)) {
+            (true, true) => {
+                if ran.contains("@jouet:cwd=unknown:") || wanted.contains("@jouet:cwd=unknown:") {
+                    return false;
+                }
+                if ran == wanted {
+                    return true;
+                }
+                // Join only paths without `..`: resolving a parent across a
+                // symlink lexically could identify different directories.
+                fn scope(s: &str) -> Option<(String, &str)> {
+                    let (directory, selection) = s.split_once(' ')?;
+                    let (cwd, cd) = directory.strip_prefix("@jouet:cwd=")?.split_once(":cd=")?;
+                    if !cwd.starts_with('/')
+                        || cwd.split('/').chain(cd.split('/')).any(|p| p == "..")
+                    {
+                        return None;
+                    }
+                    let path = if cd.starts_with('/') {
+                        cd.to_string()
+                    } else if cd == "." {
+                        cwd.to_string()
+                    } else {
+                        format!("{}/{cd}", cwd.trim_end_matches('/'))
+                    };
+                    Some((path.trim_end_matches('/').to_string(), selection))
+                }
+                return scope(ran).is_some_and(|a| scope(wanted).is_some_and(|b| a == b));
+            }
+            (true, false) | (false, true) => return false,
+            (false, false) => {}
         }
         let pnpm = |selection: &str| {
             selection
@@ -1574,9 +1621,9 @@ impl Checks {
                 run.tests = earlier.tests.clone();
             }
             if run.passed() && run.full {
-                // A full runner or task can cover a different package than a
-                // scoped pnpm run. Keep that failure unless coverage is known.
-                failures.retain(|f| f.pnpm_scoped() && !run.covers(f));
+                // A full runner or task may cover a different package or
+                // configuration. Keep scoped failures unless coverage is known.
+                failures.retain(|f| f.isolated_scoped() && !run.covers(f));
                 self.full_passes.insert(kind, run.clone());
             } else if run.passed() {
                 failures.retain(|f| f.full || !run.covers(f));
@@ -1867,7 +1914,7 @@ impl Checks {
                         && self.passes.get(kind).is_some_and(|passes| {
                             passes.iter().any(|p| {
                                 p.tree.as_deref() == Some(now.as_str())
-                                    && ((p.full && !failed.pnpm_scoped())
+                                    && ((p.full && !failed.isolated_scoped())
                                         || (!failed.full && p.covers(failed)))
                             })
                         })
@@ -1929,7 +1976,14 @@ impl Checks {
             );
         }
         let since = last.map_or(String::new(), |l| format!(" (`{}`)", shown(&l.command)));
-        let clear = if failed.pnpm_scoped() && failed.selection().contains("@jouet:cwd=unknown:") {
+        let clear = if failed.npx_jest_scoped()
+            && failed.selection().contains("@jouet:cwd=unknown:")
+        {
+            "its original working directory is unknown, so jouet cannot safely match it to another npx Jest run".to_string()
+        } else if failed.npx_jest_scoped() {
+            "a passing run of the same npx Jest selection in the same directory clears it"
+                .to_string()
+        } else if failed.pnpm_scoped() && failed.selection().contains("@jouet:cwd=unknown:") {
             "its original working directory is unknown, so jouet cannot safely match it to another pnpm run".to_string()
         } else if failed.pnpm_scoped() {
             "a passing run of the same supported pnpm selection, or a covering unfiltered Vitest run in the same scope, clears it".to_string()
@@ -2262,6 +2316,35 @@ mod tests {
         assert!(why.contains("only a full test run clears it"), "{why}");
         state.record([test("cargo test --workspace", 0, "full")], Some("t2"));
         assert_eq!(reason(&state, "t2"), None);
+    }
+
+    #[test]
+    fn npx_jest_only_clears_the_same_selection_and_directory() {
+        let mut state = Checks::default();
+        let failed = "@jouet:cwd=/repo:cd=web @jouet:npx:jest --config=unit.js a.test.js";
+        state.record(
+            [test("npx jest --config=unit.js a.test.js", 1, failed)],
+            Some("t1"),
+        );
+        for scope in [
+            "@jouet:cwd=/repo:cd=admin @jouet:npx:jest --config=unit.js a.test.js",
+            "@jouet:cwd=/repo:cd=web @jouet:npx:jest --config=integration.js a.test.js",
+            "@jouet:cwd=/repo:cd=web @jouet:npx:jest --config=unit.js b.test.js",
+        ] {
+            state.record([test("npx jest", 0, scope)], Some("t1"));
+            assert!(reason(&state, "t1").is_some());
+        }
+        state.record([test("npm test", 0, "full")], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+        state.record(
+            [test(
+                "npx jest --config=unit.js a.test.js",
+                0,
+                "@jouet:cwd=/repo/web:cd=. @jouet:npx:jest --config=unit.js a.test.js",
+            )],
+            Some("t1"),
+        );
+        assert_eq!(reason(&state, "t1"), None);
     }
 
     #[test]
