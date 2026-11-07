@@ -96,20 +96,27 @@ class ActualCheckerTest(unittest.TestCase):
                 Path(report.split('=', 1)[1]).write_text(json.dumps({
                     'success': outcome['success'], 'numPassedTests': 1,
                     'numFailedTests': 0 if outcome['success'] else 1,
-                    'testResults': [{'name': str(root / name)} for name in outcome['ran']]}))
+                    'testResults': [{'name': name if outcome.get('relative') else str(root / name),
+                                     'assertionResults': [{'status': s} for s in outcome['statuses']]}
+                                    for name in outcome['ran']]}))
                 self.assertEqual(Path(kwargs['cwd']), Path('packages/desktop-client'))
                 return subprocess.CompletedProcess([], 0 if outcome['success'] else 1, '', '')
 
             old_cwd = Path.cwd()
             try:
                 os.chdir(root)
-                for success, ran, expected in [
-                    (True, [changed], []),
-                    (False, [changed], ['changed Vitest test files did not all complete successfully: ' + changed]),
-                    (True, ['packages/desktop-client/src/other.test.ts'],
-                     ['changed Vitest test files did not all complete successfully: ' + changed]),
+                incomplete = ['changed Vitest test files did not all complete successfully: ' + changed]
+                for success, ran, statuses, relative, expected in [
+                    (True, [changed], ['passed'], False, []),
+                    # Vitest names a suite relative to where it ran, if at all.
+                    (True, ['src/accounts/balance.test.ts'], ['passed'], True, []),
+                    (False, [changed], ['failed'], False, incomplete),
+                    (True, ['packages/desktop-client/src/other.test.ts'], ['passed'], False, incomplete),
+                    # A skipped regression test beside a passing one never ran.
+                    (True, [changed], ['passed', 'skipped'], False, incomplete),
+                    (True, [changed], ['passed', 'todo'], False, incomplete),
                 ]:
-                    outcome.update(success=success, ran=ran)
+                    outcome.update(success=success, ran=ran, statuses=statuses, relative=relative)
                     checker = runpy.run_path(str(CHECKER))
                     checker['UNVERIFIED'].clear()
                     with contextlib.redirect_stdout(io.StringIO()), \

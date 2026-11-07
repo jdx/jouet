@@ -134,9 +134,16 @@ def check_agent_unit_tests(changed):
                 '--reporter=json', f'--outputFile={report}', *names,
             ], cwd=root, capture_output=True, text=True, timeout=600)
             data = json.loads(report.read_text())
-            ran = {Path(suite['name']).resolve() for suite in data['testResults']}
+            # Suite names are absolute in Vitest's report; a relative one is
+            # relative to where it ran.
+            ran = {(root / suite['name']).resolve() for suite in data['testResults']}
+            # A skipped, pending or todo test never ran, as the Playwright check
+            # also requires.
+            statuses = [test['status'] for suite in data['testResults']
+                        for test in suite['assertionResults']]
             verdict = (result.returncode == 0 and data.get('success') is True
                        and ran == {path.resolve() for path in files}
+                       and bool(statuses) and all(status == 'passed' for status in statuses)
                        and data.get('numPassedTests', 0) > 0 and data.get('numFailedTests') == 0)
         except subprocess.TimeoutExpired as error:
             print_timeout_output(error)
