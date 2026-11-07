@@ -84,6 +84,30 @@ RS
 	assert_stderr --partial 'missing1: not searched'
 }
 
+@test "search suggests -g for an unavailable quoted glob path" {
+	run --separate-stderr jouet search download '*.rs'
+	assert_failure 3
+	assert_stderr --partial 'paths are literal: use -g GLOB to filter filenames'
+
+	run --separate-stderr jouet search --json download '*.rs'
+	assert_failure 3
+	assert_equal "$(jq -r '.error.message | contains("use -g GLOB")' <<<"$output")" true
+
+	run --separate-stderr jouet search download src/main.rs '*.rs'
+	assert_failure 3
+	assert_stderr --partial 'use -g GLOB'
+
+	run --separate-stderr jouet search download -g '*.rs'
+	assert_success
+	assert_output --partial 'client.download("index.html");'
+
+	printf 'download literal\n' >'*.rs'
+	run --separate-stderr jouet search download '*.rs'
+	assert_success
+	assert_stderr ''
+	assert_output --partial 'download literal'
+}
+
 @test "search reports an unreadable file without discarding other matches" {
 	printf 'download\n' >unreadable.rs
 	chmod 000 unreadable.rs

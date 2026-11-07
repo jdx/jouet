@@ -70,11 +70,20 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
     let report = match search::run(&options, &mut memory) {
         Ok(report) => report,
         Err(e @ Error::Usage(_)) => return out.error(Exit::Usage, &e.to_string()),
-        Err(e @ Error::NotFound(_)) => return out.error(Exit::NotFound, &e.to_string()),
+        Err(e @ Error::NotFound(_)) => {
+            let hint = match &e {
+                Error::NotFound(path) => glob_path_hint(path),
+                Error::Usage(_) => "",
+            };
+            return out.error(Exit::NotFound, &format!("{e}{hint}"));
+        }
     };
     if !out.json {
         for path in &report.unsearched {
-            eprintln!("jouet: {path}: not searched (path unavailable)");
+            eprintln!(
+                "jouet: {path}: not searched (path unavailable){}",
+                glob_path_hint(Path::new(path))
+            );
         }
         for error in &report.walk_errors {
             eprintln!("jouet: search incomplete: {error}");
@@ -118,6 +127,14 @@ pub(crate) fn run(args: &SearchArgs, out: &Output) -> Exit {
         Exit::Failed
     } else {
         Exit::Ok
+    }
+}
+
+fn glob_path_hint(path: &Path) -> &'static str {
+    if path.to_string_lossy().contains(['*', '?', '[']) {
+        "; paths are literal: use -g GLOB to filter filenames"
+    } else {
+        ""
     }
 }
 
