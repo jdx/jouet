@@ -1326,8 +1326,16 @@ impl State {
         affected: impl Fn(&str) -> bool,
     ) -> Option<Block> {
         let own = self.trees.get_key_value(home);
+        // Runs outside any repository ("") share one entry, whatever
+        // directory each ran in, and have no tree to tell whether they are
+        // still about anything: a scratch check from hours ago would hold up
+        // every stop after. They count only for a session that works
+        // outside a repository itself.
         let others = self.trees.iter().filter(|(root, checks)| {
-            root.as_str() != home && !checks.subagents_only && !checks.last_by_subagent
+            root.as_str() != home
+                && !root.is_empty()
+                && !checks.subagents_only
+                && !checks.last_by_subagent
         });
         // Every tree's at once: a tree left for a later stop would be raised
         // at the end of a turn that never touched it.
@@ -3556,6 +3564,28 @@ mod tests {
         assert!(through_hk("jouet --json diag check --changed"));
         assert!(through_hk("jouet --display agent diag check"));
         assert!(!through_hk("jouet edit replace diag --old a --new b"));
+    }
+
+    #[test]
+    fn runs_outside_a_repository_hold_up_only_a_session_outside_one() {
+        let mut state = State::default();
+        state.record("", [test("bats test/a.bats", 1, "test/a.bats")], None);
+        // A session in a repository is not held up by a scratch check.
+        assert_eq!(state.block("/home", |_| None, |_| false, |_| true), None);
+        // One working outside a repository is.
+        let why = state
+            .block("", |_| None, |_| false, |_| true)
+            .unwrap()
+            .reason;
+        assert!(why.contains("bats test/a.bats"), "{why}");
+        // Its own repository's failures still count.
+        state.record("/home", [test("cargo test", 101, "full")], Some("h1"));
+        let why = state
+            .block("/home", |_| Some("h1".into()), |_| false, |_| true)
+            .unwrap()
+            .reason;
+        assert!(why.contains("cargo test"), "{why}");
+        assert!(!why.contains("bats"), "{why}");
     }
 
     #[test]
