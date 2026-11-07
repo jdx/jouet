@@ -48,8 +48,10 @@ def check_checkout(deadline: float) -> None:
             created = True
             out.write((Path(__file__).parent / "hidden" / "completion_test.go").read_text())
         try:
+            # Reserve most of the budget for the agent's committed tests even if this probe hangs.
+            hidden_timeout = min(45, remaining(deadline) / 3)
             result = subprocess.run(["go", "test", "-json", "-count=1", "-run", "^TestJouetCompletionKeepsArguments$", "."],
-                                    check=False, capture_output=True, text=True, timeout=remaining(deadline))
+                                    check=False, capture_output=True, text=True, timeout=hidden_timeout)
         except subprocess.TimeoutExpired as error:
             output = error.stdout.decode(errors="replace") if isinstance(error.stdout, bytes) else error.stdout or ""
             stderr = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else error.stderr or ""

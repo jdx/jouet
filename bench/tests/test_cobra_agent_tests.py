@@ -14,6 +14,9 @@ sys.path.insert(0, str(TASKS))
 spec = importlib.util.spec_from_file_location("cobra_agent_tests", TASKS / "cobra-completion-args/agent_tests.py")
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
+main_spec = importlib.util.spec_from_file_location("cobra_check", TASKS / "cobra-completion-args/check.py")
+main_checker = importlib.util.module_from_spec(main_spec)
+main_spec.loader.exec_module(main_checker)
 from _check import PROBLEMS, UNVERIFIED
 
 
@@ -97,6 +100,20 @@ class CobraAgentTests(unittest.TestCase):
         self.assertTrue(PROBLEMS)
         self.assertTrue(UNVERIFIED)
         self.assertLess(time.monotonic() - started, 10)
+
+    def test_hidden_timeout_leaves_time_to_find_a_committed_failure(self):
+        self.add_test('t.Fatal("committed regression")')
+        real_run = subprocess.run
+
+        def run(args, **kwargs):
+            if args[:2] == ["go", "test"] and "^TestJouetCompletionKeepsArguments$" in args:
+                return real_run([sys.executable, "-c", "import time; time.sleep(20)"], **kwargs)
+            return real_run(args, **kwargs)
+
+        with mock.patch.object(main_checker.subprocess, "run", side_effect=run):
+            main_checker.check_checkout(time.monotonic() + 12)
+        self.assertTrue(any("committed Go tests failed" in problem for problem in PROBLEMS), PROBLEMS)
+        self.assertTrue(any("completion cases timed out" in reason for reason in UNVERIFIED), UNVERIFIED)
 
     def test_unselected_build_tag_is_unverified(self):
         self.add_test("", "//go:build jouet_unavailable_tag\n\n")
