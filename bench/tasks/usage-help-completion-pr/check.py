@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _check import dirty, expect, finish, github_state, new_commit  # noqa: E402
+from _check import UNVERIFIED, dirty, expect, finish, github_state, new_commit
 
 # What was committed, before the hidden tests are added to the agent's files.
 expect(new_commit(), "nothing was committed")
@@ -16,11 +16,9 @@ env = {**os.environ, "CARGO_TERM_COLOR": "never"}
 
 
 def run(*cmd: str, cwd: str = ".") -> tuple[bool, str]:
-    proc = subprocess.run(list(cmd), capture_output=True, text=True, env=env, cwd=cwd, timeout=1500)
+    proc = subprocess.run(list(cmd), check=False, capture_output=True, text=True, env=env, cwd=cwd, timeout=1500)
     out = proc.stdout + proc.stderr
-    failed = [line for line in out.splitlines()
-              if "FAILED" in line or "FAIL" in line or "panicked" in line or line.startswith("error")]
-    return proc.returncode == 0, "\n".join(failed[:20]) + "\n" + out[-2500:]
+    return proc.returncode == 0, out
 
 
 # CI's failure: the Go conformance suite compares `go/argv`'s completion with
@@ -34,9 +32,19 @@ if ok:
 # The agent's own Rust suite, then the hidden tests drawn from the threads.
 # The completion integration tests drive real shells and can time out on a
 # loaded machine, so a failing suite gets one more run.
-ok, out = run("cargo", "test", "--all", "--all-features", "--no-fail-fast")
+suite = ["cargo", "test", "--all", "--all-features", "--no-fail-fast"]
+# On macOS zsh completion drives a nested pty and needs a controlling terminal.
+# BSD script propagates the child exit status, so test failures still fail the check.
+if sys.platform == "darwin":
+    suite = ["script", "-q", "/dev/null", *suite]
+ok, out = run(*suite)
 if not ok:
-    ok, out = run("cargo", "test", "--all", "--all-features", "--no-fail-fast")
+    first_failure = out
+    ok, out = run(*suite)
+    if ok:
+        UNVERIFIED.append("Rust suite passed only after a failed first attempt:\n" + first_failure)
+    else:
+        out = "first attempt:\n" + first_failure + "\nretry:\n" + out
 expect(ok, f"`cargo test --all --all-features` fails:\n{out}")
 
 hidden = Path(__file__).parent / "hidden"
@@ -47,7 +55,7 @@ Path("cli/tests/bench_hidden_help.rs").write_text((hidden / "complete_word_help.
 proc = subprocess.run(
     ["cargo", "test", "--all-features", "--no-fail-fast", "-p", "usage-argv", "-p", "usage-lib", "-p", "usage-cli",
      "bench_hidden"],
-    capture_output=True, text=True, env=env, timeout=1500,
+    check=False, capture_output=True, text=True, env=env, timeout=1500,
 )
 out = proc.stdout + proc.stderr
 ran = sum(int(n) for n in re.findall(r"test result: \w+\. (\d+) passed", proc.stdout))
