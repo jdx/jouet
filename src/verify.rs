@@ -844,13 +844,15 @@ pub(crate) struct Checks {
 /// How many rewrites [`Checks::formatted`] keeps.
 const FORMATTED_KEPT: usize = 20;
 
-/// Whether a Bash call only formats files or commits them: every command in
-/// it is a formatter (`cargo fmt`, `prettier --write`, `hk fix`, ...), a
+/// Whether a Bash call can format or commit files and otherwise only leaves
+/// them as they are: every command in it is a formatter (`cargo fmt`,
+/// `prettier --write`, `hk fix`, ...), a
 /// commit, whose hooks may fix what they check, `git add`, or a command that
 /// leaves the files as they are: `git status`, `git diff`, `git log`, `git
 /// push`, a new branch at the current commit, `cargo clippy` without `--fix`
 /// (also through `jouet test --cmd --`), and `tail` or `head` in a pipe. The
-/// script is parsed, so a commit message's newlines, `;` and backticks in
+/// call consisting solely of read-only commands is not formatting. The script
+/// is parsed, so a commit message's newlines, `;` and backticks in
 /// single quotes are words. A `cd` makes it something else, since the files
 /// it changed are elsewhere.
 pub(crate) fn formats(command: &str) -> bool {
@@ -861,6 +863,10 @@ pub(crate) fn formats(command: &str) -> bool {
         return false;
     }
     !script.commands.is_empty()
+        && script
+            .commands
+            .iter()
+            .any(|command| !only_observes(command.argv()))
         && script.commands.iter().all(|command| {
             // A redirection writes a file (`git status > src/a.rs`), and so
             // does a here-document's `cat`.
@@ -871,6 +877,16 @@ pub(crate) fn formats(command: &str) -> bool {
                     .is_none_or(|to| to == "/dev/null")
                 && leaves_or_formats(command.argv())
         })
+}
+
+/// Read-only commands can accompany a formatter, but cannot make edits count
+/// as formatting on their own. A concurrent edit during one still needs tests.
+fn only_observes(words: &[String]) -> bool {
+    let words: Vec<&str> = words.iter().map(String::as_str).collect();
+    matches!(
+        words.as_slice(),
+        ["git", "status" | "diff" | "show" | "log", ..] | ["tail" | "head", ..] | ["true"]
+    )
 }
 
 /// Whether `command` has a backtick the shell would substitute (one outside
@@ -2692,6 +2708,10 @@ mod tests {
             "mise x -- cargo fmt -p a && jouet commit src/a.rs --message m",
             "prettier --write src && git add src/a.ts && git commit -qm m",
             "hk fix; git status --short",
+            "git status --short && cargo fmt",
+            "git push",
+            "git status --short && git push",
+            "git status --short && git add src/a.rs",
             // A commit message's lines, `;` and backticks are its words.
             "cargo fmt && jouet commit src/a.rs --message \"fix(a): keep b; and c\n\nCo-Authored-By: X <x@y>\"",
             "jouet commit src/a.rs --message 'fix: `b` stays'",
@@ -2707,6 +2727,10 @@ mod tests {
             assert!(formats(yes), "{yes}");
         }
         for no in [
+            "git status --short",
+            "git status --short | head -20",
+            "git diff --stat && git status --short",
+            "git log --oneline -3",
             "cargo fmt && cargo test",
             "cargo clippy --fix --allow-dirty",
             "jouet test --cmd -- cargo test",
