@@ -1,4 +1,6 @@
 import importlib.util
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -46,6 +48,16 @@ class CommanderCheckerTest(unittest.TestCase):
             with mock.patch.object(self.checker.subprocess, "run", side_effect=OSError("missing")):
                 self.checker.run_tests(Path(directory), ["tests/example.test.js"], "committed tests")
             self.assertIn("could not run", self.checker.UNVERIFIED[0])
+
+    def test_timeout_keeps_jest_output(self):
+        output = io.StringIO()
+        error = subprocess.TimeoutExpired("jest", 240, output=b"stdout before hang\n", stderr=b"stderr before hang\n")
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(output), \
+                mock.patch.object(self.checker.subprocess, "run", side_effect=error):
+            self.checker.run_tests(Path(directory), ["tests/example.test.js"], "committed tests")
+        self.assertIn("stdout before hang", output.getvalue())
+        self.assertIn("stderr before hang", output.getvalue())
+        self.assertTrue(self.checker.UNVERIFIED)
 
     def test_absent_suite_cannot_pass_on_other_tests(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -116,6 +128,24 @@ class CommanderCheckerTest(unittest.TestCase):
             self.assertNotEqual(entries[1][1], original_hash)
             self.assertNotEqual(entries[0][0], entries[1][0])
             self.assertEqual(test.read_text(), "agent test\n")
+            git("rm", "-q", "tests/command.configureOutput.test.js")
+            (work / "tests").mkdir(exist_ok=True)
+            (work / "tests/other.test.js").write_text("other test\n")
+            git("add", "tests")
+            git("commit", "-qm", "delete hidden target")
+            result = check()
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("hidden-test target was removed", result.stdout)
+            git("rm", "-qr", "tests")
+            outside = Path(directory) / "outside"
+            outside.mkdir()
+            (outside / test.name).write_text("outside file\n")
+            (work / "tests").symlink_to(outside, target_is_directory=True)
+            git("add", "tests")
+            git("commit", "-qm", "replace test directory with symlink")
+            result = check()
+            self.assertIn("hidden-test target is not a regular file", result.stdout)
+            self.assertEqual((outside / test.name).read_text(), "outside file\n")
 
 
 if __name__ == "__main__":

@@ -18,6 +18,11 @@ def run_tests(checkout: Path, paths: list[str], label: str) -> None:
             cwd=checkout, capture_output=True, text=True, timeout=240, check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
+        if isinstance(error, subprocess.TimeoutExpired):
+            for stream in (error.stdout, error.stderr):
+                if stream:
+                    text = stream.decode(errors="replace") if isinstance(stream, bytes) else stream
+                    print(text, end="" if text.endswith("\n") else "\n")
         UNVERIFIED.append(f"{label} could not run: {error}")
         return
     try:
@@ -80,7 +85,9 @@ def check_phase(tests: list[str], *, hidden: bool) -> None:
                     run_tests(checkout, tests, "committed tests")
                 else:
                     target = checkout / "tests/command.configureOutput.test.js"
-                    if not target.is_file() or target.is_symlink():
+                    if not target.exists() and not target.is_symlink():
+                        expect(False, "the hidden-test target was removed from the committed tree")
+                    elif not target.is_file() or target.is_symlink() or not target.resolve().is_relative_to(checkout.resolve()):
                         UNVERIFIED.append("hidden-test target is not a regular file")
                     else:
                         shutil.copyfile(Path(__file__).parent / "hidden" / target.name, target)
