@@ -246,9 +246,16 @@ fn strings(text: &str) -> Vec<(usize, &str)> {
                 i = text[i..].find('\n').map_or(bytes.len(), |n| i + n);
             }
             b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                i = text[i + 2..]
-                    .find("*/")
-                    .map_or(bytes.len(), |n| i + 2 + n + 2);
+                // Block comments nest.
+                let mut depth = 1;
+                i += 2;
+                while i < bytes.len() && depth > 0 {
+                    match (bytes[i], bytes.get(i + 1)) {
+                        (b'/', Some(b'*')) => (depth, i) = (depth + 1, i + 2),
+                        (b'*', Some(b'/')) => (depth, i) = (depth - 1, i + 2),
+                        _ => i += 1,
+                    }
+                }
             }
             b'\'' => {
                 // A char literal ('x', '\n', '\u{..}'), or else a lifetime.
@@ -744,7 +751,7 @@ mod tests {
         let text = r####"let label = "\n"; let p = "../corpus/x.json";
 let q = '"'; // a "quote" in a comment
 let r = include_str!(r#"../../../corpus/y.json"#); let b = b"a/b"; let c = br"c/d";
-/* "e/f" */ let g = "g/h";"####;
+/* "e/f" /* nested */ " */ let g = "g/h";"####;
         let found: Vec<&str> = strings(text).into_iter().map(|(_, s)| s).collect();
         assert_eq!(
             found,
