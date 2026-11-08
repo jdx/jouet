@@ -798,10 +798,10 @@ fn gofmt_listed_file(dir: &Path, output: &str, argv: &[String]) -> bool {
         if !output[..end].ends_with(".go") {
             continue;
         }
-        for &start in starts
+        let boundary = starts.partition_point(|&start| start < end);
+        for &start in starts[..boundary]
             .iter()
             .rev()
-            .skip_while(|&&start| start >= end)
             .take_while(|&&start| end - start <= max_path_bytes)
         {
             let path = &output[start..end];
