@@ -882,6 +882,7 @@ class HarnessOutputTest(unittest.TestCase):
         killed = claude.usage(lines, Path("/nonexistent"))
         self.assertEqual((killed.input_tokens, killed.cached_input_tokens, killed.output_tokens), (161, 100, 12))
         self.assertTrue(killed.is_error)
+        self.assertFalse(killed.extra["usage_complete"])
         done = lines + [
             json.dumps(
                 {
@@ -901,13 +902,15 @@ class HarnessOutputTest(unittest.TestCase):
             )
         ]
         u = claude.usage(done, Path("/nonexistent"))
+        self.assertTrue(u.extra["usage_complete"])
         self.assertEqual(
             (u.input_tokens, u.cache_write_tokens, u.turns, u.model, u.is_error), (161, 50, 3, "claude-x", False)
         )
 
     def test_claude_stream_resumed_after_a_background_command(self):
         def result(turns, cost, input_tokens, output_tokens, text):
-            usage = {"input_tokens": input_tokens, "cache_read_input_tokens": 100, "output_tokens": output_tokens}
+            usage = {"input_tokens": input_tokens, "cache_read_input_tokens": 100,
+                     "cache_creation_input_tokens": 0, "output_tokens": output_tokens}
             return json.dumps(
                 {
                     "type": "result",
@@ -929,6 +932,18 @@ class HarnessOutputTest(unittest.TestCase):
         self.assertEqual(
             (u.input_tokens, u.output_tokens, u.turns, u.cost_usd, u.result), (226, 4280, 14, 0.23, "done")
         )
+        self.assertTrue(u.extra["usage_complete"])
+        for key in ("cache_read_input_tokens", "cache_creation_input_tokens"):
+            event = json.loads(lines[-1])
+            del event["usage"][key]
+            incomplete_cache = lines[:-1] + [json.dumps(event)]
+            self.assertFalse(HARNESSES["claude"].usage(incomplete_cache, Path("/nonexistent")).extra["usage_complete"])
+        incomplete = lines + [json.dumps({"type": "assistant", "message": {"id": "next", "usage": {"input_tokens": 4}}})]
+        self.assertFalse(HARNESSES["claude"].usage(incomplete, Path("/nonexistent")).extra["usage_complete"])
+        resumed = lines + [json.dumps({"type": "user", "message": {"content": "background job completed"}})]
+        self.assertFalse(HARNESSES["claude"].usage(resumed, Path("/nonexistent")).extra["usage_complete"])
+        missing = lines + [json.dumps({"type": "result", "usage": {"input_tokens": 4}})]
+        self.assertFalse(HARNESSES["claude"].usage(missing, Path("/nonexistent")).extra["usage_complete"])
 
     def test_codex_stream(self):
         lines = [
@@ -946,6 +961,8 @@ class HarnessOutputTest(unittest.TestCase):
             (u.input_tokens, u.cached_input_tokens, u.output_tokens, u.result, u.is_error),
             (1000, 800, 20, "done", False),
         )
+        self.assertTrue(u.extra["usage_complete"])
+        self.assertFalse(HARNESSES["codex"].usage(lines[:-1], Path("/nonexistent")).extra["usage_complete"])
 
     def test_codex_capacity_failure_is_distinguished_from_a_failed_task(self):
         lines = [json.dumps({"type": "turn.failed", "error": {
@@ -1814,6 +1831,38 @@ class ExternalTasksTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
+    def test_incomplete_token_usage_is_not_counted_as_zero_spend(self):
+        """Partial observations cannot establish total spend per solved task."""
+        from dataclasses import asdict
+
+        missing = asdict(HARNESSES["claude"].usage([], Path("/nonexistent")))
+        self.assertFalse(missing["extra"]["usage_complete"])
+        complete = {"input_tokens": 100, "cached_input_tokens": 20, "output_tokens": 5, "cost_usd": 0.04,
+                    "extra": {"usage_complete": True}}
+        records = [
+            {"task": "web", "harness": "claude", "arm": "plain", "round": 1,
+             "success": True, "wall_s": 10, "usage": complete},
+            {"task": "web", "harness": "claude", "arm": "plain", "round": 2,
+             "success": False, "wall_s": 10, "usage": missing},
+        ]
+        arm = report.summarize(records, {})["cells"][0]["arms"]["plain"]
+        self.assertEqual((arm["runs"], arm["successes"]), (2, 1))
+        self.assertIsNone(arm["per_solved"]["input_tokens"])
+        self.assertIsNone(arm["per_solved"]["weighted_input_tokens"])
+        self.assertIsNone(arm["per_solved"]["cost_usd"])
+        self.assertEqual(arm["metrics"]["input_tokens"]["n"], 1)
+        self.assertEqual(missing["input_tokens"], 0)  # retained as a partial observation for budgeting
+        records[1]["usage"] = complete
+        records[1]["stopped"] = "timeout"
+        arm = report.summarize(records, {})["cells"][0]["arms"]["plain"]
+        self.assertIsNone(arm["per_solved"]["input_tokens"])
+        self.assertIsNone(arm["per_solved"]["cost_usd"])
+        records[1].pop("stopped")
+        records[1]["exit_code"] = 1  # older records may not have a completeness flag
+        records[1]["usage"] = {k: v for k, v in complete.items() if k != "extra"}
+        arm = report.summarize(records, {})["cells"][0]["arms"]["plain"]
+        self.assertIsNone(arm["per_solved"]["input_tokens"])
+
     def test_spend_per_solved_task_counts_failed_runs_and_weights_cache_reads(self):
         def record(arm, number, success, tokens, cached):
             return {"task": "web", "harness": "codex", "arm": arm, "round": number, "success": success,

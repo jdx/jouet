@@ -28,7 +28,13 @@ METRICS: list[tuple[str, str, Callable[[dict[str, Any]], float | None], str]] = 
 
 
 def _u(r: dict[str, Any], key: str) -> float | None:
-    return (r.get("usage") or {}).get(key)
+    usage = r.get("usage") or {}
+    if key in {"input_tokens", "cached_input_tokens", "output_tokens", "cost_usd"} and (
+        (usage.get("extra") or {}).get("usage_complete") is False or r.get("stopped")
+        or (r.get("exit_code") is not None and r["exit_code"] != 0)
+    ):
+        return None
+    return usage.get(key)
 
 
 def _a(r: dict[str, Any], key: str) -> float | None:
@@ -41,10 +47,11 @@ def _shell(r: dict[str, Any], key: str) -> float | None:
 
 
 def _uncached(r: dict[str, Any]) -> float | None:
-    u = r.get("usage")
-    if not u:
+    total = _u(r, "input_tokens")
+    cached = _u(r, "cached_input_tokens")
+    if total is None or cached is None:
         return None
-    return u["input_tokens"] - u["cached_input_tokens"]
+    return total - cached
 
 
 # What a cached input token costs next to an uncached one: a tenth, for both
@@ -55,11 +62,11 @@ CACHE_READ_WEIGHT = 0.1
 def _weighted(r: dict[str, Any]) -> float | None:
     """Input tokens as they are priced: uncached ones whole, cache reads at a
     tenth. Raw input tokens count a cache read like any other token."""
-    u = r.get("usage")
-    if not u:
+    total = _u(r, "input_tokens")
+    cached = _u(r, "cached_input_tokens")
+    if total is None or cached is None:
         return None
-    cached = u.get("cached_input_tokens") or 0
-    return u["input_tokens"] - cached + CACHE_READ_WEIGHT * cached
+    return total - cached + CACHE_READ_WEIGHT * cached
 
 
 # Spent per solved task: everything the scored runs spent, failed ones
