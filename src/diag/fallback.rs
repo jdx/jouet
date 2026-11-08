@@ -2,7 +2,7 @@
 //!
 //! Deliberately small. Rust files get `cargo clippy --message-format=json`
 //! (the crate, since clippy cannot check one file), Python files `ruff check
-//! --output-format=json`, and shell scripts `shellcheck --format=json1`,
+//! --no-fix --no-fix-only --output-format=json`, and shell scripts `shellcheck --format=json1`,
 //! each only when the tool is on `PATH`. Any other file has no checker, and
 //! the report says diagnostics are unavailable for it.
 
@@ -136,11 +136,18 @@ fn run(
             "--quiet".into(),
             "--message-format=json".into(),
         ],
-        "ruff" => ["ruff", "check", "--output-format=json", "--"]
-            .iter()
-            .map(ToString::to_string)
-            .chain(files.iter().cloned())
-            .collect(),
+        "ruff" => [
+            "ruff",
+            "check",
+            "--no-fix",
+            "--no-fix-only",
+            "--output-format=json",
+            "--",
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .chain(files.iter().cloned())
+        .collect(),
         _ => ["shellcheck", "--format=json1", "--"]
             .iter()
             .map(ToString::to_string)
