@@ -494,6 +494,35 @@ fn an_outline_names_each_definition_with_its_scope() {
 }
 
 #[test]
+fn cached_definitions_are_reparsed_when_extraction_changes() {
+    let cache = tempfile::tempdir().unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    let file = repo.path().join("query.ts");
+    std::fs::write(
+        &file,
+        "class Query {\n  update = <Handler>(() => {\n    return target;\n  });\n}\n",
+    )
+    .unwrap();
+    let mut o = options("target");
+    o.paths = vec![file];
+    o.cache = Some(cache.path().to_path_buf());
+    let expected = run(&o).1;
+    assert!(expected.contains("method update"), "{expected}");
+    let entry = std::fs::read_dir(cache.path())
+        .unwrap()
+        .map(Result::unwrap)
+        .map(|entry| entry.path())
+        .find(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .unwrap();
+    let mut stale: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&entry).unwrap()).unwrap();
+    stale["queries"] = 0.into();
+    stale["defs"] = serde_json::json!([]);
+    std::fs::write(&entry, serde_json::to_vec(&stale).unwrap()).unwrap();
+    assert_eq!(run(&o).1, expected);
+}
+
+#[test]
 fn typescript_class_function_fields_are_selectable() {
     let source = b"class PagedQuery {\n  count = 0;\n  optimisticUpdate = (value: number) => {\n    return value + 1;\n  };\n  legacy = function(value: number) { return value; };\n  #private = () => 1;\n  asserted = (() => 2) as Handler;\n  notFunction = (123 as number);\n  regular() {}\n}\n";
     for extension in ["ts", "tsx"] {

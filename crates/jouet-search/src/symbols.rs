@@ -175,21 +175,25 @@ pub fn languages() -> &'static [&'static str] {
     imp::LANGUAGES
 }
 
-/// A hash of every tags query this build runs, so symbols cached by an
-/// older build are read again.
+/// A hash of the queries and the extraction logic, so changes to either
+/// invalidate definitions cached by an older build.
 pub(crate) fn queries_hash() -> u64 {
-    imp::queries()
-        .iter()
-        .fold(0xcbf2_9ce4_8422_2325, |hash, query| {
-            fnv(hash, query.as_bytes())
-        })
+    const SOURCE_HASH: u64 = fnv(0xcbf2_9ce4_8422_2325, include_bytes!("symbols.rs"));
+    static HASH: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *HASH.get_or_init(|| {
+        imp::queries()
+            .iter()
+            .fold(SOURCE_HASH, |hash, query| fnv(hash, query.as_bytes()))
+    })
 }
 
 /// FNV-1a: stable across builds and platforms, unlike std's hasher.
-pub(crate) fn fnv(mut hash: u64, bytes: &[u8]) -> u64 {
-    for byte in bytes {
-        hash ^= u64::from(*byte);
+pub(crate) const fn fnv(mut hash: u64, bytes: &[u8]) -> u64 {
+    let mut index = 0;
+    while index < bytes.len() {
+        hash ^= bytes[index] as u64;
         hash = hash.wrapping_mul(0x0100_0000_01b3);
+        index += 1;
     }
     hash
 }
