@@ -794,7 +794,10 @@ SH
 @test "--cmd follows Go flag syntax for gofmt previews" {
 	mkdir bin
 	printf 'package p\n' >example.go
-	printf '#!/bin/sh\nprintf "%%s\\n" "${GOFMT_OUTPUT:-example.go}"\n' >bin/gofmt
+	cat >bin/gofmt <<'SH'
+#!/bin/sh
+printf '%s\n' "${GOFMT_OUTPUT:-example.go}"
+SH
 	chmod +x bin/gofmt
 	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt --l example.go
 	assert_failure 1
