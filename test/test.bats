@@ -765,6 +765,10 @@ SH
 	assert_output --partial 'unformatted'
 	PATH="$PWD/bin:$PATH" GOFMT_LIST=$'diagnostic\nline\nbreak.go' run --separate-stderr jouet test --cmd -- gofmt -l .
 	assert_failure 1
+	local extensionless=$'line\nbreak'
+	printf 'package p\n' >"$extensionless"
+	PATH="$PWD/bin:$PATH" GOFMT_LIST="$extensionless" run --separate-stderr jouet test --cmd -- gofmt -l "$extensionless"
+	assert_failure 1
 	PATH="$PWD/bin:$PATH" GOFMT_LIST='diagnostic only' run --separate-stderr jouet test --cmd -- gofmt -l .
 	assert_success
 	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --json --cmd -- env gofmt -l example.go
