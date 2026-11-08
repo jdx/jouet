@@ -329,8 +329,8 @@ def markdown(summary: dict[str, Any]) -> str:
         if "codex_stop_gate_unverified" in cell.get("limitations", []):
             lines += [
                 ("Codex stop-gate coverage is not independently verified by this report. "
-                 "An installed, trusted hook or a recorded stop event does not establish that the gate "
-                 "could read the session's checks and block on a failure."),
+                 "In an ephemeral-mode smoke probe with Codex 0.166, the stop hook received no transcript; "
+                 "an installed hook or recorded stop event alone does not establish enforcement."),
                 "",
             ]
         if outcomes := cell.get("paired_outcomes"):
