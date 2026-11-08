@@ -738,18 +738,30 @@ fn gofmt_changes(argv: &[String], dir: &Path, output: &str) -> bool {
     if !script.nested.is_empty() || command.program() != Some("gofmt") {
         return false;
     }
-    let flags: Vec<&str> = command
-        .argv()
-        .iter()
-        .skip(1)
-        .take_while(|word| word.as_str() != "--")
-        .map(String::as_str)
-        .collect();
-    if flags.iter().any(|flag| matches!(*flag, "-w" | "-w=true")) {
+    // Go's flag package accepts one or two dashes, several boolean values,
+    // and repeated flags (the last value wins). It stops at the first file.
+    let (mut diff, mut list, mut write) = (false, false, false);
+    let mut args = command.argv().iter().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--" || arg == "-" || !arg.starts_with('-') {
+            break;
+        }
+        let flag = arg.trim_start_matches('-');
+        let (name, value) = flag.split_once('=').unwrap_or((flag, "true"));
+        if matches!(name, "r" | "cpuprofile") && !flag.contains('=') {
+            args.next();
+        }
+        let enabled = matches!(value, "1" | "t" | "T" | "true" | "TRUE" | "True");
+        match name {
+            "d" => diff = enabled,
+            "l" => list = enabled,
+            "w" => write = enabled,
+            _ => {}
+        }
+    }
+    if write {
         return false;
     }
-    let diff = flags.iter().any(|flag| matches!(*flag, "-d" | "-d=true"));
-    let list = flags.iter().any(|flag| matches!(*flag, "-l" | "-l=true"));
     (diff && output.lines().any(|line| line.starts_with("diff ")))
         || (list && gofmt_listed_file(dir, output, command.argv()))
 }
