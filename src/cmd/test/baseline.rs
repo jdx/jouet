@@ -571,14 +571,49 @@ impl From<String> for NotCompared {
     }
 }
 
-/// A command as [`known`] keeps it: its words and directory, with paths
-/// into the checkout written from its root, so every worktree of the
-/// repository shares it.
+/// Hash the exact invocation and environment without storing environment values.
+/// Checkout paths in the arguments and working directory are rebased so a
+/// matching invocation from another worktree can reuse the evidence.
 fn command_key(job: &Job, root: &Path) -> String {
+    command_key_with_env(job, root, std::env::vars_os())
+}
+
+fn command_key_with_env(
+    job: &Job,
+    root: &Path,
+    env: impl Iterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> String {
     let dot = Path::new(".");
-    let words: Vec<String> = job.argv.iter().map(|w| rebase(w, root, dot)).collect();
-    let dir = job.dir.strip_prefix(root).unwrap_or(Path::new(""));
-    format!("{} @{}", words.join(" "), dir.display())
+    let dir = job.dir.strip_prefix(root).unwrap_or(job.dir.as_path());
+    let mut hash = Sha256::new();
+    let mut part = |bytes: &[u8]| {
+        hash.update((bytes.len() as u64).to_le_bytes());
+        hash.update(bytes);
+    };
+    part(b"baseline-invocation-v2");
+    part(dir.as_os_str().as_encoded_bytes());
+    part(&(job.argv.len() as u64).to_le_bytes());
+    for word in &job.argv {
+        part(rebase(word, root, dot).as_bytes());
+    }
+    let mut env: Vec<_> = env.collect();
+    env.sort();
+    part(&(env.len() as u64).to_le_bytes());
+    for (name, value) in env {
+        part(name.as_encoded_bytes());
+        part(value.as_encoded_bytes());
+    }
+    part(&(job.env.len() as u64).to_le_bytes());
+    for (name, value) in &job.env {
+        part(name.as_bytes());
+        part(value.as_bytes());
+    }
+    let digest: String = hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("v2:{digest}")
 }
 
 /// A worktree of the merge base, checked out when a job first needs it.
@@ -1373,6 +1408,63 @@ mod tests {
     }
 
     #[test]
+    fn different_argument_boundaries_do_not_share_a_baseline() {
+        let job = |argv: Vec<&str>| Job {
+            argv: argv.into_iter().map(String::from).collect(),
+            env: Vec::new(),
+            dir: PathBuf::from("/repo"),
+            exit: Box::new(|_| Exit::Ok),
+        };
+        assert_ne!(
+            command_key(&job(vec!["runner", "a b"]), Path::new("/repo")),
+            command_key(&job(vec!["runner", "a", "b"]), Path::new("/repo"))
+        );
+    }
+
+    #[test]
+    fn different_job_environments_do_not_share_a_baseline() {
+        let job = |value: &str| Job {
+            argv: vec!["runner".into()],
+            env: vec![("TZ".into(), value.into())],
+            dir: PathBuf::from("/repo"),
+            exit: Box::new(|_| Exit::Ok),
+        };
+        assert_ne!(
+            command_key(&job("UTC"), Path::new("/repo")),
+            command_key(&job("America/Chicago"), Path::new("/repo"))
+        );
+    }
+
+    #[test]
+    fn different_inherited_environments_do_not_share_a_baseline() {
+        let job = Job {
+            argv: vec!["runner".into()],
+            env: Vec::new(),
+            dir: PathBuf::from("/repo"),
+            exit: Box::new(|_| Exit::Ok),
+        };
+        let env = |value: &str| vec![("TZ".into(), value.into())].into_iter();
+        assert_ne!(
+            command_key_with_env(&job, Path::new("/repo"), env("UTC")),
+            command_key_with_env(&job, Path::new("/repo"), env("America/Chicago"))
+        );
+    }
+
+    #[test]
+    fn different_external_directories_do_not_share_a_baseline() {
+        let job = |dir: &str| Job {
+            argv: vec!["runner".into()],
+            env: Vec::new(),
+            dir: PathBuf::from(dir),
+            exit: Box::new(|_| Exit::Ok),
+        };
+        assert_ne!(
+            command_key(&job("/outside/a"), Path::new("/repo")),
+            command_key(&job("/outside/b"), Path::new("/repo"))
+        );
+    }
+
+    #[test]
     fn a_command_is_kept_the_same_from_every_worktree() {
         let job = |root: &str| Job {
             argv: vec![
@@ -1385,10 +1477,7 @@ mod tests {
             exit: Box::new(|_| Exit::Ok),
         };
         let here = command_key(&job("/src/app"), Path::new("/src/app"));
-        assert_eq!(
-            here,
-            "cargo test --manifest-path=./crates/a/Cargo.toml @crates/a"
-        );
+        assert!(here.starts_with("v2:"));
         assert_eq!(command_key(&job("/wt/app-2"), Path::new("/wt/app-2")), here);
     }
 

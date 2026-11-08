@@ -1214,6 +1214,34 @@ SH
 	refute_output --partial 'cmd: passed in'
 }
 
+@test "--baseline does not reuse failures from a different environment" {
+	printf 'base\n' >tracked
+	cat >check-command <<'SH'
+#!/bin/sh
+echo '1..2'
+echo 'ok 1 another'
+if [ "$(cat tracked)" = base ] && [ "$BASELINE_CASE" = fixed ]; then
+  echo 'ok 2 target'
+  exit 0
+fi
+echo 'not ok 2 target'
+echo '# wrong answer'
+exit 1
+SH
+	chmod +x check-command
+	git add tracked check-command
+	git commit -qm base
+	git checkout -qb work
+	printf 'change\n' >tracked
+
+	run --separate-stderr env BASELINE_CASE=broken jouet test --baseline --cmd -- ./check-command
+	assert_success
+	assert_output --partial 'baseline: the failure also fails'
+	run --separate-stderr env BASELINE_CASE=fixed jouet test --baseline --cmd -- ./check-command
+	assert_failure 1
+	assert_output --partial 'NEW FAILURE'
+}
+
 @test "--baseline keeps an unnamed failure unresolved when the merge base passes" {
 	cat >check-command <<'SH'
 #!/bin/sh
