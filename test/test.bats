@@ -2183,6 +2183,20 @@ PY
 	assert_output --partial 'baseline: NEW FAILURE'
 }
 
+@test "a saved test result does not hide a changed shell environment" {
+	enable_result_reuse
+	export JOUET_TEST_BASELINE=off
+	git commit -q --allow-empty -m base
+	OLDPWD=passing run --separate-stderr jouet test --cmd -- python3 -c 'import os, sys; sys.exit(os.environ["OLDPWD"] != "passing")'
+	assert_success
+	OLDPWD=passing run --separate-stderr jouet test --cmd -- python3 -c 'import os, sys; sys.exit(os.environ["OLDPWD"] != "passing")'
+	assert_success
+	assert_output --partial 'reused:'
+	OLDPWD=failing run --separate-stderr jouet test --cmd -- python3 -c 'import os, sys; sys.exit(os.environ["OLDPWD"] != "passing")'
+	assert_failure 1
+	refute_output --partial 'reused:'
+}
+
 @test "a program not on PATH names its versioned sibling" {
 	mkdir -p bin
 	printf '#!/bin/sh\nexit 0\n' >bin/frob3

@@ -15,10 +15,6 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// Variables a shell sets differently for each command, which say nothing
-/// about what the command does.
-const VOLATILE: [&str; 4] = ["_", "OLDPWD", "PWD", "SHLVL"];
-
 /// A kept run.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) struct Kept {
@@ -76,15 +72,13 @@ pub(super) fn key(state: &str, job: &Job, env: impl Iterator<Item = (String, Str
         hash.update((bytes.len() as u64).to_le_bytes());
         hash.update(bytes);
     };
+    part(b"jouet test result v2");
     part(state.as_bytes());
     part(job.dir.as_os_str().as_encoded_bytes());
     for word in &job.argv {
         part(word.as_bytes());
     }
-    let mut vars: Vec<(String, String)> = env
-        .filter(|(k, _)| !VOLATILE.contains(&k.as_str()))
-        .chain(job.env.iter().cloned())
-        .collect();
+    let mut vars: Vec<(String, String)> = env.chain(job.env.iter().cloned()).collect();
     vars.sort();
     for (k, v) in &vars {
         part(k.as_bytes());
@@ -181,13 +175,13 @@ mod tests {
     }
 
     #[test]
-    fn the_key_holds_the_tree_command_and_environment_but_not_the_shell_s_own_variables() {
+    fn the_key_holds_the_tree_command_and_environment() {
         let base = key(
             "t h",
             &job(&["cargo", "test"]),
             env(&[("A", "1"), ("PWD", "/x")]),
         );
-        assert_eq!(
+        assert_ne!(
             base,
             key(
                 "t h",
