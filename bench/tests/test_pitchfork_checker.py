@@ -72,7 +72,7 @@ class PitchforkCheckerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.git("status", "--porcelain"), "")
 
-    def test_symlink_target_is_unverified_and_not_written(self):
+    def test_symlink_target_fails_and_is_not_written(self):
         outside = self.root / "outside"
         outside.write_text("sentinel\n")
         target = self.repo / "src/pitchfork_toml.rs"
@@ -82,10 +82,34 @@ class PitchforkCheckerTests(unittest.TestCase):
         self.git("commit", "-qm", "symlink target")
         result = subprocess.run(["python3", str(CHECKER)], cwd=self.repo, env=self.env,
                                 capture_output=True, text=True, timeout=30, check=False)
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 1)
         self.assertIn("hidden-test target is missing or a symlink", result.stdout + result.stderr)
         self.assertEqual(outside.read_text(), "sentinel\n")
         self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_deleted_target_fails(self):
+        self.git("rm", "src/pitchfork_toml.rs")
+        self.git("commit", "-qm", "delete target")
+        result = subprocess.run(["python3", str(CHECKER)], cwd=self.repo, env=self.env,
+                                capture_output=True, text=True, timeout=30, check=False)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("hidden-test target is missing", result.stdout)
+
+    def test_timeout_with_a_failure_is_failed_otherwise_unverified(self):
+        wrapper = """import runpy, subprocess, sys
+original = subprocess.run
+def run(args, **kwargs):
+    if args[0] == "cargo":
+        raise subprocess.TimeoutExpired(args, 1500, output=sys.argv[2].encode())
+    return original(args, **kwargs)
+subprocess.run = run
+runpy.run_path(sys.argv[1], run_name="__main__")
+"""
+        for output, code in (("test regression ... FAILED\n", 1), ("running tests\n", 3)):
+            with self.subTest(output=output):
+                result = subprocess.run(["python3", "-c", wrapper, str(CHECKER), output], cwd=self.repo,
+                                        env=self.env, capture_output=True, text=True, timeout=30, check=False)
+                self.assertEqual(result.returncode, code, result.stdout + result.stderr)
 
     def test_killed_checker_does_not_change_agent_checkout(self):
         fifo = self.root / "ready"

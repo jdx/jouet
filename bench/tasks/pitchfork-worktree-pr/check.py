@@ -57,8 +57,16 @@ def check_code() -> None:
                    "CARGO_TARGET_DIR": str(scratch / "target")}
 
             def cargo_test(*args: str) -> tuple[bool, str, int]:
-                proc = subprocess.run(["cargo", "test", "--lib", *args], cwd=checkout, check=False,
-                                      capture_output=True, text=True, env=env, timeout=1500)
+                try:
+                    proc = subprocess.run(["cargo", "test", "--lib", *args], cwd=checkout, check=False,
+                                          capture_output=True, text=True, env=env, timeout=1500)
+                except subprocess.TimeoutExpired as error:
+                    # TimeoutExpired carries bytes even when text=True. A timeout
+                    # alone is inconclusive; a reported test failure is not.
+                    output = b"\n".join(part for part in (error.stdout, error.stderr) if part).decode(errors="replace")
+                    if re.search(r"(?m)^test .+ \.\.\. FAILED$|^test result: FAILED\.|^thread .+ panicked at", output):
+                        return False, f"test failed before timing out:\n{output[-3000:]}", 0
+                    raise
                 out = proc.stdout + proc.stderr
                 failed = [line for line in out.splitlines() if "FAILED" in line or "panicked" in line or line.startswith("error")]
                 passed = sum(int(n) for n in re.findall(r"test result: \w+\. (\d+) passed", proc.stdout))
@@ -72,7 +80,7 @@ def check_code() -> None:
                 path = checkout / relative
                 if (not path.is_file() or path.is_symlink()
                         or any((checkout / parent).is_symlink() for parent in relative.parents if parent != Path("."))):
-                    UNVERIFIED.append(f"hidden-test target is missing or a symlink: {target}")
+                    expect(False, f"hidden-test target is missing or a symlink: {target}")
                     return
                 with path.open("a") as f:
                     f.write("\n" + (hidden / name).read_text())
