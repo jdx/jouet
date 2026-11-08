@@ -139,6 +139,9 @@ fires = [
   # `jouet test --cmd -- CMD` is a run of CMD.
   { command = "jouet test --cmd -- cargo build", exit_code = 1, kind = "build" },
   { command = "jouet test --cmd -- cargo test --workspace", exit_code = 0, kind = "test", scope = "full" },
+  # jouet takes a `--budget` written after `--` as its own.
+  { command = "jouet test --cmd -- cargo test --workspace --budget 2000", exit_code = 0, kind = "test", scope = "full" },
+  { command = "jouet test -- --budget=500", exit_code = 0, kind = "test", scope = "full" },
   { command = "jouet test --cmd -- mise run test:e2e", exit_code = 1, kind = "test", scope = "partial test:e2e" },
   { command = "jouet test --cmd -- python3 -m unittest", exit_code = 0, kind = "test", scope = "full" },
   # The command after --cmd is read through its wrappers, as any command is.

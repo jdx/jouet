@@ -60,7 +60,7 @@ use usage_rs::Args;
 ///
 /// Exits 1 when tests fail, 2 for a usage error (the runner's too), 4 when
 /// no runner is found or installed.
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub(crate) struct TestArgs {
     /// Run only the tests the changes affect
     #[usage(long)]

@@ -493,6 +493,25 @@ end
 -- narrow it; the selector names them. A dry run and help ran no tests.
 -- With `--cmd`, the words after `--` are the command it ran, returned
 -- third for the caller to classify.
+-- The words of `args` from `from` on, without a `--budget N` or
+-- `--budget=N`: `jouet test` takes one written after `--` as its own.
+local function without_budget(args: { string }, from: number): { string }
+	local words: { string } = {}
+	local i = from
+	while i <= #args do
+		local word = args[i]
+		if word == "--budget" then
+			i += 2
+		else
+			if string.sub(word, 1, 9) ~= "--budget=" then
+				table.insert(words, word)
+			end
+			i += 1
+		end
+	end
+	return words
+end
+
 local function jouet_test(args: { string }): (Kind?, Scope, { string }?)
 	local unknown = partial(nil)
 	local picks: { string } = {}
@@ -506,10 +525,11 @@ local function jouet_test(args: { string }): (Kind?, Scope, { string }?)
 		i += 1
 		if arg == "--" then
 			if sub and cmd then
-				return nil, unknown, table.move(args, i, #args, 1, {})
+				return nil, unknown, without_budget(args, i)
 			end
-			if sub and i <= #args then
-				table.insert(picks, "-- " .. table.concat(args, " ", i))
+			local rest = without_budget(args, i)
+			if sub and #rest > 0 then
+				table.insert(picks, "-- " .. table.concat(rest, " "))
 			end
 			break
 		elseif arg == "--cmd" then
