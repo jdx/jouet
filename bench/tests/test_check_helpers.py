@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -5,12 +6,23 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 TASKS = Path(__file__).resolve().parents[1] / "tasks"
 
 
 class CheckHelpersTest(unittest.TestCase):
+    def test_successful_unittest_with_zero_tests_is_not_a_pass(self):
+        spec = importlib.util.spec_from_file_location("bench_check_helpers", TASKS / "_check.py")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        empty = subprocess.CompletedProcess([], 0, stdout="", stderr="Ran 0 tests in 0.000s\n\nOK\n")
+        with mock.patch.object(helper.subprocess, "run", return_value=empty):
+            passed, output = helper.tests_pass("discover")
+        self.assertFalse(passed)
+        self.assertIn("Ran 0 tests", output)
+
     def test_unittest_discovery_requires_at_least_one_test(self):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
