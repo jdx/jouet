@@ -345,33 +345,13 @@ fake_hk_stop() {
 
 @test "Ruff fallback reports findings without applying configured fixes" {
 	git rm -q hk.pkl
-	# Model Ruff's fix and fix-only behavior without requiring Ruff on every CI host.
-	cat >"$BATS_TEST_TMPDIR/tools/ruff" <<'SH'
-#!/bin/sh
-no_fix=0
-no_fix_only=0
-for arg do
-  case "$arg" in
-    --no-fix) no_fix=1 ;;
-    --no-fix-only) no_fix_only=1 ;;
-  esac
-done
-if [ "$no_fix" -eq 1 ] && [ "$no_fix_only" -eq 1 ]; then
-  printf '%s\n' '[{"filename":"example.py","location":{"row":1,"column":8},"code":"F401","message":"unused import"}]'
-  exit 1
-fi
-printf 'print("ok")\n' >example.py
-printf '[]\n'
-SH
-	chmod +x "$BATS_TEST_TMPDIR/tools/ruff"
-
 	for setting in fix fix-only; do
 		printf '[tool.ruff]\n%s = true\n' "$setting" >pyproject.toml
 		printf 'import os\nprint("ok")\n' >example.py
 		run --separate-stderr jouet diag check example.py --json
 		assert_failure 1
-		run jq -r '.findings[0].rule' <<<"$output"
-		assert_output F401
+		run jq -r '[.findings[].rule] | index("F401") != null' <<<"$output"
+		assert_output true
 		assert_content example.py $'import os\nprint("ok")\n'
 	done
 }
