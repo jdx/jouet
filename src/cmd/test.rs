@@ -833,13 +833,21 @@ fn gofmt_listed_file(dir: &Path, output: &str, argv: &[String]) -> bool {
             }
         })
         .collect();
+    // A path this long cannot be opened as one path on the respective OS.
+    // Windows permits up to 32767 UTF-16 units, each at most four UTF-8 bytes.
+    let max_path_bytes = if cfg!(windows) { 32767 * 4 } else { 4096 };
     // Directory walks only list .go files. Find possible endings first so a
     // long diagnostic with no such ending is scanned once, not once per line.
     for (end, _) in output.match_indices('\n') {
         if !output[..end].ends_with(".go") {
             continue;
         }
-        for &start in starts.iter().take_while(|&&start| start < end) {
+        for &start in starts
+            .iter()
+            .rev()
+            .skip_while(|&&start| start >= end)
+            .take_while(|&&start| end - start <= max_path_bytes)
+        {
             let path = &output[start..end];
             // A component longer than 1020 UTF-8 bytes exceeds even Windows'
             // 255 UTF-16-unit limit. Single lines were already checked above.
