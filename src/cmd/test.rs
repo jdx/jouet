@@ -489,6 +489,15 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         ));
     }
     let base = base.filter(|_| (blamed.is_none() && unrelated.is_none()) || args.baseline);
+    if args.baseline && failed.is_empty() && report.suites.iter().any(|suite| suite.format_changes)
+    {
+        let message = "baseline: not compared; gofmt reported formatting changes with exit 0, so compare them at the merge base separately";
+        if out.json {
+            eprintln!("{message}");
+        } else {
+            emit(&format!("{message}\n"));
+        }
+    }
     if let (Some(base), Exit::Failed) = (base, exit)
         && !failed.is_empty()
     {

@@ -761,6 +761,15 @@ SH
 	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --json --cmd -- env gofmt -l example.go
 	assert_failure 1
 	assert_equal "$(jq -c '[.ok, .suites[0].exit_code, .suites[0].format_changes]' <<<"$output")" '[false,0,true]'
+	git add example.go
+	git commit -qm base
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --baseline --cmd -- gofmt -l example.go
+	assert_failure 1
+	assert_output --partial 'baseline: not compared'
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --json --baseline --cmd -- gofmt -l example.go
+	assert_failure 1
+	assert_equal "$(jq -c '[.ok, .suites[0].format_changes]' <<<"$output")" '[false,true]'
+	[[ "$stderr" == *'baseline: not compared'* ]]
 	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -w example.go
 	assert_success
 	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -d -w example.go
