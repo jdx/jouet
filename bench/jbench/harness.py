@@ -181,6 +181,15 @@ class Claude(Harness):
         events = _json_lines(stream_lines)
         results = [e for e in events if e.get("type") == "result"]
         result = results[-1] if results else None
+        # A later assistant message can belong to a resumed turn whose final
+        # result was never captured. Its usage is only a partial observation.
+        last_result = max((i for i, event in enumerate(events) if event.get("type") == "result"), default=-1)
+        complete = (bool(results) and all(
+            isinstance(r.get("usage"), dict)
+            and all(type(r["usage"].get(key)) is int and r["usage"][key] >= 0
+                    for key in ("input_tokens", "output_tokens"))
+            for r in results
+        ) and not any(event.get("type") == "assistant" for event in events[last_result + 1:]))
         init = next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), {})
         turns = sum(int(r.get("num_turns") or 0) for r in results) if results else None
         if result and result.get("usage"):
@@ -214,6 +223,7 @@ class Claude(Harness):
             session_id=(result or init).get("session_id"),
             model=init.get("model"),
             extra={
+                "usage_complete": complete,
                 "subtype": (result or {}).get("subtype"),
                 "api_ms": (result or {}).get("duration_api_ms"),
                 "permission_denials": len((result or {}).get("permission_denials") or []),
@@ -266,7 +276,7 @@ class Codex(Harness):
         ephemeral = any(e.get("type") == "jouet.ephemeral" for e in events)
         live = [e.get("usage") or {} for e in events if e.get("type") == "jouet.token_usage"]
         if done:
-            u = done[-1]["usage"]
+            u = done[-1].get("usage") or {}
         elif ephemeral:
             last = live[-1] if live else {}
             u = {"input_tokens": last.get("inputTokens"), "cached_input_tokens": last.get("cachedInputTokens"),
@@ -297,6 +307,8 @@ class Codex(Harness):
             session_id=thread,
             model=model,
             extra={"reasoning_tokens": u.get("reasoning_output_tokens"), "capacity_error": capacity,
+                   "usage_complete": bool(done and not failed and all(type(u.get(key)) is int and u[key] >= 0
+                                                       for key in ("input_tokens", "cached_input_tokens", "output_tokens"))),
                    **({"usage_observed": bool(done or live)} if ephemeral else {})},
         )
 
