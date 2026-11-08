@@ -343,6 +343,19 @@ fake_hk_stop() {
 	assert_output unavailable
 }
 
+@test "Ruff fallback reports findings without applying configured fixes" {
+	git rm -q hk.pkl
+	for setting in fix fix-only; do
+		printf '[tool.ruff]\n%s = true\n' "$setting" >pyproject.toml
+		printf 'import os\nprint("ok")\n' >example.py
+		run --separate-stderr jouet diag check example.py --json
+		assert_failure 1
+		run jq -r '[.findings[].rule] | index("F401") != null' <<<"$output"
+		assert_output true
+		assert_content example.py $'import os\nprint("ok")\n'
+	done
+}
+
 @test "mixed fallback coverage is unavailable even when the supported file is clean" {
 	git rm -q hk.pkl
 	printf '%s\n' '#!/bin/sh' "echo \"\$1\"" >run.sh

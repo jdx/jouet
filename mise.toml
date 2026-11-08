@@ -18,8 +18,9 @@ mr-boxington = { version = "latest", minimum_release_age = "0s" }
 # so release-plz.yml's MISE_LOCKED install cannot pick up an unreviewed build.
 # Bump with `mise lock`, deliberately.
 communique = { version = "latest", minimum_release_age = "0s" }
-# The bats tests parse `--json` output with it.
+# The bats tests parse `--json` output with jq and exercise the Ruff fallback.
 jq = "latest"
+ruff = "latest"
 # hk.pkl lints the bats tests with these.
 shellcheck = "latest"
 shfmt = "latest"
