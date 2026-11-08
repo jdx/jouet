@@ -909,7 +909,8 @@ class HarnessOutputTest(unittest.TestCase):
 
     def test_claude_stream_resumed_after_a_background_command(self):
         def result(turns, cost, input_tokens, output_tokens, text):
-            usage = {"input_tokens": input_tokens, "cache_read_input_tokens": 100, "output_tokens": output_tokens}
+            usage = {"input_tokens": input_tokens, "cache_read_input_tokens": 100,
+                     "cache_creation_input_tokens": 0, "output_tokens": output_tokens}
             return json.dumps(
                 {
                     "type": "result",
@@ -932,6 +933,11 @@ class HarnessOutputTest(unittest.TestCase):
             (u.input_tokens, u.output_tokens, u.turns, u.cost_usd, u.result), (226, 4280, 14, 0.23, "done")
         )
         self.assertTrue(u.extra["usage_complete"])
+        for key in ("cache_read_input_tokens", "cache_creation_input_tokens"):
+            event = json.loads(lines[-1])
+            del event["usage"][key]
+            incomplete_cache = lines[:-1] + [json.dumps(event)]
+            self.assertFalse(HARNESSES["claude"].usage(incomplete_cache, Path("/nonexistent")).extra["usage_complete"])
         incomplete = lines + [json.dumps({"type": "assistant", "message": {"id": "next", "usage": {"input_tokens": 4}}})]
         self.assertFalse(HARNESSES["claude"].usage(incomplete, Path("/nonexistent")).extra["usage_complete"])
         missing = lines + [json.dumps({"type": "result", "usage": {"input_tokens": 4}})]

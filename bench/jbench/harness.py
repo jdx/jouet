@@ -187,7 +187,7 @@ class Claude(Harness):
         complete = (bool(results) and all(
             isinstance(r.get("usage"), dict)
             and all(type(r["usage"].get(key)) is int and r["usage"][key] >= 0
-                    for key in ("input_tokens", "output_tokens"))
+                    for key in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens"))
             for r in results
         ) and not any(event.get("type") == "assistant" for event in events[last_result + 1:]))
         init = next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), {})
