@@ -90,6 +90,28 @@ fn jouet_test_saves_the_output_it_cut_counted_once() {
             .input_tokens,
         Some(0)
     );
+    let after = [AfterSetup {
+        harness: "claude".into(),
+        requests: 0,
+        primer_tokens: 0,
+    }];
+    let measured_costs = costs(&m, &[baseline(100_000)], &after);
+    let extra = measured_costs
+        .iter()
+        .find(|cost| cost.kind.label() == "extra jouet test output")
+        .expect("larger output must be priced as a cost");
+    assert_eq!((extra.count, extra.input_tokens), (2, Some(500)));
+    assert_eq!(net(&e, &measured_costs), Some(-500));
+    assert!(
+        costs(&m, &[baseline(2_000_000)], &after)
+            .iter()
+            .all(|cost| cost.kind.label() != "extra jouet test output")
+    );
+    assert!(
+        costs(&m, &[baseline(0)], &after)
+            .iter()
+            .all(|cost| cost.kind.label() != "extra jouet test output")
+    );
 }
 
 #[test]
