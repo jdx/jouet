@@ -54,7 +54,7 @@ def tests_pass(*args: str, env: dict[str, str] | None = None) -> tuple[bool, str
         env={**os.environ, **(env or {})},
         timeout=120,
     )
-    return proc.returncode == 0, (proc.stdout + proc.stderr)[-2000:]
+    return proc.returncode == 0, proc.stdout + proc.stderr
 
 
 def unchanged(*paths: str) -> bool:
@@ -96,7 +96,7 @@ def run_python(code: str, env: dict[str, str] | None = None) -> tuple[bool, str]
         env={**os.environ, **(env or {})},
         timeout=60,
     )
-    return proc.returncode == 0, (proc.stdout + proc.stderr)[-1500:]
+    return proc.returncode == 0, proc.stdout + proc.stderr
 
 
 def commit(message: str, *paths: str) -> None:
