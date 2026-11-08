@@ -1,15 +1,15 @@
 """Check the Actual running-balance task, separating missing evidence from failure."""
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _check import UNVERIFIED, expect, finish  # noqa: E402
+from _check import UNVERIFIED, expect, finish
 
 TEST_NAME = 'running balances refresh after repeated edits'
 # The hidden browser check has 240s and note validation 30s of the task's
@@ -106,7 +106,7 @@ def check_agent_browser_tests(changed, deadline):
                 'node', 'node_modules/@playwright/test/cli.js', 'test',
                 '--config', 'packages/desktop-client/playwright.config.ts',
                 '--retries=0', '--reporter=json', '--', *[re.escape(name) + '$' for name in names],
-            ], env={**os.environ, 'PLAYWRIGHT_JSON_OUTPUT_FILE': str(report)},
+            ], check=False, env={**os.environ, 'PLAYWRIGHT_JSON_OUTPUT_FILE': str(report)},
                 capture_output=True, text=True, timeout=remaining)
             verdict = agent_browser_passed(json.loads(report.read_text()), result.returncode, names)
             if not verdict:
@@ -155,7 +155,7 @@ def check_agent_unit_tests(changed, deadline):
             result = subprocess.run([
                 'node', str(Path('node_modules/vitest/vitest.mjs').resolve()), '--run',
                 '--reporter=json', f'--outputFile={report}', *names,
-            ], cwd=root, capture_output=True, text=True, timeout=remaining)
+            ], check=False, cwd=root, capture_output=True, text=True, timeout=remaining)
             data = json.loads(report.read_text())
             # Suite names are absolute in Vitest's report; a relative one is
             # relative to where it ran.
@@ -166,6 +166,7 @@ def check_agent_unit_tests(changed, deadline):
                         for test in suite['assertionResults']]
             verdict = (result.returncode == 0 and data.get('success') is True
                        and ran == {path.resolve() for path in files}
+                       and all(suite['assertionResults'] for suite in data['testResults'])
                        and bool(statuses) and all(status == 'passed' for status in statuses)
                        and data.get('numPassedTests', 0) > 0 and data.get('numFailedTests') == 0)
         except subprocess.TimeoutExpired as error:
@@ -216,7 +217,7 @@ def check():
     else:
         try:
             result = subprocess.run(['node', '--input-type=module', '-e', script, '--', *notes],
-                                    capture_output=True, text=True, timeout=30)
+                                    check=False, capture_output=True, text=True, timeout=30)
             if result.returncode:
                 print(result.stdout, end='')
                 print(result.stderr, end='')
@@ -246,7 +247,7 @@ def check():
                     'node', 'node_modules/@playwright/test/cli.js', 'test',
                     '--config', 'packages/desktop-client/playwright.config.ts',
                     spec.name, '--retries=0', '--reporter=json',
-                ], env={**os.environ, 'PLAYWRIGHT_JSON_OUTPUT_FILE': str(report)},
+                ], check=False, env={**os.environ, 'PLAYWRIGHT_JSON_OUTPUT_FILE': str(report)},
                     capture_output=True, text=True, timeout=240)
             except subprocess.TimeoutExpired as error:
                 print_timeout_output(error)

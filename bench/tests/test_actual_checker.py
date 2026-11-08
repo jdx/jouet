@@ -2,14 +2,13 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
 import runpy
 import shutil
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
-
 
 CHECKER = Path(__file__).resolve().parents[1] / "tasks/actual-running-balance/check.py"
 
@@ -232,6 +231,42 @@ class ActualCheckerTest(unittest.TestCase):
                 checker['UNVERIFIED'].clear()
                 os.chdir(old_cwd)
 
+    def test_each_changed_vitest_file_must_run_a_test(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            client = root / 'packages/desktop-client/src/accounts'
+            client.mkdir(parents=True)
+            paths = [client / 'empty.test.ts', client / 'passing.test.ts']
+            for path in paths:
+                path.write_text('test')
+
+            def run(command, **kwargs):
+                report = next(arg for arg in command if arg.startswith('--outputFile='))
+                Path(report.split('=', 1)[1]).write_text(json.dumps({
+                    'success': True, 'numPassedTests': 1, 'numFailedTests': 0,
+                    'testResults': [
+                        {'name': str(paths[0]), 'assertionResults': []},
+                        {'name': str(paths[1]), 'assertionResults': [{'status': 'passed'}]},
+                    ],
+                }))
+                return subprocess.CompletedProcess([], 0, '', '')
+
+            old_cwd = Path.cwd()
+            checker = runpy.run_path(str(CHECKER))
+            try:
+                os.chdir(root)
+                changed = [path.relative_to(root).as_posix() for path in paths]
+                checker['UNVERIFIED'].clear()
+                with contextlib.redirect_stdout(io.StringIO()), \
+                        mock.patch.object(subprocess, 'run', side_effect=run):
+                    checker['check_agent_tests'](changed)
+                self.assertEqual(checker['UNVERIFIED'], [
+                    'changed Vitest test files did not all complete successfully: ' + ', '.join(changed),
+                ])
+            finally:
+                checker['UNVERIFIED'].clear()
+                os.chdir(old_cwd)
+
     def test_requires_the_working_tree_used_by_the_check_to_be_committed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -287,7 +322,7 @@ exit 0
                         "PLAYWRIGHT_JSON_OUTPUT_FILE": str(root / 'unrelated.json')})
 
             def check():
-                return subprocess.run(["python3", str(CHECKER)], cwd=work, env=env,
+                return subprocess.run(["python3", str(CHECKER)], check=False, cwd=work, env=env,
                                       capture_output=True, text=True)
 
             (work / "uncommitted-source.js").write_text("required by the fix\n")
