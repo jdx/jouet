@@ -468,17 +468,20 @@ fn playwright_covers(ran: &[String], wanted: &[String]) -> bool {
 /// A selection whose leading `@jouet:cwd=CWD:cd=CD` names the directory it
 /// ran in, as `@jouet:dir=PATH`. The path is the real one where it still
 /// exists; one with `..` is resolved only that way, since joining a parent
-/// across a symlink by its text could name a different directory.
+/// across a symlink by its text could name a different directory. Both
+/// paths come as the checks rule's `scope_path` wrote them, and the result
+/// is written that way too, so it stays one word.
 fn resolved(selection: &str) -> Option<String> {
     let (directory, rest) = selection.split_once(' ').unwrap_or((selection, ""));
     let (cwd, cd) = directory.strip_prefix("@jouet:cwd=")?.split_once(":cd=")?;
+    let (cwd, cd) = (scope_path_decode(cwd)?, scope_path_decode(cd)?);
     if !cwd.starts_with('/') {
         return None;
     }
     let joined = if cd.starts_with('/') {
-        cd.to_string()
+        cd
     } else if cd == "." {
-        cwd.to_string()
+        cwd
     } else {
         format!("{}/{cd}", cwd.trim_end_matches('/'))
     };
@@ -487,7 +490,40 @@ fn resolved(selection: &str) -> Option<String> {
         Err(_) if joined.split('/').any(|part| part == "..") => return None,
         Err(_) => joined.trim_end_matches('/').to_string(),
     };
-    Some(format!("@jouet:dir={path} {rest}").trim_end().to_string())
+    Some(
+        format!("@jouet:dir={} {rest}", scope_path_encode(&path))
+            .trim_end()
+            .to_string(),
+    )
+}
+
+/// The checks rule's `scope_path`: each byte but `[A-Za-z0-9._/-]` as `%xx`.
+fn scope_path_encode(path: &str) -> String {
+    path.bytes()
+        .map(|b| match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'/' | b'-' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02x}"),
+        })
+        .collect()
+}
+
+/// The path `scope_path` encoded, or None for text it could not have written.
+fn scope_path_decode(encoded: &str) -> Option<String> {
+    let mut bytes = Vec::with_capacity(encoded.len());
+    let mut rest = encoded.as_bytes();
+    while let Some((&b, next)) = rest.split_first() {
+        if b == b'%' {
+            let hex = std::str::from_utf8(next.get(..2)?).ok()?;
+            bytes.push(u8::from_str_radix(hex, 16).ok()?);
+            rest = &next[2..];
+        } else {
+            bytes.push(b);
+            rest = next;
+        }
+    }
+    String::from_utf8(bytes).ok()
 }
 
 /// A package run covers a narrower one of the same configuration and root:
@@ -2638,6 +2674,23 @@ mod tests {
             &format!("@jouet:cwd={root}/elsewhere/admin:cd=."),
             "src/automations/a.test.tsx"
         ));
+        // The checks rule records paths with `scope_path`: a space is `%20`.
+        std::fs::create_dir_all(format!("{root}/my app/src/automations")).unwrap();
+        let spaced = scope_path_encode(&format!("{root}/my app"));
+        assert!(spaced.contains("my%20app"));
+        assert_eq!(
+            scope_path_decode(&spaced).unwrap(),
+            format!("{root}/my app")
+        );
+        assert!(cleared(
+            &format!("@jouet:cwd={spaced}/src/automations:cd=../.."),
+            &format!("@jouet:cwd={spaced}:cd=."),
+            "src/automations"
+        ));
+        assert_eq!(
+            resolved(&format!("@jouet:cwd={spaced}/src:cd=.. {runner}")).unwrap(),
+            format!("@jouet:dir={spaced} {runner}")
+        );
         // A `..` in a directory that is gone cannot be resolved.
         assert!(!cleared(
             &format!("@jouet:cwd={root}/gone/x:cd=.."),
