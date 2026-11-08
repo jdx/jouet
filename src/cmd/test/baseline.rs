@@ -1448,6 +1448,11 @@ mod tests {
             command_key_with_env(&job, Path::new("/repo"), env("UTC")),
             command_key_with_env(&job, Path::new("/repo"), env("America/Chicago"))
         );
+        let pwd = |value: &str| vec![("PWD".into(), value.into())].into_iter();
+        assert_ne!(
+            command_key_with_env(&job, Path::new("/repo"), pwd("/repo")),
+            command_key_with_env(&job, Path::new("/repo"), pwd("/other-worktree"))
+        );
     }
 
     #[test]
