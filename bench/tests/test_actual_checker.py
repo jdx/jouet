@@ -75,7 +75,7 @@ class ActualCheckerTest(unittest.TestCase):
             try:
                 os.chdir(root)
                 with mock.patch.object(subprocess, 'run', side_effect=run) as command:
-                    checker['check_agent_browser_tests']([f'packages/desktop-client/e2e/{name}' for name in names])
+                    checker['check_agent_tests']([f'packages/desktop-client/e2e/{name}' for name in names])
                 self.assertEqual(command.call_count, 1)
                 self.assertEqual(command.call_args.kwargs['timeout'], 600)
                 self.assertEqual(checker['UNVERIFIED'], [])
@@ -86,28 +86,31 @@ class ActualCheckerTest(unittest.TestCase):
         checker = runpy.run_path(str(CHECKER))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            browser = "packages/desktop-client/e2e/accounts.test.ts"
-            unit = "packages/desktop-client/src/accounts/balance.test.ts"
+            browser = "packages/desktop-client/e2e/accounts.spec.tsx"
+            unit = "packages/desktop-client/src/accounts/balance.spec.tsx"
             for name in (browser, unit):
                 (root / name).parent.mkdir(parents=True, exist_ok=True)
                 (root / name).write_text("test")
             spec = {"title": "regression", "ok": True,
                     "tests": [{"expectedStatus": "passed", "results": [{"status": "passed"}]}]}
 
+            unit_passes = [False]
+
             def run(command, **kwargs):
                 if "PLAYWRIGHT_JSON_OUTPUT_FILE" in kwargs.get("env", {}):
-                    report = {"suites": [{"file": "accounts.test.ts", "specs": [spec]}],
+                    report = {"suites": [{"file": "accounts.spec.tsx", "specs": [spec]}],
                               "errors": [], "stats": {"expected": 1, "skipped": 0,
                                                       "unexpected": 0, "flaky": 0}}
                     Path(kwargs["env"]["PLAYWRIGHT_JSON_OUTPUT_FILE"]).write_text(json.dumps(report))
                     return subprocess.CompletedProcess(command, 0, "", "")
                 report_path = next(arg for arg in command if arg.startswith("--outputFile="))
                 Path(report_path.split("=", 1)[1]).write_text(json.dumps({
-                    "success": False, "numPassedTests": 0, "numFailedTests": 1,
-                    "testResults": [{"name": str(root / unit),
-                                     "assertionResults": [{"status": "failed"}]}],
+                    "success": unit_passes[0], "numPassedTests": int(unit_passes[0]),
+                    "numFailedTests": int(not unit_passes[0]),
+                    "testResults": [{"name": str(root / unit), "assertionResults": [
+                        {"status": "passed" if unit_passes[0] else "failed"}]}],
                 }))
-                return subprocess.CompletedProcess(command, 1, "", "")
+                return subprocess.CompletedProcess(command, 0 if unit_passes[0] else 1, "", "")
 
             old_cwd = Path.cwd()
             try:
@@ -115,11 +118,48 @@ class ActualCheckerTest(unittest.TestCase):
                 checker["UNVERIFIED"].clear()
                 with contextlib.redirect_stdout(io.StringIO()), \
                         mock.patch.object(subprocess, "run", side_effect=run) as command:
-                    checker["check_agent_browser_tests"]([browser, unit])
+                    checker["check_agent_tests"]([browser, unit])
                 self.assertEqual(command.call_count, 2)
                 self.assertEqual(checker["UNVERIFIED"], [
                     "changed Vitest test files did not all complete successfully: " + unit,
                 ])
+                checker["UNVERIFIED"].clear()
+                unit_passes[0] = True
+                with contextlib.redirect_stdout(io.StringIO()), \
+                        mock.patch.object(subprocess, "run", side_effect=run) as command:
+                    checker["check_agent_tests"]([browser, unit])
+                self.assertEqual(command.call_count, 2)
+                self.assertEqual(checker["UNVERIFIED"], [])
+                unit_passes[0] = False
+                (root / browser).unlink()
+                (root / browser).with_name("target.ts").write_text("test")
+                (root / browser).symlink_to("target.ts")
+                with contextlib.redirect_stdout(io.StringIO()), \
+                        mock.patch.object(subprocess, "run", side_effect=run) as command:
+                    checker["check_agent_tests"]([browser, unit])
+                self.assertEqual(command.call_count, 1)
+                self.assertEqual(checker["UNVERIFIED"], [
+                    "changed Playwright test path contains a symlink: " + browser,
+                    "changed Vitest test files did not all complete successfully: " + unit,
+                ])
+                checker["UNVERIFIED"].clear()
+                (root / browser).unlink()
+                (root / browser).write_text("test")
+                (root / unit).unlink()
+                with contextlib.redirect_stdout(io.StringIO()), \
+                        mock.patch.object(subprocess, "run", side_effect=run) as command:
+                    checker["check_agent_tests"]([browser, unit])
+                self.assertEqual(command.call_count, 1)
+                self.assertEqual(checker["UNVERIFIED"], ["changed Vitest test files are missing: " + unit])
+                checker["UNVERIFIED"].clear()
+                (root / browser).unlink()
+                (root / unit).write_text("test")
+                unit_passes[0] = True
+                with contextlib.redirect_stdout(io.StringIO()), \
+                        mock.patch.object(subprocess, "run", side_effect=run) as command:
+                    checker["check_agent_tests"]([browser, unit])
+                self.assertEqual(command.call_count, 1)
+                self.assertEqual(checker["UNVERIFIED"], ["changed Playwright test file is missing: " + browser])
             finally:
                 checker["UNVERIFIED"].clear()
                 os.chdir(old_cwd)
@@ -163,10 +203,10 @@ class ActualCheckerTest(unittest.TestCase):
                     checker['UNVERIFIED'].clear()
                     with contextlib.redirect_stdout(io.StringIO()), \
                             mock.patch.object(subprocess, 'run', side_effect=run):
-                        checker['check_agent_browser_tests'](['packages/desktop-client/src/accounts/Account.tsx', changed])
+                        checker['check_agent_tests'](['packages/desktop-client/src/accounts/Account.tsx', changed])
                     self.assertEqual(checker['UNVERIFIED'], expected)
                 checker['UNVERIFIED'].clear()
-                checker['check_agent_browser_tests'](['packages/desktop-client/src/accounts/Account.tsx'])
+                checker['check_agent_tests'](['packages/desktop-client/src/accounts/Account.tsx'])
                 self.assertEqual(checker['UNVERIFIED'], ['no runnable changed Playwright or Vitest test file'])
             finally:
                 checker['UNVERIFIED'].clear()

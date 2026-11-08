@@ -80,14 +80,16 @@ def check_agent_browser_tests(changed):
     """Run changed browser tests together under one shared time budget."""
     root = Path('packages/desktop-client/e2e')
     files = [Path(path) for path in changed if path.startswith(f'{root}/')
-             and path.endswith(('.test.ts', '.spec.ts')) and Path(path).is_file()]
+             and re.search(r'\.(?:test|spec)\.[cm]?[jt]sx?$', path)]
     if not files:
-        check_agent_unit_tests(changed)
-        return
+        return False
     for path in files:
         if any(parent.is_symlink() for parent in (path, *path.parents)):
             UNVERIFIED.append(f'changed Playwright test path contains a symlink: {path}')
-            return
+            return True
+        if not path.is_file():
+            UNVERIFIED.append(f'changed Playwright test file is missing: {path}')
+            return True
     names = [path.relative_to(root).as_posix() for path in files]
     with tempfile.TemporaryDirectory(prefix='actual-agent-test-') as directory:
         report = Path(directory) / 'playwright.json'
@@ -112,14 +114,13 @@ def check_agent_browser_tests(changed):
         if not verdict:
             UNVERIFIED.append('changed Playwright test files did not all complete successfully: '
                               + ', '.join(str(path) for path in files))
-    if changed_unit_tests(changed):
-        check_agent_unit_tests(changed)
+    return True
 
 
 def changed_unit_tests(changed):
     root = Path('packages/desktop-client')
     return [Path(path) for path in changed if path.startswith(f'{root}/src/')
-            and path.endswith(('.test.ts', '.test.tsx')) and Path(path).is_file()]
+            and re.search(r'\.(?:test|spec)\.[cm]?[jt]sx?$', path)]
 
 
 def check_agent_unit_tests(changed):
@@ -127,11 +128,14 @@ def check_agent_unit_tests(changed):
     root = Path('packages/desktop-client')
     files = changed_unit_tests(changed)
     if not files:
-        UNVERIFIED.append('no runnable changed Playwright or Vitest test file')
-        return
+        return False
     if any(parent.is_symlink() for path in files for parent in (path, *path.parents)):
         UNVERIFIED.append('changed Vitest test path contains a symlink')
-        return
+        return True
+    missing = [str(path) for path in files if not path.is_file()]
+    if missing:
+        UNVERIFIED.append('changed Vitest test files are missing: ' + ', '.join(missing))
+        return True
     names = [path.relative_to(root).as_posix() for path in files]
     with tempfile.TemporaryDirectory(prefix='actual-agent-unit-') as directory:
         report = Path(directory) / 'vitest.json'
@@ -165,6 +169,14 @@ def check_agent_unit_tests(changed):
         if not verdict:
             UNVERIFIED.append('changed Vitest test files did not all complete successfully: '
                               + ', '.join(str(path) for path in files))
+    return True
+
+
+def check_agent_tests(changed):
+    browser = check_agent_browser_tests(changed)
+    unit = check_agent_unit_tests(changed)
+    if not browser and not unit:
+        UNVERIFIED.append('no runnable changed Playwright or Vitest test file')
 
 
 def check():
@@ -248,7 +260,7 @@ def check():
     finally:
         if created:
             spec.unlink(missing_ok=True)
-    check_agent_browser_tests(changed)
+    check_agent_tests(changed)
 
 
 if __name__ == '__main__':
