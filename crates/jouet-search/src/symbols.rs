@@ -550,6 +550,13 @@ mod imp {
                     };
                     node = inner;
                 }
+                "type_assertion" => {
+                    let mut cursor = node.walk();
+                    let Some(inner) = node.named_children(&mut cursor).last() else {
+                        return false;
+                    };
+                    node = inner;
+                }
                 _ => return false,
             }
         }

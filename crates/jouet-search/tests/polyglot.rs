@@ -541,6 +541,25 @@ fn typescript_class_function_fields_are_selectable() {
 }
 
 #[test]
+fn typescript_angle_asserted_function_field_is_selectable() {
+    let path = Path::new("example.ts");
+    let source = b"class Query {\n  update = <Handler>(() => 1);\n  count = <number>1;\n}\n";
+    let found = symbols::select(
+        path,
+        source,
+        &symbols::Selector::parse("Query.update").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(found.len(), 1);
+    let text = std::str::from_utf8(&source[found[0].start_byte..found[0].end_byte]).unwrap();
+    assert!(text.contains("<Handler>(() => 1)"), "{text}");
+    assert!(matches!(
+        symbols::select(path, source, &symbols::Selector::parse("count").unwrap()),
+        Err(symbols::SelectError::NotFound)
+    ));
+}
+
+#[test]
 fn a_selector_picks_definitions_by_name_kind_and_scope() {
     let path = Path::new(FIXTURE).join("web/api.ts");
     let source = std::fs::read(&path).unwrap();
