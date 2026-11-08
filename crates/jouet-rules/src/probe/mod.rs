@@ -584,9 +584,20 @@ pub(crate) fn install(
     let s = shared.clone();
     jouet.set(
         "repo",
-        lua.create_function(move |lua, ()| {
-            let found = cached(&s, "repo", |p, left| {
-                git::repo(p.dir.as_deref(), left).map(Some)
+        lua.create_function(move |lua, dir: Option<String>| {
+            // An example answers for any directory.
+            if dir.is_some()
+                && let Some(answer_) = s.cache.borrow().get("repo:*").cloned()
+            {
+                return answer(lua, answer_);
+            }
+            let key = match &dir {
+                Some(dir) => format!("repo:{dir}"),
+                None => "repo".to_string(),
+            };
+            let found = cached(&s, &key, |p, left| {
+                let at = p.at(dir.as_deref());
+                git::repo(at.as_deref(), left).map(Some)
             })?;
             answer(lua, found)
         })?,
