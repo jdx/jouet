@@ -1253,6 +1253,14 @@ fn a_failure_that_blames_the_machine_is_told_apart() {
         .is_some()
     );
     assert!(usage_error("flag provided but not defined: -nope\n", &[]).is_some());
+    // Vitest and Jest exit 1 when a filter or path matches no test file,
+    // for example a file another config includes: no test ran.
+    for log in [
+        " RUN  v4.1.12 /w/apps/admin\n\n  No test files found, exiting with code 1\n  filter: src/a.acceptance.test.tsx\n  include: src/**/*.test.tsx\n  exclude:  src/**/*.acceptance.test.tsx\n",
+        "No tests found, exiting with code 1\nRun with `--passWithNoTests` to exit with code 0\n",
+    ] {
+        assert!(usage_error(log, &[]).is_some(), "{log}");
+    }
     // argparse and pytest name the program first.
     for line in [
         "usage: pytest [options] [file_or_dir] [file_or_dir] [...]\npytest: error: unrecognized arguments: --nope\n",

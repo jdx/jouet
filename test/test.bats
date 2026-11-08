@@ -1789,6 +1789,25 @@ PY
 	assert_output '[]'
 }
 
+@test "a Vitest run whose path matched no test file is no failed test run" {
+	mkdir -p bin
+	cat >bin/vitest <<'SH'
+#!/bin/sh
+echo " RUN  v4.1.12 $PWD"
+echo
+echo "  No test files found, exiting with code 1"
+echo "  filter: $2"
+exit 1
+SH
+	chmod +x bin/vitest
+	run bash -c 'PATH="$PWD/bin:$PATH" CLAUDE_CODE_SESSION_ID=s23 jouet test --cmd -- vitest run src/a.acceptance.test.tsx'
+	assert_failure 1
+	assert_output --partial 'usage: the runner refused its arguments and ran no test'
+	assert_output --partial 'No test files found, exiting with code 1'
+	run --separate-stderr jq -c '[.trees[].runs.test // empty]' "$XDG_STATE_HOME/jouet/sessions/s23.json"
+	assert_output '[]'
+}
+
 @test "a passing --cmd run of the whole suite is a full run, so finishing is not held up" {
 	ran 'jouet test --cmd -- python3 -m unittest' 0
 	run --separate-stderr jq -c '.trees[].runs.test | [.command, .full]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
