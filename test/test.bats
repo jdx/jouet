@@ -738,6 +738,37 @@ SH
 	assert_success
 }
 
+@test "--cmd reports gofmt previews that find unformatted files" {
+	mkdir bin
+	printf 'package p\nfunc f( ){ }\n' >example.go
+	cat >bin/gofmt <<'SH'
+#!/bin/sh
+[ "${GOFMT_EMPTY:-}" = 1 ] && exit 0
+case "$1" in
+  -d) printf 'diff example.go.orig example.go\n--- example.go.orig\n+++ example.go\n@@ -1 +1 @@\n-old\n+new\n' ;;
+  -l) printf 'example.go\n' ;;
+  -w) printf 'example.go\n' ;;
+esac
+exit 0
+SH
+	chmod +x bin/gofmt
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -d example.go
+	assert_failure 1
+	assert_output --partial 'unformatted'
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- env gofmt -l example.go
+	assert_failure 1
+	assert_output --partial 'unformatted'
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --json --cmd -- env gofmt -l example.go
+	assert_failure 1
+	assert_equal "$(jq -c '[.ok, .suites[0].exit_code, .suites[0].format_changes]' <<<"$output")" '[false,0,true]'
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -w example.go
+	assert_success
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -d -w example.go
+	assert_success
+	PATH="$PWD/bin:$PATH" GOFMT_EMPTY=1 run --separate-stderr jouet test --cmd -- gofmt -d example.go
+	assert_success
+}
+
 @test "--cmd refuses a recognised test run that selected no tests" {
 	mkdir bin
 	printf '#!/bin/sh\nprintf "running 0 tests\\ntest result: ok. 0 passed; 0 failed; 0 ignored; 3 filtered out\\n"\n' >bin/cargo

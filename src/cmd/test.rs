@@ -77,6 +77,9 @@ struct SuiteReport {
     log: Option<String>,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     digest: Option<Digest>,
+    /// A read-only formatter reported files that need changes.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    format_changes: bool,
     /// Answered from an earlier run of the command on the same files.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     reused: bool,
@@ -390,7 +393,10 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             suite.log = Some(log.display().to_string());
             let output = std::fs::read(&log).unwrap_or_default();
             let output = String::from_utf8_lossy(&output);
-            let mut digest = testlog::digest_with(&output, code != 0, budget, &formats);
+            let format_changes = code == 0 && gofmt_changes(&job.argv, &job.dir, &output);
+            suite.format_changes = format_changes;
+            let mut digest =
+                testlog::digest_with(&output, code != 0 || format_changes, budget, &formats);
             let incomplete_suite = digest.nextest_incomplete;
             nextest_incomplete |= incomplete_suite;
             if code == 0 && digest.passed_names.is_empty() && !digest.passed_all.is_empty() {
@@ -420,7 +426,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 ticket.finish(
                     command,
                     ms,
-                    code == 0 && !empty_test && !contradictory && !incomplete_suite,
+                    code == 0 && !empty_test && !contradictory && !incomplete_suite && !format_changes,
                 );
             }
             if code != 0 {
@@ -454,7 +460,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 slowest_failure = slowest_failure.max(ms);
             }
             suite.digest = Some(digest);
-            let suite_exit = if incomplete_suite && code != 0 {
+            let suite_exit = if format_changes || (incomplete_suite && code != 0) {
                 Exit::Failed
             } else if empty_test || contradictory || incomplete_suite {
                 Exit::Precondition
@@ -527,7 +533,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     let base = base.filter(|_| {
         !nextest_incomplete && ((blamed.is_none() && unrelated.is_none()) || args.baseline)
     });
-    if let (Some(base), Exit::Failed) = (base, exit) {
+    if let (Some(base), Exit::Failed) = (base, exit)
+        && !failed.is_empty()
+    {
         let unnamed = failed.iter().any(|(_, names, _, _)| names.is_none());
         // Set when only a kept comparison could be used, and none was.
         let mut slow = false;
@@ -754,6 +762,32 @@ const NOT_A_TEST: &[&str] = &[
     "--write",
     "--fix",
 ];
+
+/// Older gofmt versions exit zero for a diff; `-l` also exits zero when it
+/// names files. These read-only previews are checks when run through --cmd.
+fn gofmt_changes(argv: &[String], dir: &Path, output: &str) -> bool {
+    let script = jouet_rules::shell::parse(&command_line(argv));
+    let [command] = script.commands.as_slice() else {
+        return false;
+    };
+    if !script.nested.is_empty() || command.program() != Some("gofmt") {
+        return false;
+    }
+    let flags: Vec<&str> = command
+        .argv()
+        .iter()
+        .skip(1)
+        .take_while(|word| word.as_str() != "--")
+        .map(String::as_str)
+        .collect();
+    if flags.iter().any(|flag| matches!(*flag, "-w" | "-w=true")) {
+        return false;
+    }
+    let diff = flags.iter().any(|flag| matches!(*flag, "-d" | "-d=true"));
+    let list = flags.iter().any(|flag| matches!(*flag, "-l" | "-l=true"));
+    (diff && output.lines().any(|line| line.starts_with("diff ")))
+        || (list && output.lines().any(|line| dir.join(line).is_file()))
+}
 
 /// A Ruff preview is not a test, even when wrapped in `sh -c`. Limit this
 /// to a single command so an unrelated test script with the same flags, or a
@@ -1182,6 +1216,7 @@ fn given(cwd: &Path, args: &TestArgs) -> (Report, Vec<Option<Job>>) {
         duration_ms: None,
         log: None,
         digest: None,
+        format_changes: false,
         reused: false,
     };
     let job = Job {
@@ -1229,6 +1264,7 @@ fn full(cwd: &Path, args: &TestArgs) -> Result<(Report, Vec<Option<Job>>), affec
             duration_ms: None,
             log: None,
             digest: None,
+            format_changes: false,
             reused: false,
         };
         let job = Job {
@@ -1438,6 +1474,7 @@ fn suite_report(suite: &Suite) -> SuiteReport {
         duration_ms: None,
         log: None,
         digest: None,
+        format_changes: false,
         reused: false,
     }
 }
@@ -1580,6 +1617,12 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
             suite.adapter
         ),
         Some(0) if empty_test => format!("{}: no test ran in {secs:.1}s", suite.adapter),
+        Some(0) if suite.format_changes => {
+            format!(
+                "{}: gofmt found unformatted files in {secs:.1}s",
+                suite.adapter
+            )
+        }
         Some(0) if contradictory => format!(
             "{}: command exited 0 but reported failing tests in {secs:.1}s",
             suite.adapter
@@ -1635,7 +1678,7 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
     } else if digest.no_tests && suite.exit_code == Some(0) {
         s.push_str(", but no test ran: a filter or path that matched nothing?");
     }
-    if streamed || (suite.exit_code == Some(0) && !contradictory && !incomplete) {
+    if streamed || (suite.exit_code == Some(0) && !contradictory && !incomplete && !suite.format_changes) {
         let _ = writeln!(s, " (full log: {log})");
         // A few warnings by name, so the agent can tell its own without
         // reading the log.
@@ -1667,7 +1710,11 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
     }
     s.push('\n');
     for failure in &digest.failures {
-        let _ = writeln!(s, "FAIL {}", failure.name);
+        if suite.format_changes {
+            s.push_str("Formatting differences:\n");
+        } else {
+            let _ = writeln!(s, "FAIL {}", failure.name);
+        }
         for line in &failure.lines {
             if line.is_empty() {
                 s.push('\n');
