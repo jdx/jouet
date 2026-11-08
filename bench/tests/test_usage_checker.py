@@ -60,6 +60,26 @@ class UsageEvidenceTest(unittest.TestCase):
         self.assertTrue(self.problems)
         self.assertTrue(self.checker.UNVERIFIED)
 
+    def test_reported_failure_without_a_summary_is_still_a_failure(self):
+        output = "running 2 tests\ntest tests::first ... FAILED\ntest tests::second ... "
+        proc = subprocess.CompletedProcess(["cargo"], 101, stdout=output)
+        with mock.patch.object(self.checker.subprocess, "run", return_value=proc), \
+                mock.patch.object(self.checker.time, "monotonic", return_value=0):
+            self.checker.run("heading_help", "committed test", 100, Path("checkout"))
+        self.assertTrue(self.checker.UNVERIFIED)
+        self.assertTrue(self.problems)
+        self.assertIn("test tests::first ... FAILED", self.problems[0])
+
+    def test_reported_failure_cannot_be_hidden_by_a_passing_summary(self):
+        output = ("running 1 test\ntest tests::first ... FAILED\n"
+                  "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;")
+        proc = subprocess.CompletedProcess(["cargo"], 0, stdout=output)
+        with mock.patch.object(self.checker.subprocess, "run", return_value=proc), \
+                mock.patch.object(self.checker.time, "monotonic", return_value=0):
+            self.checker.run("heading_help", "committed test", 100, Path("checkout"))
+        self.assertTrue(self.checker.UNVERIFIED)
+        self.assertTrue(self.problems)
+
     def test_expired_budget_does_not_start_a_test(self):
         with mock.patch.object(self.checker.subprocess, "run") as run, \
                 mock.patch.object(self.checker.time, "monotonic", return_value=101):
