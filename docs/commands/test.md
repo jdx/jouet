@@ -247,7 +247,7 @@ setup = ["npm", "ci"]
 
 After reviewing the configuration, a person runs `jouet trust`. When a comparison actually runs, jouet executes this argument list once in the root of its temporary merge-base checkout, before the test commands. It invokes the program directly, without a shell, and does not run setup in the current worktree. The program can run project scripts and access the network as the user; trust it accordingly. A missing program or unsuccessful setup leaves the failures uncomparable, with its output in the reported log. A configured setup uses a fresh comparison, rather than a cached result.
 
-**What the merge base did is kept** for 14 days in `$XDG_STATE_HOME/jouet/known/`, by repository (every worktree of it shares it), merge base and command. A later failure of the same command at the same merge base is compared with what is kept, without running the merge base again, so a failure that was already there stays known while you work. If the kept run could not name any failures, passing `--baseline` explicitly retries it, for example after installing a missing tool.
+**What the merge base did is kept** for 14 days in `$XDG_STATE_HOME/jouet/known/`, by repository (every worktree of it shares it), merge base, command and effective environment. Environment values are hashed rather than stored in the key. A later failure of the same command at the same merge base and environment is compared with what is kept, without running the merge base again, so a failure that was already there stays known while you work. If the kept run could not name any failures, passing `--baseline` explicitly retries it, for example after installing a missing tool.
 
 **Without `--baseline`:**
 

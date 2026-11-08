@@ -2076,6 +2076,30 @@ SCRIPT
 	refute_output --partial 'baseline:'
 }
 
+@test "a cached baseline is not reused in a different environment" {
+	mkdir -p tests
+	cat >tests/test_env.py <<'PY'
+import os
+import unittest
+
+class T(unittest.TestCase):
+    def test_env(self):
+        if os.environ.get("JOUET_BASELINE_FIXTURE") == "on":
+            self.fail("same failure")
+PY
+	git add tests/test_env.py
+	git commit -q -m base
+	git checkout -q -b work
+	jouet edit replace tests/test_env.py --old '        if os.environ.get("JOUET_BASELINE_FIXTURE") == "on":' --new '        if True:'
+
+	JOUET_BASELINE_FIXTURE=on run --separate-stderr jouet test --baseline --cmd -- python3 -m unittest discover -s tests
+	assert_success
+	assert_output --partial 'baseline: the failure also fails at main'
+	JOUET_BASELINE_FIXTURE=off run --separate-stderr jouet test --baseline --cmd -- python3 -m unittest discover -s tests
+	assert_failure 1
+	assert_output --partial 'baseline: NEW FAILURE'
+}
+
 @test "a program not on PATH names its versioned sibling" {
 	mkdir -p bin
 	printf '#!/bin/sh\nexit 0\n' >bin/frob3
