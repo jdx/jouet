@@ -88,6 +88,9 @@ pub(crate) struct Digest {
     /// so a pass says nothing.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub(crate) no_tests: bool,
+    /// Nextest stopped before running all selected tests after a failure.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) nextest_incomplete: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -176,6 +179,7 @@ struct Parsed {
     passed: u64,
     failed: u64,
     skipped: u64,
+    nextest_incomplete: bool,
     warnings: u64,
     found: Vec<Found>,
     /// The names of the passing tests, from runners that print each.
@@ -291,6 +295,7 @@ regexes! {
     NEXTEST_FAIL = r"^\s*(?:FAIL|SIGSEGV|SIGABRT|SIGKILL|SIGBUS|TIMEOUT|ABORT|LEAK-FAIL)\s+\[\s*[\d.]+s\]\s+(?:\(\s*\d+/\d+\)\s+)?(.+)$";
     NEXTEST_NEXT = r"^(\s*(PASS|FAIL|SKIP|SIGSEGV|SIGABRT|SIGKILL|SIGBUS|TIMEOUT|ABORT|SLOW|START|LEAK|LEAK-FAIL|RETRY|FLAKY|TRY \d+ \S+)\s+\[|\s*(Summary|Cancelling|Canceling|Starting) |─{3,}|warning: |error: )";
     NEXTEST_SUMMARY = r"^\s*Summary \[[^\]]*\]\s+(.*)$";
+    NEXTEST_INCOMPLETE = r"^warning: [1-9]\d*/\d+ tests were not run due to test failure\b";
     // rustc's diagnostics.
     RUSTC_ERROR = r"^(error(?:\[E\d{4}\])?): (.+)$";
     RUSTC_WARNING = r"^warning(?:\[[^\]]+\])?: ";
@@ -632,6 +637,7 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
         warnings_all,
         warnings_changed: None,
         no_tests,
+        nextest_incomplete: parsed.nextest_incomplete,
     }
 }
 
@@ -829,6 +835,9 @@ fn nextest(lines: &[String], out: &mut Parsed) {
     for (i, line) in lines.iter().enumerate() {
         if depth[i] > 0 {
             continue;
+        }
+        if NEXTEST_INCOMPLETE.is_match(line) {
+            out.nextest_incomplete = true;
         }
         if let Some(c) = NEXTEST_FAIL.captures(line) {
             out.push(i, c[1].trim(), until(lines, i + 1, &NEXTEST_NEXT));
