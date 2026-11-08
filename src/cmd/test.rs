@@ -254,16 +254,11 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     let mut slowest_failure = 0;
     // The lines the change adds, for naming its passing tests: read before
     // anything runs, so files a run writes are not taken for the change.
-    let added = if args.dry_run {
-        String::new()
+    // Share the root and untracked-file queries with the warning paths.
+    let (added, touched) = if args.dry_run {
+        (String::new(), None)
     } else {
-        added_lines(&cwd)
-    };
-    // And the files it touches, for naming its warnings.
-    let touched = if args.dry_run {
-        None
-    } else {
-        touched_files(&cwd)
+        change_context(&cwd)
     };
     // What each failed suite blames on the machine; the run is the
     // machine's only when every one of them does.
@@ -983,36 +978,6 @@ fn versioned_on_path(name: &str) -> Option<String> {
     found.into_iter().next()
 }
 
-/// The lines the work tree adds since HEAD: the diff's added lines and
-/// every untracked file's, up to a few megabytes.
-fn added_lines(dir: &Path) -> String {
-    let git = |args: &[&str]| {
-        Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-            .unwrap_or_default()
-    };
-    let mut added: String = git(&["diff", "HEAD", "-U0", "--no-color", "--no-ext-diff"])
-        .lines()
-        .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
-        .map(|l| format!("{}\n", &l[1..]))
-        .collect();
-    let root = git(&["rev-parse", "--show-toplevel"]);
-    for path in git(&["ls-files", "--others", "--exclude-standard", "--full-name"]).lines() {
-        if added.len() > 4 << 20 {
-            break;
-        }
-        if let Ok(text) = std::fs::read_to_string(Path::new(root.trim()).join(path)) {
-            added.push_str(&text);
-        }
-    }
-    added
-}
-
 /// What a change touches: the repository's root, and the files the work
 /// tree changes since HEAD and its untracked ones, as absolute paths. None
 /// when git cannot tell, as before a first commit.
@@ -1021,7 +986,10 @@ struct Touched {
     files: Vec<PathBuf>,
 }
 
-fn touched_files(dir: &Path) -> Option<Touched> {
+/// Capture added lines and touched paths before the command can modify files.
+/// Both need the repository root and its untracked files; share those queries
+/// when the command runs at the root.
+fn change_context(dir: &Path) -> (String, Option<Touched>) {
     let git = |dir: &Path, args: &[&str]| {
         let out = Command::new("git")
             .args(args)
@@ -1033,15 +1001,53 @@ fn touched_files(dir: &Path) -> Option<Touched> {
             .filter(|o| o.status.success())?;
         Some(String::from_utf8_lossy(&out.stdout).into_owned())
     };
-    // Canonical, as the run's directory and each warning's path are, since
-    // git's form can differ (`C:/a` for `\\?\C:\a`, `/tmp` for `/private/tmp`).
-    let root = PathBuf::from(git(dir, &["rev-parse", "--show-toplevel"])?.trim_end());
+    let diff =
+        git(dir, &["diff", "HEAD", "-U0", "--no-color", "--no-ext-diff"]).unwrap_or_default();
+    let mut added: String = diff
+        .lines()
+        .filter(|line| line.starts_with('+') && !line.starts_with("+++"))
+        .map(|line| format!("{}\n", &line[1..]))
+        .collect();
+    let Some(root) = git(dir, &["rev-parse", "--show-toplevel"]) else {
+        return (added, None);
+    };
+    // Canonical, as the run's directory and each warning's path are.
+    let root = PathBuf::from(root.trim_end());
     let root = root.canonicalize().unwrap_or(root);
-    let changed = git(
+    let untracked_here = git(
+        dir,
+        &[
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "--full-name",
+            "-z",
+        ],
+    );
+    if let Some(untracked) = &untracked_here {
+        for path in untracked.split('\0').filter(|path| !path.is_empty()) {
+            if added.len() > 4 << 20 {
+                break;
+            }
+            if let Ok(text) = std::fs::read_to_string(root.join(path)) {
+                added.push_str(&text);
+            }
+        }
+    }
+    let Some(changed) = git(
         &root,
         &["diff", "HEAD", "--name-only", "--no-ext-diff", "-z"],
-    )?;
-    let untracked = git(&root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    ) else {
+        return (added, None);
+    };
+    let untracked = if dir.canonicalize().is_ok_and(|dir| dir == root) {
+        untracked_here
+    } else {
+        git(&root, &["ls-files", "--others", "--exclude-standard", "-z"])
+    };
+    let Some(untracked) = untracked else {
+        return (added, None);
+    };
     let mut files: Vec<PathBuf> = changed
         .split('\0')
         .chain(untracked.split('\0'))
@@ -1053,7 +1059,7 @@ fn touched_files(dir: &Path) -> Option<Touched> {
         .collect();
     files.sort();
     files.dedup();
-    Some(Touched { root, files })
+    (added, Some(Touched { root, files }))
 }
 
 /// The warnings (`headline (path:line:col)`) whose file is one the change
@@ -1783,6 +1789,83 @@ fn counts(digest: &Digest) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn change_context_preserves_nested_scope_and_names_touched_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let git = |args: &[&str]| {
+            let result = Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        std::fs::write(root.join("tracked.rs"), "before\n").unwrap();
+        git(&["add", "tracked.rs"]);
+        git(&[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=",
+            "commit",
+            "-qm",
+            "base",
+        ]);
+        std::fs::write(root.join("tracked.rs"), "after\n").unwrap();
+        std::fs::create_dir(root.join("sub")).unwrap();
+        std::fs::write(root.join("root file.rs"), "root_only_test\n").unwrap();
+        std::fs::write(root.join("sub/nested file.rs"), "nested_test\n").unwrap();
+        #[cfg(unix)]
+        std::fs::write(root.join("line\nbreak.rs"), "unusual_path_test\n").unwrap();
+
+        let (added, touched) = change_context(&root);
+        assert!(
+            added.contains("after\n")
+                && added.contains("root_only_test")
+                && added.contains("nested_test")
+        );
+        #[cfg(unix)]
+        assert!(added.contains("unusual_path_test"));
+        let touched = touched.unwrap();
+        assert!(touched.files.contains(&root.join("tracked.rs")));
+        assert!(touched.files.contains(&root.join("root file.rs")));
+        assert!(touched.files.contains(&root.join("sub/nested file.rs")));
+        #[cfg(unix)]
+        assert!(touched.files.contains(&root.join("line\nbreak.rs")));
+
+        let (added, touched) = change_context(&root.join("sub"));
+        assert!(added.contains("after\n") && added.contains("nested_test"));
+        assert!(!added.contains("root_only_test"));
+        assert!(touched.unwrap().files.contains(&root.join("root file.rs")));
+    }
+
+    #[test]
+    fn change_context_handles_a_repository_without_a_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(
+            Command::new("git")
+                .args(["init", "-q"])
+                .current_dir(dir.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+        std::fs::write(dir.path().join("new.rs"), "new_test\n").unwrap();
+        let (added, touched) = change_context(dir.path());
+        assert!(added.contains("new_test"));
+        assert!(touched.is_none());
+    }
 
     #[test]
     fn the_change_names_its_own_passing_tests_by_whole_words() {

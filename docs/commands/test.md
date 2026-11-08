@@ -280,6 +280,8 @@ With `jouet setup`'s hooks, `jouet test --cmd -- CMD` is recorded as a run of CM
 
 For a read-only `gofmt -d` or `gofmt -l` command, jouet reports unformatted files as a failure even when gofmt exits zero. Older Go versions exit zero after printing a diff, and `-l` lists files without failing; jouet recognizes listed paths even when they contain newlines. A `gofmt -w` invocation writes formatting changes and retains its own exit status. When a zero-exit preview reports changes, `--baseline` says it did not compare them; the run stays failed. In JSON, the suite has `format_changes: true` and `exit_code: 0`, while the overall `ok` is `false`.
 
+Untracked files contribute to the changed-test names and warning paths, including when their names contain spaces or newlines. When run from a subdirectory, untracked test names are read from that directory, while warning paths cover the repository.
+
 ## What a run prints
 
 An agent that runs a suite and cuts its output with `head`, `tail` or `grep` often cuts off the failure it needed, and runs the whole suite again with another filter. `jouet test` runs it once:
