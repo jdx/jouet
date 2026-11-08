@@ -588,10 +588,9 @@ impl Engine {
                 self.stub("ahead:*", ahead.into());
             }
             if let Some(worktrees) = case.git_worktrees {
-                self.stub(
-                    "repo",
-                    serde_json::json!({ "root": "/repo", "linked_worktree": false, "worktrees": worktrees }),
-                );
+                let repo = serde_json::json!({ "root": "/repo", "linked_worktree": false, "worktrees": worktrees });
+                self.stub("repo:*", repo.clone());
+                self.stub("repo", repo);
             }
             if let Some(stack) = &case.stack {
                 self.stub("stack:layer", stack.clone());

@@ -472,8 +472,9 @@ declare jouet: {
 		-- gh-stack does not track it.
 		layer: () -> (JouetStackLayer?, string?),
 	},
-	-- The work tree's root and its GitHub repository.
-	repo: () -> (JouetRepo?, string?),
+	-- The work tree's root and its GitHub repository. With `dir`, of the
+	-- work tree there instead (a `cd`'s, from `jouet.dirs`).
+	repo: (dir: string?) -> (JouetRepo?, string?),
 	-- An environment variable, if it is on the allowlist: AI_AGENT,
 	-- CARGO_TARGET_DIR, CI, CLAUDECODE, CODEX_SANDBOX, GITHUB_ACTIONS,
 	-- GITHUB_BASE_REF, GITHUB_HEAD_REF, GITHUB_REF_NAME, GITHUB_REPOSITORY,

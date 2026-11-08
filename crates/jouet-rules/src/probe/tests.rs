@@ -152,6 +152,19 @@ fn repo_names_the_root_the_github_remote_and_a_linked_worktree() {
     e.set_probes(Probes::new(Some(linked), None, false));
     assert!(said(&e).starts_with("jdx/jouet jdx jouet true 2 "));
 
+    // With a directory, of the repository there, as after a `cd` from a
+    // directory outside any.
+    let e = engine(
+        r#"(function()
+        local here = jouet.repo()
+        local w, l = jouet.repo("work"), jouet.repo("linked")
+        return `{here} {w.linked_worktree} {w.worktrees} {l.linked_worktree} {w.root}`
+    end)()"#,
+        Budget::default(),
+    );
+    e.set_probes(Probes::new(Some(dir.path().into()), None, false));
+    assert_eq!(said(&e), format!("nil false 2 true {}", root.display()));
+
     let outside = tempfile::tempdir().unwrap();
     let e = engine(
         "(function() local r, err = jouet.repo(); return `{r} {err}` end)()",

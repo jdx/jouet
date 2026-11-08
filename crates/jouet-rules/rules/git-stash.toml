@@ -54,8 +54,11 @@ fires = [
   { command = "git stash pop", harness = "codex" },
   # Other worktrees share the stash.
   { command = "git stash -u", git = { worktrees = 2 } },
-  # A `cd` may reach another repository.
-  { command = "cd ../other && git stash", git = { worktrees = 1 } },
+  # A `cd` jouet cannot follow may reach any repository.
+  { command = "cd $DIR && git stash", git = { worktrees = 1 } },
+  { command = "cd - && git stash pop", git = { worktrees = 1 } },
+  # One it can follow is judged by the repository it reaches.
+  { command = "cd apps/admin && git stash", git = { worktrees = 2 } },
   # So may `git -C`, `--git-dir`, `--work-tree` or `GIT_DIR`.
   { command = "git -C ../other stash pop", git = { worktrees = 1 } },
   { command = "git --git-dir=../other/.git stash", git = { worktrees = 1 } },
@@ -82,4 +85,7 @@ quiet = [
   # One worktree: nothing else shares its stash.
   { command = "git stash", git = { worktrees = 1 } },
   { command = "git stash pop", git = { worktrees = 1 } },
+  # A `cd` into a repository with one worktree, as into a subdirectory.
+  { command = "cd apps/admin; git stash -q -- src/a.tsx; git stash pop -q", git = { worktrees = 1 } },
+  { command = "cd /work && git stash", git = { worktrees = 1 } },
 ]
