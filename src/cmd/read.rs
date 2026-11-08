@@ -215,6 +215,7 @@ fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
+/// Read a file by its requested outline, symbols or ranges, and report missing selections.
 fn read_file(args: &ReadArgs, out: &Output) -> Exit {
     let Some(path) = args.path.as_deref() else {
         return out.error(
