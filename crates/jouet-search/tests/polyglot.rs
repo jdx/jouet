@@ -356,10 +356,10 @@ fn overlapping_roots_search_each_file_once() {
 
 #[test]
 fn dot_root_and_nested_paths_are_searched_once() {
-    let mut single = options("no such text anywhere");
+    let mut single = options("Session");
     single.paths = vec![PathBuf::from(".")];
     let (expected, _) = run(&single);
-    let mut overlapping = options("no such text anywhere");
+    let mut overlapping = options("Session");
     overlapping.paths = vec![PathBuf::from(".")];
     overlapping.paths.extend([
         PathBuf::from("tests"),
