@@ -2102,14 +2102,13 @@ PY
 
 @test "a saved test result does not hide a changed shell environment" {
 	enable_result_reuse
-	export JOUET_TEST_BASELINE=off
 	git commit -q --allow-empty -m base
-	OLDPWD=passing run --separate-stderr jouet test --cmd -- python3 -c 'import os, sys; sys.exit(os.environ["OLDPWD"] != "passing")'
+	JOUET_TEST_BASELINE=off OLDPWD=passing run --separate-stderr jouet test --cmd -- python3 -c 'import os, sys; sys.exit(os.environ["OLDPWD"] != "passing")'
 	assert_success
-	OLDPWD=passing run --separate-stderr jouet test --cmd -- python3 -c 'import os, sys; sys.exit(os.environ["OLDPWD"] != "passing")'
+	JOUET_TEST_BASELINE=off OLDPWD=passing run --separate-stderr jouet test --cmd -- python3 -c 'import os, sys; sys.exit(os.environ["OLDPWD"] != "passing")'
 	assert_success
 	assert_output --partial 'reused:'
-	OLDPWD=failing run --separate-stderr jouet test --cmd -- python3 -c 'import os, sys; sys.exit(os.environ["OLDPWD"] != "passing")'
+	JOUET_TEST_BASELINE=off OLDPWD=failing run --separate-stderr jouet test --cmd -- python3 -c 'import os, sys; sys.exit(os.environ["OLDPWD"] != "passing")'
 	assert_failure 1
 	refute_output --partial 'reused:'
 }
