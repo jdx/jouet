@@ -82,6 +82,48 @@ class ActualCheckerTest(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_mixed_browser_and_unit_tests_are_both_checked(self):
+        checker = runpy.run_path(str(CHECKER))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            browser = "packages/desktop-client/e2e/accounts.test.ts"
+            unit = "packages/desktop-client/src/accounts/balance.test.ts"
+            for name in (browser, unit):
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_text("test")
+            spec = {"title": "regression", "ok": True,
+                    "tests": [{"expectedStatus": "passed", "results": [{"status": "passed"}]}]}
+
+            def run(command, **kwargs):
+                if "PLAYWRIGHT_JSON_OUTPUT_FILE" in kwargs.get("env", {}):
+                    report = {"suites": [{"file": "accounts.test.ts", "specs": [spec]}],
+                              "errors": [], "stats": {"expected": 1, "skipped": 0,
+                                                      "unexpected": 0, "flaky": 0}}
+                    Path(kwargs["env"]["PLAYWRIGHT_JSON_OUTPUT_FILE"]).write_text(json.dumps(report))
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                report_path = next(arg for arg in command if arg.startswith("--outputFile="))
+                Path(report_path.split("=", 1)[1]).write_text(json.dumps({
+                    "success": False, "numPassedTests": 0, "numFailedTests": 1,
+                    "testResults": [{"name": str(root / unit),
+                                     "assertionResults": [{"status": "failed"}]}],
+                }))
+                return subprocess.CompletedProcess(command, 1, "", "")
+
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                checker["UNVERIFIED"].clear()
+                with contextlib.redirect_stdout(io.StringIO()), \
+                        mock.patch.object(subprocess, "run", side_effect=run) as command:
+                    checker["check_agent_browser_tests"]([browser, unit])
+                self.assertEqual(command.call_count, 2)
+                self.assertEqual(checker["UNVERIFIED"], [
+                    "changed Vitest test files did not all complete successfully: " + unit,
+                ])
+            finally:
+                checker["UNVERIFIED"].clear()
+                os.chdir(old_cwd)
+
     def test_a_changed_vitest_file_stands_in_for_a_playwright_one(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

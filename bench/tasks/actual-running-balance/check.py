@@ -112,13 +112,20 @@ def check_agent_browser_tests(changed):
         if not verdict:
             UNVERIFIED.append('changed Playwright test files did not all complete successfully: '
                               + ', '.join(str(path) for path in files))
+    if changed_unit_tests(changed):
+        check_agent_unit_tests(changed)
+
+
+def changed_unit_tests(changed):
+    root = Path('packages/desktop-client')
+    return [Path(path) for path in changed if path.startswith(f'{root}/src/')
+            and path.endswith(('.test.ts', '.test.tsx')) and Path(path).is_file()]
 
 
 def check_agent_unit_tests(changed):
     """Run changed Vitest files when the agent wrote its regression test as a unit test."""
     root = Path('packages/desktop-client')
-    files = [Path(path) for path in changed if path.startswith(f'{root}/src/')
-             and path.endswith(('.test.ts', '.test.tsx')) and Path(path).is_file()]
+    files = changed_unit_tests(changed)
     if not files:
         UNVERIFIED.append('no runnable changed Playwright or Vitest test file')
         return
