@@ -821,19 +821,35 @@ fn gofmt_listed_file(dir: &Path, output: &str, argv: &[String]) -> bool {
     }) {
         return true;
     }
-    for start in std::iter::once(0).chain(output.match_indices('\n').map(|(at, _)| at + 1)) {
-        for (end, _) in output[start..].match_indices('\n') {
-            let path = &output[start..start + end];
-            // Directory walks only list .go files. A component longer than
-            // 1020 UTF-8 bytes exceeds even Windows' 255 UTF-16-unit limit.
-            if path
-                .rsplit(['/', '\\'])
-                .next()
-                .is_some_and(|name| name.len() > 1020)
-            {
-                break;
+    // If the first separator appears on the first line, every candidate from
+    // that line needs the same existing directory prefix.
+    let starts: Vec<usize> = std::iter::once(0)
+        .chain(output.match_indices('\n').map(|(at, _)| at + 1))
+        .filter(|&start| {
+            let first_line = output[start..].split('\n').next().unwrap_or("");
+            match first_line.find(std::path::is_separator) {
+                Some(at) => dir.join(&first_line[..=at]).is_dir(),
+                None => true,
             }
-            if path.contains('\n') && path.ends_with(".go") && dir.join(path).is_file() {
+        })
+        .collect();
+    // Directory walks only list .go files. Find possible endings first so a
+    // long diagnostic with no such ending is scanned once, not once per line.
+    for (end, _) in output.match_indices('\n') {
+        if !output[..end].ends_with(".go") {
+            continue;
+        }
+        for &start in starts.iter().take_while(|&&start| start < end) {
+            let path = &output[start..end];
+            // A component longer than 1020 UTF-8 bytes exceeds even Windows'
+            // 255 UTF-16-unit limit. Single lines were already checked above.
+            if path.contains('\n')
+                && path
+                    .rsplit(['/', '\\'])
+                    .next()
+                    .is_some_and(|name| name.len() <= 1020)
+                && dir.join(path).is_file()
+            {
                 return true;
             }
         }

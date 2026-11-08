@@ -765,6 +765,13 @@ SH
 	assert_output --partial 'unformatted'
 	PATH="$PWD/bin:$PATH" GOFMT_LIST=$'diagnostic\nline\nbreak.go' run --separate-stderr jouet test --cmd -- gofmt -l .
 	assert_failure 1
+	mkdir sub
+	local many="sub/"
+	for _ in {1..12}; do many+=$'line\n'; done
+	many+="end.go"
+	printf 'package p\n' >"$many"
+	PATH="$PWD/bin:$PATH" GOFMT_LIST=$'diagnostic\n'"$many" run --separate-stderr jouet test --cmd -- gofmt -l .
+	assert_failure 1
 	local extensionless=$'line\nbreak'
 	printf 'package p\n' >"$extensionless"
 	PATH="$PWD/bin:$PATH" GOFMT_LIST="$extensionless" run --separate-stderr jouet test --cmd -- gofmt -l "$extensionless"
