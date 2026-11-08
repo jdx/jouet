@@ -279,7 +279,7 @@ The built-in `piped-test-output` rule points agents here. It warns the first tim
 
 With `jouet setup`'s hooks, `jouet test --cmd -- CMD` is recorded as a run of CMD: `jouet test --cmd -- cargo build` is a build, and `jouet test --cmd -- cargo test --workspace` a full test run. A command jouet does not recognise, such as `./run-tests.sh`, is recorded as nothing, as it is when run directly.
 
-For a read-only `gofmt -d` or `gofmt -l` command, jouet reports unformatted files as a failure even when gofmt exits zero. Older Go versions exit zero after printing a diff, and `-l` lists files without failing. A `gofmt -w` invocation writes formatting changes and retains its own exit status. When a zero-exit preview reports changes, `--baseline` says it did not compare them; the run stays failed.
+For a read-only `gofmt -d` or `gofmt -l` command, jouet reports unformatted files as a failure even when gofmt exits zero. Older Go versions exit zero after printing a diff, and `-l` lists files without failing; jouet recognizes listed paths even when they contain newlines. A `gofmt -w` invocation writes formatting changes and retains its own exit status. When a zero-exit preview reports changes, `--baseline` says it did not compare them; the run stays failed.
 
 ## What a run prints
 
