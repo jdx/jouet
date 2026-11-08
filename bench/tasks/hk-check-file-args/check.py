@@ -33,7 +33,7 @@ def run(*cmd: str, env: dict | None = None) -> tuple[bool, str]:
     # the check's GIT_CONFIG_GLOBAL=/dev/null would refuse.
     full.pop("GIT_CONFIG_GLOBAL", None)
     proc = subprocess.run(cmd, capture_output=True, text=True, env=full, timeout=1100, check=False)
-    return proc.returncode == 0, (proc.stdout + proc.stderr)[-3000:]
+    return proc.returncode == 0, proc.stdout + proc.stderr
 
 
 ok, out = run("cargo", "build")
