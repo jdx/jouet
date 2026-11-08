@@ -751,7 +751,27 @@ fn gofmt_changes(argv: &[String], dir: &Path, output: &str) -> bool {
     let diff = flags.iter().any(|flag| matches!(*flag, "-d" | "-d=true"));
     let list = flags.iter().any(|flag| matches!(*flag, "-l" | "-l=true"));
     (diff && output.lines().any(|line| line.starts_with("diff ")))
-        || (list && output.lines().any(|line| dir.join(line).is_file()))
+        || (list && gofmt_listed_file(dir, output))
+}
+
+/// `gofmt -l` writes paths literally, so one path can span several lines.
+fn gofmt_listed_file(dir: &Path, output: &str) -> bool {
+    if output.lines().any(|line| dir.join(line).is_file()) {
+        return true;
+    }
+    for start in std::iter::once(0).chain(output.match_indices('\n').map(|(at, _)| at + 1)) {
+        for (end, _) in output[start..].match_indices('\n') {
+            // Even Windows extended paths cannot exceed this many UTF-8 bytes.
+            if end > 128 * 1024 {
+                break;
+            }
+            let path = &output[start..start + end];
+            if path.contains('\n') && dir.join(path).is_file() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// A Ruff preview is not a test, even when wrapped in `sh -c`. Limit this

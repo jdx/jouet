@@ -746,7 +746,7 @@ SH
 [ "${GOFMT_EMPTY:-}" = 1 ] && exit 0
 case "$1" in
   -d) printf 'diff example.go.orig example.go\n--- example.go.orig\n+++ example.go\n@@ -1 +1 @@\n-old\n+new\n' ;;
-  -l) printf 'example.go\n' ;;
+  -l) printf '%s\n' "${GOFMT_LIST:-example.go}" ;;
   -w) printf 'example.go\n' ;;
 esac
 exit 0
@@ -758,6 +758,15 @@ SH
 	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- env gofmt -l example.go
 	assert_failure 1
 	assert_output --partial 'unformatted'
+	local newline_name=$'line\nbreak.go'
+	printf 'package p\n' >"$newline_name"
+	PATH="$PWD/bin:$PATH" GOFMT_LIST="$newline_name" run --separate-stderr jouet test --cmd -- gofmt -l "$newline_name"
+	assert_failure 1
+	assert_output --partial 'unformatted'
+	PATH="$PWD/bin:$PATH" GOFMT_LIST=$'diagnostic\nline\nbreak.go' run --separate-stderr jouet test --cmd -- gofmt -l .
+	assert_failure 1
+	PATH="$PWD/bin:$PATH" GOFMT_LIST='diagnostic only' run --separate-stderr jouet test --cmd -- gofmt -l .
+	assert_success
 	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --json --cmd -- env gofmt -l example.go
 	assert_failure 1
 	assert_equal "$(jq -c '[.ok, .suites[0].exit_code, .suites[0].format_changes]' <<<"$output")" '[false,0,true]'
