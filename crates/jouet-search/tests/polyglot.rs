@@ -329,6 +329,8 @@ fn overlapping_roots_search_each_file_once() {
             overlapping.paths = vec![
                 root.join("web"),
                 root.clone(),
+                PathBuf::from(".").join(&root),
+                PathBuf::from(".").join(root.join("web")),
                 std::path::absolute(root.join("web/index.js")).unwrap(),
                 root.join("web"),
             ];
@@ -350,6 +352,24 @@ fn overlapping_roots_search_each_file_once() {
             assert_eq!(paths.len(), actual.files.len());
         }
     }
+}
+
+#[test]
+fn dot_root_and_nested_paths_are_searched_once() {
+    let mut single = options("no such text anywhere");
+    single.paths = vec![PathBuf::from(".")];
+    let (expected, _) = run(&single);
+    let mut overlapping = options("no such text anywhere");
+    overlapping.paths = vec![PathBuf::from(".")];
+    overlapping.paths.extend([
+        PathBuf::from("tests"),
+        PathBuf::from("./tests"),
+        std::path::absolute("tests/fixtures").unwrap(),
+    ]);
+    let (actual, _) = run(&overlapping);
+    assert_eq!(actual.files_searched, expected.files_searched);
+    assert_eq!(actual.files_matched, expected.files_matched);
+    assert_eq!(actual.matches, expected.matches);
 }
 
 #[test]
