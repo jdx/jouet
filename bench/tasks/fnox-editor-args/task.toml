@@ -20,6 +20,9 @@ test/edit.bats, using the standard @test "name" form, and commit your fix.
 git = "~/src/fnox"
 commit = "2627b559531abed8fa270fbaa00371abb60ae2df"
 
+[tools]
+age-keygen = "age-keygen"
+
 [env]
 RUSTUP_HOME = "~/.rustup"
 CARGO_HOME = "~/.cargo"

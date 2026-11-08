@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from jbench import tasks
+
 TASKS = Path(__file__).resolve().parents[1] / "tasks"
 sys.path.insert(0, str(TASKS))
 spec = importlib.util.spec_from_file_location(
@@ -19,6 +21,22 @@ spec.loader.exec_module(checker)
 
 
 class FnoxBatsTest(unittest.TestCase):
+    def test_editor_task_exposes_age_keygen_to_the_isolated_environment(self):
+        task = tasks.load("fnox-editor-args")
+        self.assertEqual(task.tools.get("age-keygen"), "age-keygen")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "age-keygen"
+            binary.write_text("#!/bin/sh\nprintf 'available\\n'\n")
+            binary.chmod(0o755)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            env = {"PATH": str(bin_dir), "HOME": str(root)}
+            with mock.patch("jbench.arms.resolve", return_value=binary):
+                task.agent_env(env, bin_dir, root)
+            result = subprocess.run(["age-keygen"], env=env, text=True, capture_output=True, check=True)
+            self.assertEqual(result.stdout, "available\n")
+
     def test_checker_imports_its_helper_in_isolated_python(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
