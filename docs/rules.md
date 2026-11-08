@@ -67,6 +67,7 @@ The built-in rules, grouped by what they are about:
 | Servers and background work | `job-start`, `job-ready`, `job-logs`, `job-stop`, `pitchfork-start`, `pitchfork-stop`, `pitchfork-logs` |
 | What goes into the context | `reread`, `large-read`, `unbudgeted-search`, `unbounded-query`, `curl-json` |
 | Sessions and trust | `claimed-path`, `trust`, `rule-files` |
+| Commands that would hang | `stdin-hang` |
 
 [Steering rules](/setup#steering-rules) in the setup guide describes what they deny and what they suggest instead. Their source, in [`crates/jouet-rules/rules`](https://github.com/jdx/jouet/tree/main/crates/jouet-rules/rules), is a good place to copy from when you write your own.
 
@@ -343,7 +344,7 @@ The script returns a table with a `check` function, which gets the tool call and
 
 A matcher in front of a script is worth having: a hook only starts a Luau VM when a script has a call to look at, so a rule that matches `sleep` costs nothing on every other command. Rules without a script never start one.
 
-These built-in rules have scripts: `affected-tests`, `checks`, `claimed-path`, `committed-secrets`, `job-start`, `piped-test-output`, `pitchfork-start`, `pitchfork-stop`, `python-edit`, `rebase-merged-base`, `reset-to-remote`, `rule-files`, `scoped-lint`, `sed-line-edit` and `unbounded-query`. Some of what they do:
+These built-in rules have scripts: `affected-tests`, `checks`, `claimed-path`, `committed-secrets`, `job-start`, `piped-test-output`, `pitchfork-start`, `pitchfork-stop`, `python-edit`, `rebase-merged-base`, `reset-to-remote`, `rule-files`, `scoped-lint`, `sed-line-edit`, `stdin-hang` and `unbounded-query`. Some of what they do:
 
 - `checks` reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them. A `jouet test --cmd -- sh -c '...'` script counts as the checks in it: one that passed with `cargo build && cargo test -p a` recorded a build and a test, as the same commands run directly do. A script records nothing when it failed (which command failed is unknown), changes directory or runs under a wrapper that does (`env -C`), or runs a command that is not a check, which may have changed the files after the checks ran.
 - `affected-tests` matches a whole-suite test run, then asks whether jouet can select tests here (`jouet.test.adapters()`) and whether the last test run was a whole suite too.
@@ -382,6 +383,7 @@ These built-in rules have scripts: `affected-tests`, `checks`, `claimed-path`, `
 | `via` | The wrappers `argv` looked through, by basename, outermost first: `rtk git status` ran via `{ "rtk" }`. |
 | `op` | The operator after it: `"seq"`, `"and"`, `"or"`, `"pipe"` or `"background"`; `nil` at the end of the script. |
 | `stdout_to` | The file its standard output is redirected to (`> out.log`, `&> all`), as written; `nil` when there is none. |
+| `stdin_redirected` | Its standard input comes from a redirection: `< file`, a here-document or `<<< word`. |
 | `env` | The variable assignments before the program (`RUST_LOG=1 cargo test`), which `words` leaves out. |
 | `nested` | Whether it is inside `$(...)` or a script passed to `sh -c`. |
 | `matched` | Whether one of the rule's matchers matched it: the reason the script runs. Always false for a rule without matchers, and in `jouet.parse`. |
