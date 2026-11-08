@@ -11,6 +11,32 @@ TASKS = Path(__file__).resolve().parents[1] / "tasks"
 
 
 class CheckHelpersTest(unittest.TestCase):
+    def test_unittest_discovery_requires_at_least_one_test(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            tests = work / "tests"
+            tests.mkdir()
+            code = "import json; from _check import tests_pass; print(json.dumps(tests_pass('discover', '-s', 'tests')))"
+
+            def run():
+                result = subprocess.run(
+                    [sys.executable, "-c", code], cwd=work,
+                    env={**os.environ, "PYTHONPATH": str(TASKS)},
+                    capture_output=True, text=True, check=True,
+                )
+                return json.loads(result.stdout)
+
+            passed, output = run()
+            self.assertFalse(passed)
+            self.assertIn("Ran 0 tests", output)
+            (tests / "test_one.py").write_text(
+                "import unittest\nclass OneTest(unittest.TestCase):\n"
+                "    def test_one(self):\n        self.assertTrue(True)\n"
+            )
+            passed, output = run()
+            self.assertTrue(passed, output)
+            self.assertIn("Ran 1 test", output)
+
     def test_subprocess_failures_retain_the_first_and_last_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
