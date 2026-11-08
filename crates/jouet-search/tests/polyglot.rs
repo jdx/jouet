@@ -495,7 +495,7 @@ fn an_outline_names_each_definition_with_its_scope() {
 
 #[test]
 fn typescript_class_function_fields_are_selectable() {
-    let source = b"class PagedQuery {\n  count = 0;\n  optimisticUpdate = (value: number) => {\n    return value + 1;\n  };\n  legacy = function(value: number) { return value; };\n  regular() {}\n}\n";
+    let source = b"class PagedQuery {\n  count = 0;\n  optimisticUpdate = (value: number) => {\n    return value + 1;\n  };\n  legacy = function(value: number) { return value; };\n  #private = () => 1;\n  asserted = (() => 2) as Handler;\n  notFunction = (123 as number);\n  regular() {}\n}\n";
     for extension in ["ts", "tsx"] {
         let path = format!("example.{extension}");
         let path = Path::new(&path);
@@ -516,8 +516,25 @@ fn typescript_class_function_fields_are_selectable() {
         )
         .unwrap();
         assert_eq!(legacy.len(), 1);
+        for selector in ["PagedQuery.#private", "PagedQuery.asserted"] {
+            let found = symbols::select(path, source, &symbols::Selector::parse(selector).unwrap())
+                .unwrap();
+            assert_eq!(found.len(), 1);
+            assert_eq!(found[0].def.kind, "method");
+            let text =
+                std::str::from_utf8(&source[found[0].start_byte..found[0].end_byte]).unwrap();
+            assert!(text.contains("=>"), "{text}");
+        }
         assert!(matches!(
             symbols::select(path, source, &symbols::Selector::parse("count").unwrap()),
+            Err(symbols::SelectError::NotFound)
+        ));
+        assert!(matches!(
+            symbols::select(
+                path,
+                source,
+                &symbols::Selector::parse("notFunction").unwrap()
+            ),
             Err(symbols::SelectError::NotFound)
         ));
     }

@@ -305,7 +305,7 @@ mod imp {
     const TS_EXTRA: &str = r"
 (type_alias_declaration name: (type_identifier) @name) @definition.type
 (enum_declaration name: (identifier) @name) @definition.type
-(public_field_definition name: (property_identifier) @name value: [(arrow_function) (function_expression)]) @definition.method
+(public_field_definition name: [(property_identifier) (private_property_identifier)] @name value: (_)) @definition.method
 ";
 
     const LUAU_TAGS: &str = r"
@@ -474,6 +474,14 @@ mod imp {
             {
                 continue;
             }
+            if matches!(lang, Lang::TypeScript | Lang::Tsx)
+                && node.kind() == "public_field_definition"
+                && !node
+                    .child_by_field_name("value")
+                    .is_some_and(ts_function_value)
+            {
+                continue;
+            }
             let Ok(text) = name.utf8_text(source) else {
                 continue;
             };
@@ -527,6 +535,24 @@ mod imp {
         let mut all: Vec<Located> = found.into_values().map(|(_, l)| l).collect();
         all.sort_by_key(|l| (l.def.start, l.def.line));
         Some(all)
+    }
+
+    fn ts_function_value(mut node: Node<'_>) -> bool {
+        loop {
+            match node.kind() {
+                "arrow_function" | "function_expression" => return true,
+                "parenthesized_expression"
+                | "as_expression"
+                | "satisfies_expression"
+                | "non_null_expression" => {
+                    let Some(inner) = node.named_child(0) else {
+                        return false;
+                    };
+                    node = inner;
+                }
+                _ => return false,
+            }
+        }
     }
 
     fn luau_single_assignment(node: Node<'_>) -> bool {
