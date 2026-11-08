@@ -11,6 +11,7 @@ use grep_searcher::{BinaryDetection, SearcherBuilder};
 use ignore::WalkState;
 use ignore::overrides::OverrideBuilder;
 use serde::Serialize;
+use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -241,6 +242,20 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
     let found: Mutex<Vec<Collected>> = Mutex::new(Vec::new());
     let unreadable = Mutex::new(WalkFailures::default());
     let searched = AtomicUsize::new(0);
+    // Multiple roots can walk the same path. Deduplicate before opening it so
+    // overlapping arguments do not duplicate matches, counts, or work.
+    let visited = (paths.len() > 1).then(|| Mutex::new(HashSet::<PathBuf>::new()));
+    let cwd = visited.as_ref().and_then(|_| std::env::current_dir().ok());
+    let relative_roots: Vec<PathBuf> = cwd
+        .as_ref()
+        .into_iter()
+        .flat_map(|cwd| {
+            paths
+                .iter()
+                .filter(|path| path.is_relative())
+                .map(|path| cwd.join(path))
+        })
+        .collect();
     walk.build_parallel().run(|| {
         let matcher = matcher.clone();
         let mut searcher = SearcherBuilder::new()
@@ -250,6 +265,9 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
         let found = &found;
         let unreadable = &unreadable;
         let searched = &searched;
+        let visited = &visited;
+        let cwd = &cwd;
+        let relative_roots = &relative_roots;
         let note = Note {
             keep,
             memory: memory_ref,
@@ -270,6 +288,30 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
                 return WalkState::Continue;
             }
             let path = entry.path();
+            let mut relative = None;
+            if let Some(visited) = visited {
+                let key = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    cwd.as_ref()
+                        .map_or_else(|| path.to_path_buf(), |cwd| cwd.join(path))
+                };
+                // An absolute and a relative root may race to yield the same
+                // file. Prefer the relative spelling consistently when one
+                // of the supplied relative roots covers it.
+                if let Some(cwd) = cwd
+                    && relative_roots.iter().any(|root| key.starts_with(root))
+                    && let Ok(path) = key.strip_prefix(cwd)
+                {
+                    relative = Some(path.to_path_buf());
+                }
+                if let Ok(mut visited) = visited.lock()
+                    && !visited.insert(key)
+                {
+                    return WalkState::Continue;
+                }
+            }
+            let path = relative.as_deref().unwrap_or(path);
             let stamp = entry
                 .metadata()
                 .map_or(Stamp { len: 0, mtime: 0 }, |m| Stamp::of(&m));
