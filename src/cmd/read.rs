@@ -215,6 +215,7 @@ fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
+/// Read a file by its requested outline, symbols or ranges, and report missing selections.
 fn read_file(args: &ReadArgs, out: &Output) -> Exit {
     let Some(path) = args.path.as_deref() else {
         return out.error(
@@ -375,11 +376,11 @@ fn read_file(args: &ReadArgs, out: &Output) -> Exit {
         let what = format!("{path} has no definition matching {}", names.join(", "));
         // Nothing else to show: the error, with what the file does define.
         if read.sections.is_empty() {
-            let defs: Vec<String> = outline().unwrap_or_default().iter().map(describe).collect();
+            let defs = outline().unwrap_or_default();
             return out.error_with_hint(
                 Exit::NotFound,
                 &what,
-                Some(&format!("it defines: {}", defs.join(", "))),
+                Some(&definition_hint(&defs, &missing)),
             );
         }
         read.notes.push(what);
@@ -470,6 +471,48 @@ fn describe(l: &Located) -> String {
         l.def.start,
         l.def.end
     )
+}
+
+/// Keep a missing-symbol hint small while putting plausible names first.
+fn definition_hint(defs: &[Located], missing: &[&str]) -> String {
+    const SHOWN: usize = 10;
+    let mut ranked: Vec<&Located> = defs.iter().collect();
+    ranked.sort_by_key(|located| {
+        let name = located.def.name.trim_start_matches('_').to_lowercase();
+        missing
+            .iter()
+            .map(|query| {
+                let query = query.split_whitespace().last().unwrap_or("");
+                let query = query.rsplit([':', '.']).next().unwrap_or(query);
+                let query = query.trim_start_matches('_').to_lowercase();
+                if !name.is_empty() && name == query {
+                    0
+                } else if name.len() >= 3
+                    && query.len() >= 3
+                    && (name.contains(&query) || query.contains(&name))
+                {
+                    1
+                } else {
+                    2
+                }
+            })
+            .min()
+            .unwrap_or(2)
+    });
+    let shown = ranked
+        .iter()
+        .take(SHOWN)
+        .map(|item| describe(item))
+        .collect::<Vec<_>>();
+    let mut hint = format!("it defines: {}", shown.join(", "));
+    if defs.len() > SHOWN {
+        let _ = write!(
+            hint,
+            "; {} more definitions (use --outline --max-lines 0 to list all)",
+            defs.len() - SHOWN
+        );
+    }
+    hint
 }
 
 fn entry(l: &Located) -> OutlineEntry {

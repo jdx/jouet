@@ -133,6 +133,27 @@ LUAU
 	assert_output "1	hello"
 }
 
+@test "missing symbol hints prioritize close names and mark omitted definitions" {
+	for i in $(seq 1 15); do printf 'def unrelated_%s():\n    pass\n\n' "$i"; done >src/many.py
+	printf 'def _make_default_short_help():\n    pass\n' >>src/many.py
+	run --separate-stderr jouet read src/many.py --symbol make_default_short_help
+	assert_failure 3
+	assert_stderr --partial 'it defines: function _make_default_short_help'
+	assert_stderr --partial '6 more definitions (use --outline --max-lines 0 to list all)'
+	refute_stderr --partial 'unrelated_15'
+	run --separate-stderr jouet read src/many.py --symbol make_default_short_help --json
+	assert_failure 3
+	assert_output --partial 'function _make_default_short_help'
+	assert_output --partial '6 more definitions'
+	assert_stderr ''
+	run --separate-stderr jouet read src/many.py --symbol 'fn Missing::make_default_short_help'
+	assert_failure 3
+	assert_stderr --partial 'it defines: function _make_default_short_help'
+	run --separate-stderr jouet read src/many.py --outline --max-lines 0
+	assert_success
+	assert_output --partial 'unrelated_15'
+}
+
 set_read_session() {
 	export JOUET_SESSION_ID=s1
 }
