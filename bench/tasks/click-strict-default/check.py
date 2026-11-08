@@ -5,14 +5,22 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _check import UNVERIFIED, committed_files, dirty, expect, finish, head_sha, new_commit  # noqa: E402
+from _check import (
+    UNVERIFIED,
+    committed_files,
+    dirty,
+    expect,
+    finish,
+    head_sha,
+    new_commit,
+)
 
 
 def check_ruff(path: str, mode: str, added: bool) -> None:
     """Only count a new failure when the same file passes at the task base."""
-    args = ["ruff", "check"] if mode == "lint" else ["ruff", "format", "--check"]
+    args = ["ruff", "check", "--no-fix", "--no-fix-only"] if mode == "lint" else ["ruff", "format", "--check"]
     try:
-        current = subprocess.run([*args, "--", path], capture_output=True, text=True, timeout=60)
+        current = subprocess.run([*args, "--", path], capture_output=True, text=True, timeout=60, check=False)
         if current.returncode == 0:
             return
         if current.returncode != 1:
@@ -21,13 +29,13 @@ def check_ruff(path: str, mode: str, added: bool) -> None:
         if added:
             expect(False, f"Ruff {mode} fails on new file {path}:\n{current.stdout}{current.stderr}")
             return
-        original = subprocess.run(["git", "show", f"{head_sha()}:{path}"], capture_output=True, timeout=30)
+        original = subprocess.run(["git", "show", f"{head_sha()}:{path}"], capture_output=True, timeout=30, check=False)
         if original.returncode:
             UNVERIFIED.append(f"Ruff {mode} cannot compare {path} with its base")
             return
         baseline = subprocess.run(
             [*args, "--stdin-filename", path, "-"], input=original.stdout,
-            capture_output=True, timeout=60,
+            capture_output=True, timeout=60, check=False,
         )
         if baseline.returncode == 0:
             expect(False, f"Ruff {mode} fails on {path}:\n{current.stdout}{current.stderr}")
@@ -56,7 +64,7 @@ for default, expected in ((StrictDefault(), "strict-default"), ("", '""'), ("val
     assert record is not None and f"[default: {expected}]" in record[1], record
 '''
 run = subprocess.run(["python3", "-c", program], capture_output=True, text=True,
-                     env={**os.environ, "PYTHONPATH": str(Path.cwd() / "src")}, timeout=60)
+                     env={**os.environ, "PYTHONPATH": str(Path.cwd() / "src")}, timeout=60, check=False)
 expect(run.returncode == 0, f"option default cases failed:\n{run.stdout}\n{run.stderr}")
 expect(new_commit(), "nothing was committed")
 expect(not dirty(), f"tracked changes were left uncommitted: {dirty()}")
@@ -69,7 +77,7 @@ expect(bool(tests), "no committed Python test file was changed")
 if tests:
     try:
         tested = subprocess.run(["python3", "-m", "pytest", "-q", "--", *tests],
-                                capture_output=True, text=True, timeout=90)
+                                capture_output=True, text=True, timeout=90, check=False)
         output = tested.stdout + tested.stderr
         if tested.returncode == 1 and re.search(r"\b[1-9][0-9]* failed\b", output):
             expect(False, f"committed tests failed:\n{output}")

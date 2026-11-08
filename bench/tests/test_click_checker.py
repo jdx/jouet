@@ -12,6 +12,63 @@ CHECKER = Path(__file__).resolve().parents[1] / "tasks/click-short-help/check.py
 
 
 class ClickCheckerTest(unittest.TestCase):
+    def test_ruff_lint_does_not_fix_committed_files(self):
+        ruff = shutil.which("ruff")
+        self.assertIsNotNone(ruff, "the mise-locked Ruff test tool is required")
+        checkers = [CHECKER.parent.parent / task / "check.py" for task in (
+            "click-short-help", "click-prompt-suffix", "click-strict-default",
+        )]
+        for setting in ("fix", "fix-only"):
+            with self.subTest(setting=setting), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                work = root / "work"
+                work.mkdir()
+                (work / "tests").mkdir()
+                (work / "pyproject.toml").write_text(f"[tool.ruff]\n{setting} = true\n")
+                source = work / "source.py"
+                source.write_text('print("ok")\n')
+                test = work / "tests/test_change.py"
+                test.write_text("def test_change():\n    assert 1 == 1\n")
+                env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+                       "GIT_AUTHOR_NAME": "Bench", "GIT_AUTHOR_EMAIL": "bench@example.invalid",
+                       "GIT_COMMITTER_NAME": "Bench", "GIT_COMMITTER_EMAIL": "bench@example.invalid"}
+
+                def git(*args, cwd=work, git_env=env):
+                    return subprocess.run(["git", *args], cwd=cwd, env=git_env, check=True,
+                                          capture_output=True, text=True).stdout.strip()
+
+                git("init", "-q")
+                git("add", "pyproject.toml", "source.py", "tests/test_change.py")
+                git("commit", "-qm", "base")
+                base = git("rev-parse", "HEAD")
+                committed = 'import os\nprint("ok")\n'
+                source.write_text(committed)
+                test.write_text("def test_change():\n    assert 2 == 2\n")
+                git("add", "source.py", "tests/test_change.py")
+                git("commit", "-qm", "candidate")
+                bin_dir = root / "bin"
+                bin_dir.mkdir()
+                (bin_dir / "git").symlink_to(shutil.which("git"))
+                (bin_dir / "ruff").symlink_to(ruff)
+                python = bin_dir / "python3"
+                python.write_text(
+                    '#!/bin/sh\n'
+                    'if [ "$1" != -m ]; then exit 0; fi\n'
+                    'for arg in "$@"; do case "$arg" in --junitxml=*) report=${arg#--junitxml=};; esac; done\n'
+                    'if [ -n "$report" ]; then printf \'<testsuite tests="1" failures="0" errors="0" skipped="0"><testcase/></testsuite>\' > "$report"; fi\n'
+                    'printf "1 passed\\n"\n'
+                )
+                python.chmod(0o755)
+                env.update({"PATH": str(bin_dir), "BENCH_HEAD_SHA": base})
+                for checker in checkers:
+                    with self.subTest(checker=checker.parent.name):
+                        source.write_text(committed)
+                        result = subprocess.run([sys.executable, "-I", str(checker)], cwd=work,
+                                                env=env, capture_output=True, text=True, check=False)
+                        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                        self.assertIn("Ruff lint fails on source.py", result.stdout)
+                        self.assertEqual(source.read_text(), committed)
+
     def test_timeout_keeps_captured_output_and_removes_checkout(self):
         spec = importlib.util.spec_from_file_location("click_checker", CHECKER)
         checker = importlib.util.module_from_spec(spec)

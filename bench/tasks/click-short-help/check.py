@@ -19,7 +19,7 @@ from _check import (
 
 def check_ruff(path: str, mode: str, added: bool) -> None:
     """Only count a new failure when the same file passes at the task base."""
-    args = ["ruff", "check"] if mode == "lint" else ["ruff", "format", "--check"]
+    args = ["ruff", "check", "--no-fix", "--no-fix-only"] if mode == "lint" else ["ruff", "format", "--check"]
     try:
         current = subprocess.run([*args, "--", path], capture_output=True, text=True, timeout=60, check=False)
         if current.returncode == 0:
