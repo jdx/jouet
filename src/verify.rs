@@ -289,26 +289,7 @@ impl Run {
                 if ran == wanted {
                     return true;
                 }
-                // Join only paths without `..`: resolving a parent across a
-                // symlink lexically could identify different directories.
-                fn scope(s: &str) -> Option<(String, &str)> {
-                    let (directory, selection) = s.split_once(' ')?;
-                    let (cwd, cd) = directory.strip_prefix("@jouet:cwd=")?.split_once(":cd=")?;
-                    if !cwd.starts_with('/')
-                        || cwd.split('/').chain(cd.split('/')).any(|p| p == "..")
-                    {
-                        return None;
-                    }
-                    let path = if cd.starts_with('/') {
-                        cd.to_string()
-                    } else if cd == "." {
-                        cwd.to_string()
-                    } else {
-                        format!("{}/{cd}", cwd.trim_end_matches('/'))
-                    };
-                    Some((path.trim_end_matches('/').to_string(), selection))
-                }
-                return scope(ran).is_some_and(|a| scope(wanted).is_some_and(|b| a == b));
+                return resolved(ran).is_some_and(|a| resolved(wanted).is_some_and(|b| a == b));
             }
             (true, false) | (false, true) => return false,
             (false, false) => {}
@@ -323,9 +304,18 @@ impl Run {
                 if ran.contains("@jouet:cwd=unknown:") || wanted.contains("@jouet:cwd=unknown:") {
                     return false;
                 }
+                if ran == wanted {
+                    return true;
+                }
+                // `cd ../.. && pnpm …` and `pnpm …` started in that
+                // directory are the same run.
+                let (ran, wanted) = (
+                    resolved(ran).unwrap_or_else(|| ran.to_string()),
+                    resolved(wanted).unwrap_or_else(|| wanted.to_string()),
+                );
                 return ran == wanted
                     || (same_runner(&self.command, &failed.command)
-                        && pnpm_vitest_covers(ran, wanted));
+                        && pnpm_vitest_covers(&ran, &wanted));
             }
             (true, false) | (false, true) => return false,
             (false, false) => {}
@@ -475,6 +465,31 @@ fn playwright_covers(ran: &[String], wanted: &[String]) -> bool {
                 && wanted.names.iter().all(|name| ran.names.contains(name))))
 }
 
+/// A selection whose leading `@jouet:cwd=CWD:cd=CD` names the directory it
+/// ran in, as `@jouet:dir=PATH`. The path is the real one where it still
+/// exists; one with `..` is resolved only that way, since joining a parent
+/// across a symlink by its text could name a different directory.
+fn resolved(selection: &str) -> Option<String> {
+    let (directory, rest) = selection.split_once(' ').unwrap_or((selection, ""));
+    let (cwd, cd) = directory.strip_prefix("@jouet:cwd=")?.split_once(":cd=")?;
+    if !cwd.starts_with('/') {
+        return None;
+    }
+    let joined = if cd.starts_with('/') {
+        cd.to_string()
+    } else if cd == "." {
+        cwd.to_string()
+    } else {
+        format!("{}/{cd}", cwd.trim_end_matches('/'))
+    };
+    let path = match std::fs::canonicalize(&joined) {
+        Ok(path) => path.to_str()?.to_string(),
+        Err(_) if joined.split('/').any(|part| part == "..") => return None,
+        Err(_) => joined.trim_end_matches('/').to_string(),
+    };
+    Some(format!("@jouet:dir={path} {rest}").trim_end().to_string())
+}
+
 /// A package run covers a narrower one of the same configuration and root:
 /// its own excluded suite, a name filter, or a file under a directory it
 /// ran (`vitest run src/a` covers `vitest run src/a/b.test.ts`). Vitest
@@ -487,7 +502,7 @@ fn pnpm_vitest_covers(ran: &str, wanted: &str) -> bool {
     let wanted: Vec<_> = wanted.split_whitespace().collect();
     let prefix_len = if ran
         .first()
-        .is_some_and(|word| word.starts_with("@jouet:cwd="))
+        .is_some_and(|word| word.starts_with("@jouet:cwd=") || word.starts_with("@jouet:dir="))
     {
         2
     } else {
@@ -2566,6 +2581,68 @@ mod tests {
         assert!(!pnpm_vitest_covers(
             "@jouet:cwd=/repo/a:cd=. @jouet:pnpm:dir=web:vitest",
             "@jouet:cwd=/repo/b:cd=. @jouet:pnpm:dir=web:vitest --exclude tests/b"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pnpm_run_after_a_cd_matches_one_started_in_that_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let root = root.to_str().unwrap();
+        std::fs::create_dir_all(format!("{root}/admin/src/automations")).unwrap();
+        std::fs::create_dir_all(format!("{root}/elsewhere/admin/src")).unwrap();
+        std::os::unix::fs::symlink(
+            format!("{root}/elsewhere/admin/src"),
+            format!("{root}/linked"),
+        )
+        .unwrap();
+        let runner = "@jouet:pnpm:dir=.:vitest -c acceptance.ts";
+        let cleared = |failed_dir: &str, ran_dir: &str, ran: &str| {
+            let mut state = Checks::default();
+            state.record(
+                [test(
+                    "pnpm exec vitest run -c acceptance.ts src/automations/a.test.tsx",
+                    1,
+                    &format!("{failed_dir} {runner} src/automations/a.test.tsx"),
+                )],
+                Some("t1"),
+            );
+            state.record(
+                [test(
+                    &format!("pnpm exec vitest run -c acceptance.ts {ran}"),
+                    0,
+                    &format!("{ran_dir} {runner} {ran}"),
+                )],
+                Some("t1"),
+            );
+            reason(&state, "t1").is_none()
+        };
+        let after_cd = format!("@jouet:cwd={root}/admin/src/automations:cd=../..");
+        let started = format!("@jouet:cwd={root}/admin:cd=.");
+        assert!(cleared(&after_cd, &started, "src/automations/a.test.tsx"));
+        assert!(cleared(&after_cd, &started, "src/automations"));
+        assert!(cleared(
+            &started,
+            &format!("@jouet:cwd={root}:cd=admin"),
+            "src"
+        ));
+        // `linked/..` is the symlink target's parent, not this root.
+        assert!(!cleared(
+            &format!("@jouet:cwd={root}/linked:cd=.."),
+            &format!("@jouet:cwd={root}:cd=."),
+            "src/automations/a.test.tsx"
+        ));
+        assert!(cleared(
+            &format!("@jouet:cwd={root}/linked:cd=.."),
+            &format!("@jouet:cwd={root}/elsewhere/admin:cd=."),
+            "src/automations/a.test.tsx"
+        ));
+        // A `..` in a directory that is gone cannot be resolved.
+        assert!(!cleared(
+            &format!("@jouet:cwd={root}/gone/x:cd=.."),
+            &format!("@jouet:cwd={root}/gone:cd=."),
+            "src/automations/a.test.tsx"
         ));
     }
 
