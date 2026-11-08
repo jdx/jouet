@@ -10,6 +10,7 @@ CHECKER = Path(__file__).resolve().parents[1] / "tasks/hk-check-file-args/check.
 
 class HkCheckerTest(unittest.TestCase):
     def test_requires_a_clean_committed_checkout_before_running_checks(self):
+        """Check checkout requirements, test outcomes, and complete failure output."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             work = root / "work"
