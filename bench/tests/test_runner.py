@@ -940,6 +940,8 @@ class HarnessOutputTest(unittest.TestCase):
             self.assertFalse(HARNESSES["claude"].usage(incomplete_cache, Path("/nonexistent")).extra["usage_complete"])
         incomplete = lines + [json.dumps({"type": "assistant", "message": {"id": "next", "usage": {"input_tokens": 4}}})]
         self.assertFalse(HARNESSES["claude"].usage(incomplete, Path("/nonexistent")).extra["usage_complete"])
+        resumed = lines + [json.dumps({"type": "user", "message": {"content": "background job completed"}})]
+        self.assertFalse(HARNESSES["claude"].usage(resumed, Path("/nonexistent")).extra["usage_complete"])
         missing = lines + [json.dumps({"type": "result", "usage": {"input_tokens": 4}})]
         self.assertFalse(HARNESSES["claude"].usage(missing, Path("/nonexistent")).extra["usage_complete"])
 

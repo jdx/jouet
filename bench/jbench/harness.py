@@ -181,15 +181,15 @@ class Claude(Harness):
         events = _json_lines(stream_lines)
         results = [e for e in events if e.get("type") == "result"]
         result = results[-1] if results else None
-        # A later assistant message can belong to a resumed turn whose final
-        # result was never captured. Its usage is only a partial observation.
+        # A later user or assistant message can belong to a resumed turn whose
+        # final result was never captured. Its usage is only a partial observation.
         last_result = max((i for i, event in enumerate(events) if event.get("type") == "result"), default=-1)
         complete = (bool(results) and all(
             isinstance(r.get("usage"), dict)
             and all(type(r["usage"].get(key)) is int and r["usage"][key] >= 0
                     for key in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens"))
             for r in results
-        ) and not any(event.get("type") == "assistant" for event in events[last_result + 1:]))
+        ) and not any(event.get("type") in ("user", "assistant") for event in events[last_result + 1:]))
         init = next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), {})
         turns = sum(int(r.get("num_turns") or 0) for r in results) if results else None
         if result and result.get("usage"):
