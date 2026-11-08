@@ -378,8 +378,12 @@ fn group(out: &mut String, g: &Group, details: usize) {
         let _ = write!(out, ": {}", shown.join(", "));
     }
     let more = g.more + (g.details.len() - shown.len()) as u64;
-    if more > 0 && !shown.is_empty() {
-        let _ = write!(out, " (+{more})");
+    if more > 0 {
+        if shown.is_empty() {
+            let _ = write!(out, " ({more} details omitted)");
+        } else {
+            let _ = write!(out, " (+{more})");
+        }
     }
     out.push('\n');
 }
@@ -460,6 +464,21 @@ mod tests {
             },
         );
         assert!(text.contains("1 more kinds of call (2 calls)"), "{text}");
+    }
+
+    #[test]
+    fn a_group_counts_details_omitted_by_the_budget() {
+        let calls = Group {
+            what: "test".into(),
+            count: 2,
+            failed: 0,
+            details: vec!["first".into(), "second".into()],
+            more: 3,
+        };
+        let mut text = String::new();
+        group(&mut text, &calls, 0);
+        assert!(text.contains("(5 details omitted)"), "{text}");
+        assert!(!text.contains("first"), "{text}");
     }
 
     #[test]
