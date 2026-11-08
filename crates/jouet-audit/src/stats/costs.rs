@@ -200,9 +200,7 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
         if let Some(edit) = edit_cost(measured, baseline, harness, &priced) {
             out.push(edit);
         }
-        if let Some(test) = test_output_cost(measured, baseline, harness) {
-            out.push(test);
-        }
+        out.extend(test_output_cost(measured, baseline, harness));
         match after.iter().find(|a| a.harness == harness) {
             Some(a) if a.primer_tokens == 0 => {}
             Some(a) => out.push(Cost {
@@ -240,34 +238,57 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
 }
 
 /// Extra test output compared with the pre-setup average, counted once.
-fn test_output_cost(
-    measured: &Measured,
-    baseline: Option<&Baseline>,
-    harness: &str,
-) -> Option<Cost> {
-    let before = baseline?
-        .kinds
-        .iter()
-        .find(|kind| kind.kind == Kind::Test)?;
-    if before.runs < MIN_BASELINE_RUNS || before.calls == 0 || before.output_bytes == 0 {
-        return None;
-    }
-    let (calls, bytes) = measured
+fn test_output_cost(measured: &Measured, baseline: Option<&Baseline>, harness: &str) -> Vec<Cost> {
+    let (runs, calls, bytes) = measured
         .commands
         .iter()
         .filter(|command| {
             command.harness == harness && Kind::of(&command.command) == Some(Kind::Test)
         })
-        .fold((0, 0), |(calls, bytes), command| {
-            (calls + command.output_calls, bytes + command.output_bytes)
+        .fold((0, 0, 0), |(runs, calls, bytes), command| {
+            (
+                runs + command.runs,
+                calls + command.output_calls,
+                bytes + command.output_bytes,
+            )
         });
+    if runs == 0 {
+        return Vec::new();
+    }
+    let refuse = |count, reason: String| Cost {
+        harness: harness.to_string(),
+        kind: CostKind::TestOutput,
+        count,
+        input_tokens: None,
+        basis: String::new(),
+        refused: Some(reason),
+        outside_net: false,
+    };
+    let Some(before) = baseline.and_then(|b| b.kinds.iter().find(|kind| kind.kind == Kind::Test))
+    else {
+        return vec![refuse(runs, "no test output baseline before setup".into())];
+    };
+    if before.runs < MIN_BASELINE_RUNS || before.calls == 0 || before.output_bytes == 0 {
+        return vec![refuse(
+            runs,
+            "too little pre-setup test output evidence; rescan or collect a baseline".into(),
+        )];
+    }
+    let mut result = Vec::new();
+    if calls < runs {
+        result.push(refuse(
+            runs - calls,
+            "test output size was not recorded for these runs".into(),
+        ));
+    }
     if calls == 0 {
-        return None;
+        return result;
     }
     let old = ratio(before.output_bytes, before.calls);
     let new = ratio(bytes, calls);
     let extra = (new - old).max(0.0);
-    (extra > 0.0).then(|| Cost {
+    if extra > 0.0 {
+        result.push(Cost {
         harness: harness.to_string(),
         kind: CostKind::TestOutput,
         count: calls,
@@ -275,7 +296,9 @@ fn test_output_cost(
         basis: format!("{} calls before setup gave the agent {} bytes of output on average; jouet test gave {} over the {} calls that recorded it, at {BYTES_PER_TOKEN} bytes a token, counted once", count_text(before.calls), count_text(old.round() as u64), count_text(new.round() as u64), count_text(calls)),
         refused: None,
         outside_net: false,
-    })
+        });
+    }
+    result
 }
 
 /// `jouet edit` failures beyond the rate edits failed at before setup, or
