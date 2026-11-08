@@ -28,6 +28,7 @@ FIX_TESTS = "^check files (resolves|follows|keeps|with a symlinked)"
 
 
 def run(*cmd: str, env: dict | None = None) -> tuple[bool, str]:
+    """Run a checker command and retain all of its output for diagnosis."""
     full = {**os.environ, "MISE_TRUSTED_CONFIG_PATHS": os.getcwd(), **(env or {})}
     # hk's test setup writes the global git config of its own HOME, which
     # the check's GIT_CONFIG_GLOBAL=/dev/null would refuse.
