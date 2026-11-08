@@ -494,6 +494,36 @@ fn an_outline_names_each_definition_with_its_scope() {
 }
 
 #[test]
+fn typescript_class_function_fields_are_selectable() {
+    let source = b"class PagedQuery {\n  count = 0;\n  optimisticUpdate = (value: number) => {\n    return value + 1;\n  };\n  legacy = function(value: number) { return value; };\n  regular() {}\n}\n";
+    for extension in ["ts", "tsx"] {
+        let path = format!("example.{extension}");
+        let path = Path::new(&path);
+        let found = symbols::select(
+            path,
+            source,
+            &symbols::Selector::parse("PagedQuery.optimisticUpdate").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].def.kind, "method");
+        let text = std::str::from_utf8(&source[found[0].start_byte..found[0].end_byte]).unwrap();
+        assert!(text.contains("return value + 1"), "{text}");
+        let legacy = symbols::select(
+            path,
+            source,
+            &symbols::Selector::parse("method PagedQuery.legacy").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(legacy.len(), 1);
+        assert!(matches!(
+            symbols::select(path, source, &symbols::Selector::parse("count").unwrap()),
+            Err(symbols::SelectError::NotFound)
+        ));
+    }
+}
+
+#[test]
 fn a_selector_picks_definitions_by_name_kind_and_scope() {
     let path = Path::new(FIXTURE).join("web/api.ts");
     let source = std::fs::read(&path).unwrap();

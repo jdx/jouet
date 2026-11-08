@@ -42,6 +42,8 @@ Inside an agent session, lines this session was already shown, from a file uncha
 
 Definitions come from tree-sitter, for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C, C++ and Luau. An outline or symbol of another kind of file exits 2; `--range` works on any text file. A missing file exits 3, as does a call whose every symbol is missing; that error lists what the file defines.
 
+In TypeScript and TSX, class fields initialized to arrow or function expressions are included as methods, so a selector such as `PagedQuery.optimisticUpdate` can read one by name.
+
 When a graph caller lookup fails, the definition is still printed and a note says callers are unavailable; JSON includes the note in `notes`.
 
 With `--json`, `jouet read src/lib.rs --symbol fetch --json` prints:

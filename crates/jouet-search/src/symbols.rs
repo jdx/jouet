@@ -300,10 +300,12 @@ mod imp {
 (program (export_statement declaration: (variable_declaration (variable_declarator name: (identifier) @name) @definition.constant)))
 ";
 
-    /// TypeScript's type aliases and enums, which its upstream tags miss.
+    /// TypeScript definitions which its upstream tags miss, including class
+    /// fields initialized to functions (a common way to bind methods).
     const TS_EXTRA: &str = r"
 (type_alias_declaration name: (type_identifier) @name) @definition.type
 (enum_declaration name: (identifier) @name) @definition.type
+(public_field_definition name: (property_identifier) @name value: [(arrow_function) (function_expression)]) @definition.method
 ";
 
     const LUAU_TAGS: &str = r"
