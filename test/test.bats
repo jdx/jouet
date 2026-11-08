@@ -791,6 +791,31 @@ SH
 	assert_success
 }
 
+@test "--cmd follows Go flag syntax for gofmt previews" {
+	mkdir bin
+	printf 'package p\n' >example.go
+	printf '#!/bin/sh\nprintf "%%s\\n" "${GOFMT_OUTPUT:-example.go}"\n' >bin/gofmt
+	chmod +x bin/gofmt
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt --l example.go
+	assert_failure 1
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -l=1 example.go
+	assert_failure 1
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -l=false --l=True example.go
+	assert_failure 1
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt --w=false -l=1 example.go
+	assert_failure 1
+	PATH="$PWD/bin:$PATH" GOFMT_OUTPUT='diff example.go.orig example.go' run --separate-stderr jouet test --cmd -- gofmt --d=1 example.go
+	assert_failure 1
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -l -l=false example.go
+	assert_success
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt --l -w=1 example.go
+	assert_success
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -r -l example.go
+	assert_success
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt example.go -l
+	assert_success
+}
+
 @test "--cmd refuses a recognised test run that selected no tests" {
 	mkdir bin
 	printf '#!/bin/sh\nprintf "running 0 tests\\ntest result: ok. 0 passed; 0 failed; 0 ignored; 3 filtered out\\n"\n' >bin/cargo
