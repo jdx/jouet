@@ -6,11 +6,15 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _check import UNVERIFIED, expect, finish  # noqa: E402
 
 TEST_NAME = 'running balances refresh after repeated edits'
+# The hidden browser check has 240s and note validation 30s of the task's
+# 900s checker limit. Share 600s between authored runners to leave a margin.
+AGENT_TEST_BUDGET_S = 600
 
 
 def print_timeout_output(error):
@@ -76,7 +80,7 @@ def agent_browser_passed(report, exit_code, filenames):
         return False
 
 
-def check_agent_browser_tests(changed):
+def check_agent_browser_tests(changed, deadline):
     """Run changed browser tests together under one shared time budget."""
     root = Path('packages/desktop-client/e2e')
     files = [Path(path) for path in changed if path.startswith(f'{root}/')
@@ -91,6 +95,10 @@ def check_agent_browser_tests(changed):
             UNVERIFIED.append(f'changed Playwright test file is missing: {path}')
             return True
     names = [path.relative_to(root).as_posix() for path in files]
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        UNVERIFIED.append('changed test budget expired before Playwright could run')
+        return True
     with tempfile.TemporaryDirectory(prefix='actual-agent-test-') as directory:
         report = Path(directory) / 'playwright.json'
         try:
@@ -99,7 +107,7 @@ def check_agent_browser_tests(changed):
                 '--config', 'packages/desktop-client/playwright.config.ts',
                 '--retries=0', '--reporter=json', '--', *[re.escape(name) + '$' for name in names],
             ], env={**os.environ, 'PLAYWRIGHT_JSON_OUTPUT_FILE': str(report)},
-                capture_output=True, text=True, timeout=600)
+                capture_output=True, text=True, timeout=remaining)
             verdict = agent_browser_passed(json.loads(report.read_text()), result.returncode, names)
             if not verdict:
                 print(result.stdout, end="")
@@ -123,7 +131,7 @@ def changed_unit_tests(changed):
             and re.search(r'\.(?:test|spec)\.[cm]?[jt]sx?$', path)]
 
 
-def check_agent_unit_tests(changed):
+def check_agent_unit_tests(changed, deadline):
     """Run changed Vitest files when the agent wrote its regression test as a unit test."""
     root = Path('packages/desktop-client')
     files = changed_unit_tests(changed)
@@ -137,13 +145,17 @@ def check_agent_unit_tests(changed):
         UNVERIFIED.append('changed Vitest test files are missing: ' + ', '.join(missing))
         return True
     names = [path.relative_to(root).as_posix() for path in files]
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        UNVERIFIED.append('changed test budget expired before Vitest could run')
+        return True
     with tempfile.TemporaryDirectory(prefix='actual-agent-unit-') as directory:
         report = Path(directory) / 'vitest.json'
         try:
             result = subprocess.run([
                 'node', str(Path('node_modules/vitest/vitest.mjs').resolve()), '--run',
                 '--reporter=json', f'--outputFile={report}', *names,
-            ], cwd=root, capture_output=True, text=True, timeout=600)
+            ], cwd=root, capture_output=True, text=True, timeout=remaining)
             data = json.loads(report.read_text())
             # Suite names are absolute in Vitest's report; a relative one is
             # relative to where it ran.
@@ -173,8 +185,9 @@ def check_agent_unit_tests(changed):
 
 
 def check_agent_tests(changed):
-    browser = check_agent_browser_tests(changed)
-    unit = check_agent_unit_tests(changed)
+    deadline = time.monotonic() + AGENT_TEST_BUDGET_S
+    browser = check_agent_browser_tests(changed, deadline)
+    unit = check_agent_unit_tests(changed, deadline)
     if not browser and not unit:
         UNVERIFIED.append('no runnable changed Playwright or Vitest test file')
 

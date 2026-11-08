@@ -77,7 +77,8 @@ class ActualCheckerTest(unittest.TestCase):
                 with mock.patch.object(subprocess, 'run', side_effect=run) as command:
                     checker['check_agent_tests']([f'packages/desktop-client/e2e/{name}' for name in names])
                 self.assertEqual(command.call_count, 1)
-                self.assertEqual(command.call_args.kwargs['timeout'], 600)
+                self.assertGreater(command.call_args.kwargs['timeout'], 0)
+                self.assertLessEqual(command.call_args.kwargs['timeout'], 600)
                 self.assertEqual(checker['UNVERIFIED'], [])
             finally:
                 os.chdir(old_cwd)
@@ -160,6 +161,25 @@ class ActualCheckerTest(unittest.TestCase):
                     checker["check_agent_tests"]([browser, unit])
                 self.assertEqual(command.call_count, 1)
                 self.assertEqual(checker["UNVERIFIED"], ["changed Playwright test file is missing: " + browser])
+                checker["UNVERIFIED"].clear()
+                (root / browser).write_text("test")
+                clock = mock.Mock()
+                clock.monotonic.side_effect = [100, 101, 650]
+                with contextlib.redirect_stdout(io.StringIO()), \
+                        mock.patch.dict(checker["check_agent_tests"].__globals__, {"time": clock}), \
+                        mock.patch.object(subprocess, "run", side_effect=run) as command:
+                    checker["check_agent_tests"]([browser, unit])
+                self.assertEqual([call.kwargs["timeout"] for call in command.call_args_list], [599, 50])
+                self.assertEqual(checker["UNVERIFIED"], [])
+                clock = mock.Mock()
+                clock.monotonic.side_effect = [100, 101, 700]
+                with contextlib.redirect_stdout(io.StringIO()), \
+                        mock.patch.dict(checker["check_agent_tests"].__globals__, {"time": clock}), \
+                        mock.patch.object(subprocess, "run", side_effect=run) as command:
+                    checker["check_agent_tests"]([browser, unit])
+                self.assertEqual(command.call_count, 1)
+                self.assertEqual(command.call_args.kwargs["timeout"], 599)
+                self.assertEqual(checker["UNVERIFIED"], ["changed test budget expired before Vitest could run"])
             finally:
                 checker["UNVERIFIED"].clear()
                 os.chdir(old_cwd)
