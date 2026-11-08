@@ -26,6 +26,8 @@ Files are read in parallel and streamed, so a history of several gigabytes takes
 
 A request to the model re-reads the whole context, so a request avoided saves its whole input. `jouet audit` gives each request's input tokens to what the request did: split evenly between the tool calls it issued, by their category, or to "replies" when it called no tool. Claude Code and Codex both record tokens per request; when a source has no token counts, categories are ranked by tool time instead.
 
+When transcripts include a complete, consistent cache split, the harness totals also show cache-read and other input tokens for those requests, alongside the number of requests covered. Other input includes cache writes; it is not necessarily billed as uncached input. Requests with missing, partial or inconsistent cache data are excluded from the split, so its values may cover less than the input total. No split is shown when none is available. The JSON fields are `cache_read_input_tokens`, `other_input_tokens` and `cache_split_requests` under each harness's `totals`. These observations are not a cost estimate or a claim of savings.
+
 The categories are CI polling, process polling, PR threads, PR status, other GitHub, edits, build/test/lint, reads and searches, git, web, agents, replies and other. A shell command is categorized by what it runs, most specific first, so `sleep 30 && gh pr checks 12` is CI polling. jouet's own test, read, search, graph, edit and commit commands count with the corresponding work rather than as other.
 
 The process-polling and CI-polling categories include blocking waits and other checks. Their attributed tokens and time describe where the session spent them; they are not a count of waste or a claim that a longer wait was possible.

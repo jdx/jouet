@@ -32,6 +32,9 @@ struct Acc {
     requests: u64,
     requests_with_tokens: u64,
     input_tokens: u64,
+    cache_read_input_tokens: u128,
+    other_input_tokens: u128,
+    cache_split_requests: u64,
     output_tokens: u64,
     calls: u64,
     commands: u64,
@@ -184,6 +187,15 @@ impl Analyzer {
             if let Some(input) = request.input_tokens {
                 acc.requests_with_tokens += 1;
                 acc.input_tokens += input;
+            }
+            if request.input_tokens_complete
+                && let (Some(input), Some(cached)) =
+                    (request.input_tokens, request.cached_input_tokens)
+                && let Some(other) = input.checked_sub(cached)
+            {
+                acc.cache_read_input_tokens += u128::from(cached);
+                acc.other_input_tokens += u128::from(other);
+                acc.cache_split_requests += 1;
             }
             acc.output_tokens += request.output_tokens.unwrap_or(0);
             let calls = transcript
@@ -357,6 +369,9 @@ impl Analyzer {
             ours.requests += theirs.requests;
             ours.requests_with_tokens += theirs.requests_with_tokens;
             ours.input_tokens += theirs.input_tokens;
+            ours.cache_read_input_tokens += theirs.cache_read_input_tokens;
+            ours.other_input_tokens += theirs.other_input_tokens;
+            ours.cache_split_requests += theirs.cache_split_requests;
             ours.output_tokens += theirs.output_tokens;
             ours.calls += theirs.calls;
             ours.commands += theirs.commands;
@@ -460,6 +475,10 @@ fn merge_example(slot: &mut Option<String>, candidate: Option<String>) {
 }
 
 fn harness_report(name: &str, acc: &Acc, top_shapes: usize) -> HarnessReport {
+    let cache_split = u64::try_from(acc.cache_read_input_tokens)
+        .ok()
+        .zip(u64::try_from(acc.other_input_tokens).ok())
+        .filter(|_| acc.cache_split_requests > 0);
     let by_tokens = acc.input_tokens > 0;
     let total = if by_tokens {
         acc.input_tokens as f64
@@ -533,6 +552,9 @@ fn harness_report(name: &str, acc: &Acc, top_shapes: usize) -> HarnessReport {
             requests: acc.requests,
             requests_with_tokens: acc.requests_with_tokens,
             input_tokens: acc.input_tokens,
+            cache_read_input_tokens: cache_split.map(|(cached, _)| cached),
+            other_input_tokens: cache_split.map(|(_, other)| other),
+            cache_split_requests: cache_split.map(|_| acc.cache_split_requests),
             output_tokens: acc.output_tokens,
             calls: acc.calls,
             commands: acc.commands,
@@ -690,6 +712,15 @@ pub struct Totals {
     pub requests_with_tokens: u64,
     #[serde(skip_serializing_if = "is_zero")]
     pub input_tokens: u64,
+    /// Cache-read tokens in requests with a complete, valid split.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u64>,
+    /// Other input in those same requests, including cache writes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub other_input_tokens: Option<u64>,
+    /// How many requests contributed to the split.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_split_requests: Option<u64>,
     #[serde(skip_serializing_if = "is_zero")]
     pub output_tokens: u64,
     #[serde(skip_serializing_if = "is_zero")]
@@ -868,6 +899,48 @@ mod tests {
             });
         }
         t
+    }
+
+    #[test]
+    fn reports_only_valid_complete_cache_splits_across_merged_analyzers() {
+        let request = |input, cached, complete| Request {
+            input_tokens: input,
+            cached_input_tokens: cached,
+            input_tokens_complete: complete,
+            ..Default::default()
+        };
+        let first = Transcript {
+            session: "one".into(),
+            requests: vec![
+                request(Some(100), Some(70), true),
+                request(Some(100), None, true),
+                request(Some(50), Some(60), true),
+                request(Some(20), Some(5), false),
+            ],
+            ..Default::default()
+        };
+        let second = Transcript {
+            session: "two".into(),
+            requests: vec![request(Some(40), Some(0), true)],
+            ..Default::default()
+        };
+        let mut a = Analyzer::default();
+        let mut b = Analyzer::default();
+        a.add("codex", &first);
+        b.add("codex", &second);
+        a.merge(b);
+        let totals = serde_json::to_value(&a.report(0).harnesses[0].totals).unwrap();
+        assert_eq!(totals["requests"], 5);
+        assert_eq!(totals["cache_split_requests"], 2);
+        assert_eq!(totals["cache_read_input_tokens"], 70);
+        assert_eq!(totals["other_input_tokens"], 70);
+
+        let mut unknown = Analyzer::default();
+        unknown.add("codex", &single("three", Some(10), Vec::new()));
+        let totals = serde_json::to_value(&unknown.report(0).harnesses[0].totals).unwrap();
+        assert!(totals.get("cache_read_input_tokens").is_none());
+        assert!(totals.get("other_input_tokens").is_none());
+        assert!(totals.get("cache_split_requests").is_none());
     }
 
     #[test]

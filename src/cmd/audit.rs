@@ -294,6 +294,20 @@ fn harness_text(s: &mut String, h: &HarnessReport, top: usize) {
         duration(t.command_ms),
         bytes(t.output_bytes)
     );
+    if let (Some(cached), Some(other), Some(requests)) = (
+        t.cache_read_input_tokens,
+        t.other_input_tokens,
+        t.cache_split_requests,
+    ) {
+        let _ = writeln!(
+            s,
+            "  cache split for {} of {} requests: {} cached input tokens, {} other input tokens (including cache writes)",
+            count(requests),
+            count(t.requests),
+            tokens(cached),
+            tokens(other)
+        );
+    }
     let by = if h.ranked_by == "input_tokens" {
         "share of input tokens"
     } else {
@@ -518,6 +532,37 @@ pub(crate) fn bytes(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_split_names_its_request_coverage() {
+        let transcript = jouet_audit::Transcript {
+            session: "one".into(),
+            requests: vec![
+                jouet_audit::Request {
+                    input_tokens: Some(100),
+                    cached_input_tokens: Some(70),
+                    input_tokens_complete: true,
+                    ..Default::default()
+                },
+                jouet_audit::Request {
+                    input_tokens: Some(50),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let mut analyzer = Analyzer::default();
+        analyzer.add("codex", &transcript);
+        let report = analyzer.report(0);
+        let mut rendered = String::new();
+        harness_text(&mut rendered, &report.harnesses[0], 0);
+        assert!(
+            rendered.contains(
+                "cache split for 1 of 2 requests: 70 cached input tokens, 30 other input tokens"
+            ),
+            "{rendered}"
+        );
+    }
 
     #[test]
     fn since_takes_days_dates_and_rfc_3339() {
