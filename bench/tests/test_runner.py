@@ -1832,6 +1832,7 @@ class ExternalTasksTest(unittest.TestCase):
 
 class ReportTest(unittest.TestCase):
     def test_incomplete_token_usage_is_not_counted_as_zero_spend(self):
+        """Partial observations cannot establish total spend per solved task."""
         from dataclasses import asdict
 
         missing = asdict(HARNESSES["claude"].usage([], Path("/nonexistent")))
