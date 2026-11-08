@@ -2113,6 +2113,25 @@ PY
 	refute_output --partial 'reused:'
 }
 
+@test "result reuse keeps arguments separate from environment entries" {
+	git commit -q --allow-empty -m base
+	run --separate-stderr env -i "HOME=$HOME" "PATH=$PATH" "XDG_STATE_HOME=$XDG_STATE_HOME" JOUET_TEST_REUSE_S=3600 JOUET_TEST_BASELINE=off jouet test --cmd -- python3 -c 'import os, sys; sys.exit(os.getenv("A_JOUET_COLLISION") == "1")' A_JOUET_COLLISION 1
+	assert_success
+	run --separate-stderr env -i "HOME=$HOME" "PATH=$PATH" "XDG_STATE_HOME=$XDG_STATE_HOME" JOUET_TEST_REUSE_S=3600 JOUET_TEST_BASELINE=off A_JOUET_COLLISION=1 jouet test --cmd -- python3 -c 'import os, sys; sys.exit(os.getenv("A_JOUET_COLLISION") == "1")'
+	assert_failure 1
+	refute_output --partial 'reused:'
+}
+
+@test "result reuse accepts non UTF-8 environment values" {
+	enable_result_reuse
+	git commit -q --allow-empty -m base
+	JOUET_NON_UTF8=$'\xff' run --separate-stderr jouet test --cmd -- python3 -c 'print("ok")'
+	assert_success
+	JOUET_NON_UTF8=$'\xff' run --separate-stderr jouet test --cmd -- python3 -c 'print("ok")'
+	assert_success
+	assert_output --partial 'reused:'
+}
+
 @test "a program not on PATH names its versioned sibling" {
 	mkdir -p bin
 	printf '#!/bin/sh\nexit 0\n' >bin/frob3

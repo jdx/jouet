@@ -203,7 +203,7 @@ reused: `mise run check` ran on these same files 3m ago (115s, exit 1); --fresh 
 
 The output, the log, the [baseline](#failures-that-were-there-before-baseline) comparison and what the stop gate records are those of the earlier run, and `--json` marks the suite `"reused": true`.
 
-A run is answered this way only when every one of these is the same: the contents of the working tree (tracked and untracked files, less those git ignores), HEAD, the command, the directory it runs in, and the environment. The environment includes shell variables such as `PWD` and `OLDPWD`, because a command can depend on them. A run is kept for this only when it left the working tree as it found it. It is kept for `[test] reuse_s` seconds (`JOUET_TEST_REUSE_S`, 0 by default).
+A run is answered this way only when every one of these is the same: the contents of the working tree (tracked and untracked files, less those git ignores), HEAD, the command, the directory it runs in, and the environment. The environment includes shell variables such as `PWD` and `OLDPWD`, because a command can depend on them; non-UTF-8 values are supported. A run is kept for this only when it left the working tree as it found it. It is kept for `[test] reuse_s` seconds (`JOUET_TEST_REUSE_S`, 0 by default).
 
 Ignored files are not part of the key. A reused result can therefore be stale after an ignored input changes, and a reused command does not recreate deleted ignored outputs. Commands can also depend on network or service state or be flaky. Opt in only when those limits are acceptable; `--fresh` runs the command and keeps its result for the next run.
 

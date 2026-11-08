@@ -289,7 +289,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             let Some(job) = job else { continue };
             let key = tree
                 .as_deref()
-                .map(|tree| reuse::key(tree, job, std::env::vars()));
+                .map(|tree| reuse::key(tree, job, std::env::vars_os()));
             let kept = key
                 .as_deref()
                 .filter(|_| !args.fresh)
