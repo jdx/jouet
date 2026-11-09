@@ -1,14 +1,14 @@
 #:schema https://jouet.jdx.dev/schema/rules.json
 [[rule]]
 name = "ci-rerun"
-why = "Rerunning CI blind wastes a run on a real failure; `jouet ci explain` says whether the failure is flaky, infrastructure or real, and reruns only the first two."
+why = "Rerunning CI blind hides why it failed; `jouet ci explain` says whether each failure is flaky, infrastructure or real, then reruns the failed jobs."
 mode = "deny"
 scope = "builtin"
 author = "builtin"
 created = "2026-10-31"
 needs = ["ci", "explain"]
 suggest = "jouet ci explain"
-message = "It reads the failed jobs' logs and the workflow's history and says whether each is flaky, infrastructure or real; `--rerun` (with `--run ID` or a PR) reruns only a flake or an infrastructure failure, since a real one fails again, and a run cancelled before anything failed. For a cause fixed outside the repository (a secret, an access, a registry), `--rerun --force` reruns it anyway (`jouet agent-help ci`)."
+message = "It reads the failed jobs' logs and the workflow's history and says whether each is flaky, infrastructure or real; `--rerun` (with `--run ID` or a PR) reruns every failed job, and a run cancelled before anything failed, and names the jobs that were not a flake or an infrastructure failure (`jouet agent-help ci`)."
 
 [[rule.match]]
 command = "gh run rerun"
@@ -36,7 +36,6 @@ quiet = [
   "gh run list --limit 5",
   "gh api repos/jdx/jouet/actions/runs/41193844808",
   "jouet ci explain --run 41193844808 --rerun",
-  "jouet ci explain --run 41193844808 --rerun --force",
   "echo 'gh run rerun 1'",
   "git commit -m 'gh run rerun 1 --failed'",
 ]

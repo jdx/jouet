@@ -74,7 +74,7 @@ const WHEN: &[(&str, Option<&str>)] = &[
     (
         "ci",
         Some(
-            "reproducing a GitHub Actions job on this machine before pushing, or one `wait ci` reported failing (`ci run --check NAME`, needs jactionlint), instead of pushing again to see; and before rerunning or \"fixing\" a CI failure: `ci explain [PR]` (or `--run ID` for a run without a PR) says whether each failed job is flaky, infrastructure or real, with the evidence, and `--rerun` reruns only a flake or an infrastructure failure, instead of `gh run rerun`",
+            "reproducing a GitHub Actions job on this machine before pushing, or one `wait ci` reported failing (`ci run --check NAME`, needs jactionlint), instead of pushing again to see; and before rerunning or \"fixing\" a CI failure: `ci explain [PR]` (or `--run ID` for a run without a PR) says whether each failed job is flaky, infrastructure or real, with the evidence, and `--rerun` reruns the failed jobs, instead of `gh run rerun`",
         ),
     ),
     (
@@ -389,8 +389,8 @@ const USAGE: &[Usage] = &[
                 "whether each failed job is flaky, infrastructure or real, with the evidence; one target only, and a URL names an Actions run or job",
             ),
             (
-                "jouet ci explain [<PR> | --run ID] --rerun [--force]",
-                "rerun only when every failure is a flake or infrastructure; --force for a cause fixed outside the repository",
+                "jouet ci explain [<PR> | --run ID] --rerun",
+                "rerun every failed job, naming those that are not a flake or infrastructure",
             ),
             (
                 "jouet ci run [<WORKFLOW>] --check NAME",

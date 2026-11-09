@@ -134,7 +134,7 @@ The built-in rules:
 | Rule | Denies | Suggests |
 |---|---|---|
 | `sleep-poll` | `sleep N` together with `gh pr checks`, `gh run view` or a `statusCheckRollup` query | `jouet wait ci` |
-| `ci-rerun` | `gh run rerun` (bare, `--failed` or `--job`), and `gh api` calls to a run's or job's `rerun` endpoints | [`jouet ci explain`](/commands/ci#jouet-ci-explain), whose `--rerun` reruns only a flaky or infrastructure failure |
+| `ci-rerun` | `gh run rerun` (bare, `--failed` or `--job`), and `gh api` calls to a run's or job's `rerun` endpoints | [`jouet ci explain`](/commands/ci#jouet-ci-explain), whose `--rerun` reruns the failed jobs |
 | `ci-pending` | warns (does not deny), after the call, when `gh pr checks` exited 8: checks are still pending | `jouet wait ci` rather than checking again |
 | `ci-failed` | warns (does not deny), after the call, when `gh pr checks` exited 1, or `gh run view` or `gh run watch` with `--exit-status` did: a check failed, or gh could not answer | [`jouet ci explain`](/commands/ci#jouet-ci-explain) before reading logs or pushing a fix |
 | `review-threads` | `gh api graphql` (or `curl` to the GraphQL API) with a `reviewThreads` query | `jouet pr threads` |

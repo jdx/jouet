@@ -296,11 +296,10 @@ fn a_macos_only_failure_is_an_os_difference_not_a_flake() {
             .iter()
             .all(|f| f["conclusion"] == "cancelled" && f["follows"] == "trusted / test-macos")
     );
-    assert_eq!(doc["rerun"]["allowed"], false);
-    assert!(doc["rerun"].get("command").is_none(), "{doc}");
+    assert_eq!(doc["rerun"]["allowed"], true);
     assert_eq!(
         doc["rerun"]["reason"],
-        "a rerun repeats a real failure: trusted / test-macos (real)"
+        "reruns every failed job; not a flake or infrastructure: trusted / test-macos (real)"
     );
 
     // A later run of the same commit in which the job passed makes it flaky.
@@ -426,7 +425,7 @@ fn a_compile_error_main_also_has_is_real_and_not_the_prs_fault() {
         .filter_map(|f| f["name"].as_str())
         .collect();
     assert_eq!(following, ["trusted / final", "final"]);
-    assert_eq!(doc["rerun"]["allowed"], false);
+    assert_eq!(doc["rerun"]["allowed"], true);
 }
 
 #[test]
@@ -439,23 +438,24 @@ fn a_pr_is_explained_by_the_latest_failed_runs_on_its_head() {
     assert_eq!(doc["pr"], 73);
     assert_eq!(doc["result"], "real");
     assert_eq!(doc["runs"][0]["run_id"], 41_193_332_714_u64);
-    assert_eq!(doc["rerun"]["allowed"], false);
+    assert_eq!(doc["rerun"]["allowed"], true);
 }
 
 #[test]
-fn rerun_refuses_a_real_failure_before_any_write() {
+fn rerun_reruns_a_real_failure_too() {
     let fake = github();
     let dir = tempfile::tempdir().unwrap();
     let out = explain(&fake, dir.path(), &["--run", REAL_RUN, "--rerun"]);
-    assert_eq!(out.status.code(), Some(4), "{}", stdout(&out));
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
     let doc = json(&out);
-    assert_eq!(doc["error"]["code"], "precondition");
-    let message = doc["error"]["message"].as_str().unwrap();
+    assert_eq!(doc["rerun"]["started"], true);
     assert!(
-        message.starts_with("not rerunning: a rerun repeats a real failure: trusted / test (real)"),
-        "{message}"
+        doc["rerun"]["reason"].as_str().unwrap().starts_with(
+            "reruns every failed job; not a flake or infrastructure: trusted / test (real)"
+        ),
+        "{doc}"
     );
-    assert!(!fake.requests().iter().any(|r| r.method == "POST"));
+    assert!(fake.requests().iter().any(|r| r.method == "POST"));
 }
 
 #[test]
@@ -503,7 +503,7 @@ fn the_text_report_groups_jobs_that_failed_the_same_way() {
     );
     assert!(text.contains("\nfailed after trusted / test failed, with nothing of their own: trusted / final and final\n"), "{text}");
     assert!(
-        text.contains("\nrerun: refused, a rerun repeats a real failure: "),
+        text.contains("\nrerun: allowed, reruns every failed job; not a flake or infrastructure: "),
         "{text}"
     );
     // The excerpt keeps to its budget, and says what it left out.

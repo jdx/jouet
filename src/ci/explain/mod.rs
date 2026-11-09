@@ -72,9 +72,6 @@ pub(crate) enum Target {
 pub(crate) struct Request {
     pub(crate) target: Target,
     pub(crate) rerun: bool,
-    /// Rerun whatever the verdict: the cause was fixed outside the
-    /// repository.
-    pub(crate) force: bool,
     pub(crate) log_lines: usize,
 }
 
@@ -445,7 +442,7 @@ pub(crate) fn explain(client: &mut Client, req: &Request) -> Result<Report, Refu
         })
         .map(|r| r.id)
         .collect();
-    let mut rerun = rerun_plan(&reports, &again, in_progress, &cancelled, req.force);
+    let mut rerun = rerun_plan(&reports, &again, in_progress, &cancelled);
     if req.rerun {
         if !rerun.allowed {
             return Err(Refusal {
@@ -1217,13 +1214,7 @@ fn elsewhere(
 }
 
 /// Whether `--rerun` may rerun the failed jobs, and the command that does.
-fn rerun_plan(
-    reports: &[RunReport],
-    target: &str,
-    in_progress: bool,
-    cancelled: &[u64],
-    force: bool,
-) -> Rerun {
+fn rerun_plan(reports: &[RunReport], target: &str, in_progress: bool, cancelled: &[u64]) -> Rerun {
     let failed: Vec<&JobReport> = reports.iter().flat_map(|r| &r.jobs).collect();
     let refuse = |reason: String| Rerun {
         allowed: false,
@@ -1269,27 +1260,14 @@ fn rerun_plan(
             "nothing failed".into()
         });
     }
-    let blocking: Vec<String> = failed
+    // Every failed job is rerun whatever its verdict: a log cannot show that
+    // the cause was fixed outside the repository, and a rerun of one that
+    // fails again costs little. The verdicts a flake would not have are named.
+    let undiagnosed: Vec<String> = failed
         .iter()
         .filter(|j| !j.verdict.rerunnable())
         .map(|j| format!("{} ({})", j.name, j.verdict.as_str()))
         .collect();
-    if !blocking.is_empty() && !force {
-        let real = failed.iter().any(|j| j.verdict == Verdict::Real);
-        // A real failure is not offered --force: it is there for the cause
-        // a log cannot show was fixed, not to rerun what fails again.
-        if real {
-            return refuse(format!(
-                "a rerun repeats a real failure: {}",
-                short_list(&blocking)
-            ));
-        }
-        return refuse(format!(
-            "a failure without a diagnosis is not rerun blind: {}. If its cause was fixed outside the repository (a secret, an access, a registry or service outage), `{}` reruns it anyway",
-            short_list(&blocking),
-            command(" --force")
-        ));
-    }
     if let Some(r) = reports.iter().find(|r| r.in_progress) {
         return refuse(format!(
             "run {} is still in progress, and GitHub reruns only finished runs (`jouet wait run {}`)",
@@ -1298,12 +1276,15 @@ fn rerun_plan(
     }
     Rerun {
         allowed: true,
-        reason: if blocking.is_empty() {
+        reason: if undiagnosed.is_empty() {
             "every failed job is flaky or infrastructure".into()
         } else {
-            format!("forced, whatever the verdict: {}", short_list(&blocking))
+            format!(
+                "reruns every failed job; not a flake or infrastructure: {}",
+                short_list(&undiagnosed)
+            )
         },
-        command: Some(command(if blocking.is_empty() { "" } else { " --force" })),
+        command: Some(command("")),
         jobs: failed.iter().map(|j| j.name.clone()).collect(),
         runs: Vec::new(),
         started: false,
@@ -1336,14 +1317,14 @@ mod tests {
             jobs: Vec::new(),
             following: Vec::new(),
         };
-        let plan = rerun_plan(&[run(vec![15116])], "", true, &[], false);
+        let plan = rerun_plan(&[run(vec![15116])], "", true, &[]);
         assert!(!plan.allowed);
         assert!(
             plan.reason.contains("`jouet wait ci 15116`"),
             "{}",
             plan.reason
         );
-        let plan = rerun_plan(&[run(Vec::new())], "", true, &[], false);
+        let plan = rerun_plan(&[run(Vec::new())], "", true, &[]);
         assert!(plan.reason.contains("`jouet wait ci`"), "{}", plan.reason);
     }
 
@@ -1366,10 +1347,10 @@ mod tests {
         let mut passed = report(Vec::new());
         passed.run_id = 8;
         passed.workflow = "ci".into();
-        let plan = rerun_plan(&[report(Vec::new()), passed], "--run 7", false, &[7], false);
+        let plan = rerun_plan(&[report(Vec::new()), passed], "--run 7", false, &[7]);
         assert!(plan.allowed, "{}", plan.reason);
         assert_eq!(plan.jobs, ["release (run 7, cancelled)"]);
-        assert!(!rerun_plan(&[report(Vec::new())], "--run 7", false, &[], false).allowed);
+        assert!(!rerun_plan(&[report(Vec::new())], "--run 7", false, &[]).allowed);
         let job = || JobReport {
             name: "Release".into(),
             job_id: 1,
@@ -1388,22 +1369,23 @@ mod tests {
             log_truncated: false,
             log_path: None,
         };
-        // Refused without --force, and the refusal names it.
-        let plan = rerun_plan(&[report(vec![job()])], "--run 7", false, &[], false);
-        assert!(!plan.allowed);
-        assert!(
-            plan.reason
-                .contains("`jouet ci explain --run 7 --rerun --force`"),
-            "{}",
-            plan.reason
+        // An undiagnosed or real failure is rerun too, and named.
+        let plan = rerun_plan(&[report(vec![job()])], "--run 7", false, &[]);
+        assert!(plan.allowed, "{}", plan.reason);
+        assert!(plan.reason.contains("unknown"), "{}", plan.reason);
+        assert_eq!(
+            plan.command.as_deref(),
+            Some("jouet ci explain --run 7 --rerun")
         );
         let mut real = job();
         real.verdict = Verdict::Real;
-        let plan = rerun_plan(&[report(vec![real])], "--run 7", false, &[], false);
-        assert!(!plan.reason.contains("--force"), "{}", plan.reason);
-        assert!(plan.reason.contains("real failure"), "{}", plan.reason);
-        let plan = rerun_plan(&[report(vec![job()])], "--run 7", false, &[], true);
+        let plan = rerun_plan(&[report(vec![real])], "--run 7", false, &[]);
         assert!(plan.allowed, "{}", plan.reason);
-        assert!(plan.reason.starts_with("forced"), "{}", plan.reason);
+        assert!(plan.reason.contains("real"), "{}", plan.reason);
+        let mut flaky = job();
+        flaky.verdict = Verdict::Flaky;
+        let plan = rerun_plan(&[report(vec![flaky])], "--run 7", false, &[]);
+        assert!(plan.allowed, "{}", plan.reason);
+        assert_eq!(plan.reason, "every failed job is flaky or infrastructure");
     }
 }
