@@ -146,15 +146,17 @@ fn runs_jouet_test(command: &str) -> bool {
 }
 
 /// `cwd` with the home directory written `~`, only where it is a whole
-/// path component: `/home/jo` is not a prefix of `/home/john`.
+/// path component, on Unix or Windows: `/home/jo` is not a prefix of
+/// `/home/john`.
 fn tilde(cwd: &str, home: Option<&str>) -> String {
+    let separator = |c: char| c == '/' || c == '\\';
     match home
-        .map(|h| h.trim_end_matches('/'))
+        .map(|h| h.trim_end_matches(separator))
         .filter(|h| !h.is_empty())
     {
         Some(home) if cwd == home => "~".into(),
         Some(home) => match cwd.strip_prefix(home) {
-            Some(rest) if rest.starts_with('/') => format!("~{rest}"),
+            Some(rest) if rest.starts_with(separator) => format!("~{rest}"),
             _ => cwd.to_string(),
         },
         None => cwd.to_string(),
@@ -278,6 +280,11 @@ mod tests {
         assert_eq!(tilde("/home/john/src", Some("/home/jo")), "/home/john/src");
         assert_eq!(tilde("/src", Some("/")), "/src");
         assert_eq!(tilde("/src", None), "/src");
+        assert_eq!(tilde(r"C:\Users\jo\src", Some(r"C:\Users\jo")), r"~\src");
+        assert_eq!(
+            tilde(r"C:\Users\john", Some(r"C:\Users\jo\")),
+            r"C:\Users\john"
+        );
     }
 
     #[test]
