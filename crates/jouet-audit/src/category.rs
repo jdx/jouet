@@ -382,6 +382,19 @@ mod tests {
             cat("wc -l <<< 'gh pr checks 1 --watch'"),
             Category::CiPolling
         );
+        // A `<<` in quotes, a comment or arithmetic opens no heredoc.
+        for command in [
+            "echo '<<EOF'\ngh pr checks 1 --watch",
+            "echo hi # <<EOF\ngh pr checks 1 --watch",
+            "echo $((1<<EOF))\ngh pr checks 1 --watch",
+        ] {
+            assert_eq!(cat(command), Category::CiPolling, "{command}");
+        }
+        // A hyphenated delimiter closes its body.
+        assert_eq!(
+            cat("cat > a.md <<END-NOTE\ngh pr checks 1\nEND-NOTE\njouet wait ci 3"),
+            Category::CiPolling
+        );
     }
 
     #[test]

@@ -338,12 +338,38 @@ fn skip_heredoc_bodies(b: &[u8], mut i: usize, heredocs: &mut Vec<(String, bool)
     i
 }
 
+/// Whether a `<<` after `before` on its line is a redirection: not inside
+/// quotes or a comment, and not a shift inside `((...))` or `$((...))`.
+fn opens_a_heredoc(before: &str) -> bool {
+    let (mut single, mut double, mut escaped) = (false, false, false);
+    let mut prev = ' ';
+    for c in before.chars() {
+        if escaped {
+            escaped = false;
+        } else if single {
+            single = c != '\'';
+        } else if c == '\\' {
+            escaped = true;
+        } else if double {
+            double = c != '"';
+        } else if c == '\'' {
+            single = true;
+        } else if c == '"' {
+            double = true;
+        } else if c == '#' && (prev.is_whitespace() || matches!(prev, ';' | '&' | '|')) {
+            return false;
+        }
+        prev = c;
+    }
+    !single && !double && before.matches("((").count() <= before.matches("))").count()
+}
+
 /// The command without its heredoc bodies, which are data for the program
 /// they feed: a note appended with `cat >> notes.md <<EOF` that mentions
 /// `jouet wait ci` does not wait on CI.
 pub(crate) fn without_heredoc_bodies(command: &str) -> String {
     static START: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r#"<<(-?)\s*(?:'([^']+)'|"([^"]+)"|\\?([A-Za-z0-9_]+))"#)
+        regex::Regex::new(r#"<<(-?)\s*(?:'([^']+)'|"([^"]+)"|\\?([^\s;&|<>()'"]+))"#)
             .expect("the heredoc pattern compiles")
     });
     let b = command.as_bytes();
@@ -362,7 +388,9 @@ pub(crate) fn without_heredoc_bodies(command: &str) -> String {
             .filter(|c| {
                 // `<<<` is a here-string, not a heredoc.
                 let at = c.get(0).expect("a match").start();
-                !line[at + 2..].starts_with('<') && !line[..at].ends_with('<')
+                !line[at + 2..].starts_with('<')
+                    && !line[..at].ends_with('<')
+                    && opens_a_heredoc(&line[..at])
             })
             .filter_map(|c| {
                 let delim = c.get(2).or(c.get(3)).or(c.get(4))?.as_str().to_string();
