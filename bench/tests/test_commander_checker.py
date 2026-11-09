@@ -71,6 +71,33 @@ class CommanderCheckerTest(unittest.TestCase):
                 self.checker.run_tests(root, ["tests/example.test.js"], "committed tests")
             self.assertIn("missing test suites", self.checker.UNVERIFIED[0])
 
+    def test_original_tests_include_the_old_path_of_a_rename(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+                   "GIT_AUTHOR_NAME": "Bench", "GIT_AUTHOR_EMAIL": "bench@example.invalid",
+                   "GIT_COMMITTER_NAME": "Bench", "GIT_COMMITTER_EMAIL": "bench@example.invalid"}
+
+            def git(*args):
+                return subprocess.run(["git", *args], cwd=work, env=env, capture_output=True,
+                                      text=True, check=True).stdout.strip()
+
+            git("init", "-q")
+            (work / "tests").mkdir()
+            (work / "tests/old.test.js").write_text("original test\n")
+            git("add", "tests")
+            git("commit", "-qm", "base")
+            base = git("rev-parse", "HEAD")
+            git("mv", "tests/old.test.js", "tests/new.test.js")
+            git("commit", "-qm", "rename")
+            previous = Path.cwd()
+            try:
+                os.chdir(work)
+                with mock.patch.dict(os.environ, {"BENCH_HEAD_SHA": base}):
+                    self.assertEqual(self.checker.original_tests(), {"tests/old.test.js": b"original test\n"})
+            finally:
+                os.chdir(previous)
+
     def test_committed_and_hidden_tests_use_isolated_checkouts(self):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory) / "work"
@@ -100,7 +127,9 @@ class CommanderCheckerTest(unittest.TestCase):
                 'for arg in "$@"; do case "$arg" in --outputFile=*) report=${arg#--outputFile=};; esac; done\n'
                 'hash=$(git hash-object tests/command.configureOutput.test.js)\n'
                 'printf "%s|%s\\n" "$PWD" "$hash" >> "$TRACE"\n'
-                'printf "{\\"numTotalTests\\":1,\\"numPassedTests\\":1,\\"numFailedTests\\":0,\\"numPendingTests\\":0,\\"testResults\\":[{\\"name\\":\\"%s/tests/command.configureOutput.test.js\\",\\"assertionResults\\":[{\\"status\\":\\"passed\\"}]}]}\\n" "$PWD" > "$report"\n'
+                'if [ "$(cat source.js)" = "regressed source" ] && [ "$(cat tests/command.configureOutput.test.js)" = "base test" ]; then passed=0; failed=1; status=failed; else passed=1; failed=0; status=passed; fi\n'
+                'printf "{\\"numTotalTests\\":1,\\"numPassedTests\\":%s,\\"numFailedTests\\":%s,\\"numPendingTests\\":0,\\"testResults\\":[{\\"name\\":\\"%s/tests/command.configureOutput.test.js\\",\\"assertionResults\\":[{\\"status\\":\\"%s\\"}]}]}\\n" "$passed" "$failed" "$PWD" "$status" > "$report"\n'
+                'exit "$failed"\n'
             )
             jest.chmod(0o755)
             trace = Path(directory) / "trace"
@@ -123,11 +152,22 @@ class CommanderCheckerTest(unittest.TestCase):
             result = check()
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             entries = [line.split("|", 1) for line in trace.read_text().splitlines()]
-            self.assertEqual(len(entries), 2)
+            self.assertEqual(len(entries), 3)
             self.assertEqual(entries[0][1], original_hash)
             self.assertNotEqual(entries[1][1], original_hash)
+            self.assertNotEqual(entries[2][1], original_hash)
             self.assertNotEqual(entries[0][0], entries[1][0])
             self.assertEqual(test.read_text(), "agent test\n")
+            source.write_text("regressed source\n")
+            git("add", "source.js")
+            git("commit", "-qm", "regress original behavior")
+            result = check()
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("original tests on the fix reported 1 failing tests", result.stdout)
+            self.assertEqual(test.read_text(), "agent test\n")
+            source.write_text("fixed source\n")
+            git("add", "source.js")
+            git("commit", "-qm", "restore original behavior")
             git("rm", "-q", "tests/command.configureOutput.test.js")
             (work / "tests").mkdir(exist_ok=True)
             (work / "tests/other.test.js").write_text("other test\n")

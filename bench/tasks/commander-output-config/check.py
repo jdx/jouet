@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _check import UNVERIFIED, committed_files, dirty, expect, finish, new_commit  # noqa: E402
+from _check import UNVERIFIED, committed_files, dirty, expect, finish, head_sha, new_commit  # noqa: E402
 
 
 def run_tests(checkout: Path, paths: list[str], label: str) -> None:
@@ -63,7 +63,35 @@ def run_tests(checkout: Path, paths: list[str], label: str) -> None:
         UNVERIFIED.append(f"{label} did not pass any tests")
 
 
-def check_phase(tests: list[str], *, hidden: bool) -> None:
+def original_tests() -> dict[str, bytes] | None:
+    """Read changed test files as they were when the agent started."""
+    try:
+        changed = set(subprocess.run(
+            ["git", "diff", "--no-renames", "--name-only", "-z", head_sha(), "HEAD", "--", "tests"],
+            capture_output=True, timeout=30, check=True,
+        ).stdout.split(b"\0"))
+        tree = subprocess.run(["git", "ls-tree", "-rz", "--full-tree", head_sha(), "--", "tests"],
+                              capture_output=True, timeout=30, check=True).stdout
+        originals = {}
+        for entry in tree.split(b"\0"):
+            if not entry:
+                continue
+            meta, raw_path = entry.split(b"\t", 1)
+            mode, kind, oid = meta.split(b" ")
+            path = raw_path.decode("utf-8")
+            if raw_path not in changed or not path.endswith((".test.js", ".spec.js")):
+                continue
+            if kind != b"blob" or mode not in (b"100644", b"100755"):
+                raise ValueError(f"original test {path} is not a regular file")
+            originals[path] = subprocess.run(["git", "cat-file", "blob", oid.decode("ascii")],
+                                             capture_output=True, timeout=30, check=True).stdout
+        return originals
+    except (OSError, subprocess.SubprocessError, UnicodeError, ValueError) as error:
+        UNVERIFIED.append(f"could not read original tests: {error}")
+        return None
+
+
+def check_phase(tests: list[str], *, hidden: bool, originals: dict[str, bytes] | None = None) -> None:
     with tempfile.TemporaryDirectory(prefix="commander-check-") as directory:
         checkout = Path(directory)
         try:
@@ -81,7 +109,21 @@ def check_phase(tests: list[str], *, hidden: bool) -> None:
                 UNVERIFIED.append("Commander dependencies are unavailable")
             else:
                 (checkout / "node_modules").symlink_to(dependencies, target_is_directory=True)
-                if not hidden:
+                if originals is not None:
+                    for path, contents in originals.items():
+                        target = checkout / path
+                        if (target.is_symlink() or not target.parent.is_dir()
+                                or (target.exists() and not target.is_file())
+                                or not target.resolve().is_relative_to(checkout.resolve())):
+                            UNVERIFIED.append(f"original test path is not a safe regular file: {path}")
+                            return
+                        try:
+                            target.write_bytes(contents)
+                        except OSError as error:
+                            UNVERIFIED.append(f"could not restore original test {path}: {error}")
+                            return
+                    run_tests(checkout, sorted(originals), "original tests on the fix")
+                elif not hidden:
                     run_tests(checkout, tests, "committed tests")
                 else:
                     target = checkout / "tests/command.configureOutput.test.js"
@@ -105,12 +147,16 @@ def check_phase(tests: list[str], *, hidden: bool) -> None:
 def main() -> None:
     expect(new_commit(), "nothing was committed")
     expect(not dirty(), f"tracked changes were left uncommitted: {dirty()}")
-    tests = sorted(path for path in committed_files()
+    changed = committed_files()
+    tests = sorted(path for path in changed
                    if path.startswith("tests/") and path.endswith((".test.js", ".spec.js"))
                    and Path(path).is_file() and not Path(path).is_symlink())
     expect(bool(tests), "no committed Commander test file was changed")
     if tests:
         check_phase(tests, hidden=False)
+    originals = original_tests()
+    if originals:
+        check_phase([], hidden=False, originals=originals)
     check_phase([], hidden=True)
     finish()
 
