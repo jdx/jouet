@@ -19,7 +19,9 @@ pub struct LedgerEntry {
     /// `claude` or `codex`.
     pub harness: String,
     pub session: Option<String>,
-    /// `session-start`, `pre-tool-use`, `post-tool-use`, `stop` or `override`.
+    /// `session-start`, `pre-tool-use`, `post-tool-use`, `stop`, `edit`
+    /// (the harness edited a file), `override`, and others this reader
+    /// passes over.
     pub event: String,
     pub tool: Option<String>,
     /// The command's shape: known subcommands and flag names, values replaced.
@@ -36,11 +38,17 @@ pub struct LedgerEntry {
 #[serde(default)]
 pub struct LedgerDecision {
     pub rule: String,
-    /// `deny`, `warn`, `record:<kind>`, `override` or `block`.
+    /// `deny`, `warn`, `record:<kind>`, `override`, `block` or
+    /// `would-block`.
     pub action: String,
     /// For a `deny`, `warn` or `override`: the revision of the rule that
     /// decided. Older lines lack it.
     pub revision: Option<String>,
+    /// For the stop gate's `block` or `would-block`: what the reason was
+    /// about, such as `failed-test`. Blocks from before reasons were named
+    /// lack it. (For a `record:<kind>`, the run's scope.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
 /// Every entry of a ledger directory, oldest first.

@@ -25,11 +25,16 @@ const TAIL: u64 = 256 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Decision {
     pub rule: String,
-    /// `deny`, `warn`, `record:<kind>`, `block` or `override`.
+    /// `deny`, `warn`, `record:<kind>`, `block`, `would-block` or
+    /// `override`.
     pub action: String,
     /// For a `record:<kind>`: `full` when the run covered the whole
     /// project, else `partial`. Never what a partial run selected, which is
-    /// a value. Older lines lack it, and read as partial.
+    /// a value. Older lines lack it, and read as partial. For the stop
+    /// gate's `block` or `would-block`: what the reason is about, one
+    /// decision per reason (`failed-test`, `changed-after-pass`, ...; see
+    /// `verify::Block::about`), or `hk-stop` for hk's merged stop hook.
+    /// Blocks recorded before reasons were named lack it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
     /// For a `deny`, `warn` or `override`: the revision of the rule that
@@ -59,6 +64,7 @@ pub(crate) struct Entry {
     /// `override`,
     /// `slow-hook` (a hook over its time budget; `tool` names its event),
     /// `fix` (hk's fixers run on edited files; `tool` names the edit tool),
+    /// `edit` (the harness edited a file; `tool` names the edit tool),
     /// or `deprecated` (a command used something on its way out).
     pub event: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

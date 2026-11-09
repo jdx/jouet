@@ -25,6 +25,22 @@ The table counts each rule only from its current revision: the ledger records wi
 
 `overridden` counts the same command run again soon after a deny or warning, and `then jouet`, `then other` and `then nothing` say what the agent ran next after a denial.
 
+## The stop gate
+
+The stop gate [observes by default](/setup#observing-or-blocking): where it would block, it records a `would-block`, one for each reason, and lets the agent finish. With `[hooks] gate = "block"` it records a `block` for each reason instead. `jouet stats` counts both by reason, and judges each by the first thing that followed it in the session, at any later turn:
+
+- **right:** an edit (the harness's edit tools, or a `jouet edit` that succeeded) or a test, lint or build run that failed came first. The agent changed something after all, or something was still broken.
+- **passed:** a test, lint or build run passed before any edit. The change was fine as it stood.
+- **open:** neither has happened since.
+
+```text
+  stop gate by reason (right: an edit or a failed check came next; passed: a check passed first; open: neither yet):
+    would-block failed-test: 12 (right 2, passed 7, open 3)
+    would-block changed-after-pass: 5 (right 0, passed 4, open 1)
+```
+
+The reasons are `failed-test`, `failed-lint` and `failed-build` (a failed run nothing has cleared), `changed-after-pass` (files changed after the last passing test run), `hk-partial` (the last hk check covered only some files), `hk-changed` (files changed after the last hk check passed), and `hk-stop` (hk's own stop hook, which blocks in both modes). Edits made another way, such as by `sed -i`, are not seen, so an edit-only judgement undercounts. Blocks recorded before the ledger named their reasons are counted in `finishing blocked`, but not here. In `--json`, these are `measured.gate`.
+
 ## How the estimates work
 
 A request re-reads the whole context, so a request avoided saves its whole input. For each kind of work, the history before setup gives how many requests a run of it took and how much context each request read:

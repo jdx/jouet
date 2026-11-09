@@ -155,7 +155,13 @@ fn handle(
             log.append(log.entry("session-start"));
             let loaded = load_all(payload).filter(|_| hooks.prime)?;
             let cwd = payload.get("cwd").and_then(Value::as_str).map(Path::new);
-            let primer = session_start(&loaded.engine, hooks.steer, hooks.verify, harness, cwd);
+            let primer = session_start(
+                &loaded.engine,
+                hooks.steer,
+                hooks.verify && hooks.gate_blocks(),
+                harness,
+                cwd,
+            );
             // The slow checks here, from the timings kept in git notes.
             let mut notes: Vec<String> = cwd
                 .and_then(|cwd| crate::cost::primer_line(&crate::cost::Costs::load(cwd)))
@@ -276,6 +282,16 @@ fn handle(
         // The graph is re-indexed after the format, so it sees the file as
         // it was left.
         "post-edit" => {
+            // An edit after a stop the gate found a reason at is what
+            // `jouet stats` judges that reason by.
+            if hooks.verify {
+                let mut entry = log.entry("edit");
+                entry.tool = payload
+                    .get("tool_name")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                log.append(entry);
+            }
             let fixed = settings
                 .edit
                 .fix_after
@@ -302,17 +318,37 @@ fn handle(
             }))
         }
         "stop" => {
-            let output = if hooks.verify || !hk_stop.is_empty() {
-                stop(harness, payload, hooks.verify, hk_stop)
+            let gate = hooks.verify.then_some(hooks.gate_blocks());
+            let Stopped {
+                output,
+                reasons,
+                hk_blocked,
+            } = if hooks.verify || !hk_stop.is_empty() {
+                stop(harness, payload, gate, hk_stop)
             } else {
-                None
+                Stopped::default()
             };
             let mut entry = log.entry("stop");
-            if output.as_ref().is_some_and(|o| o.get("decision").is_some()) {
+            // One decision per reason, each named: a `block` where the gate
+            // stopped the agent, a `would-block` where it only observed.
+            let action = if gate == Some(true) {
+                "block"
+            } else {
+                "would-block"
+            };
+            entry
+                .decisions
+                .extend(reasons.into_iter().map(|reason| ledger::Decision {
+                    rule: "verify".into(),
+                    action: action.into(),
+                    scope: Some(reason),
+                    revision: None,
+                }));
+            if hk_blocked {
                 entry.decisions.push(ledger::Decision {
                     rule: "verify".into(),
                     action: "block".into(),
-                    scope: None,
+                    scope: Some("hk-stop".into()),
                     revision: None,
                 });
             }
@@ -704,7 +740,7 @@ pub(crate) fn primer_tokens(settings: &Settings, cwd: &Path, harness: &str) -> u
     let primer = session_start(
         &rules::load(cwd).engine,
         hooks.steer,
-        hooks.verify,
+        hooks.verify && hooks.gate_blocks(),
         harness,
         Some(cwd),
     );
@@ -1365,10 +1401,30 @@ fn small_fix(root: &Path) -> bool {
     crate::affected::changed_code_lines(root).is_some_and(|lines| lines <= verify::SMALL_FIX_LINES)
 }
 
-fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> Option<Value> {
+/// What a stop decided.
+#[derive(Debug, Default)]
+struct Stopped {
+    /// The hook's stdout.
+    output: Option<Value>,
+    /// What each reason the gate found now is about ([`verify::Block::about`]),
+    /// whether it blocked for them or only observed them.
+    reasons: Vec<String>,
+    /// Whether hk's merged stop hook blocked.
+    hk_blocked: bool,
+}
+
+/// The stop: `gate` is None with `[hooks] verify` off, else whether the
+/// gate blocks for its reasons (`[hooks] gate = "block"`) or only finds
+/// them, for the ledger to record. hk's merged stop hook (`hk_stop`) blocks
+/// either way: its verdict is hk's.
+fn stop(harness: Harness, payload: &Value, gate: Option<bool>, hk_stop: &[String]) -> Stopped {
+    let verify = gate.is_some();
     // Jobs left running are a note, never a reason to block.
     let mut note = if verify { jobs_note(payload) } else { None };
-    let as_note = |note: Option<String>| note.map(|note| json!({ "systemMessage": note }));
+    let as_note = |note: Option<String>| Stopped {
+        output: note.map(|note| json!({ "systemMessage": note })),
+        ..Stopped::default()
+    };
     // Block at most once in a row: after one nudge, the agent's answer
     // stands, so a check that cannot pass never traps it.
     if payload.get("stop_hook_active").and_then(Value::as_bool) == Some(true) {
@@ -1462,15 +1518,24 @@ fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> 
     {
         let _ = verify::update(&path, |state| state.raise(block));
     }
-    let jouet = block.map(|b| b.reason);
+    // Observed, a reason is kept as raised all the same, so each is
+    // recorded once, where the gate would have blocked for it.
+    let reasons = block.as_ref().map(verify::Block::about).unwrap_or_default();
+    let jouet = block.map(|b| b.reason).filter(|_| gate == Some(true));
     let hk_passed = state.checks(&home).is_some_and(|c| c.hk_passed_at(now));
     let hk = if hk_stop.is_empty() || hk_passed {
         None
     } else {
         run_hk_stop(hk_stop, payload)
     };
+    let hk_blocked = hk.is_some();
     let reason = match (jouet, hk) {
-        (None, None) => return as_note(note),
+        (None, None) => {
+            return Stopped {
+                reasons,
+                ..as_note(note)
+            };
+        }
         (Some(one), None) => one,
         (None, Some(hk)) => format!("{hk} [hk]"),
         (Some(jouet), Some(hk)) => format!("{jouet}\n\nhk check: {hk} [hk]"),
@@ -1479,7 +1544,11 @@ fn stop(harness: Harness, payload: &Value, verify: bool, hk_stop: &[String]) -> 
         Some(note) => format!("{reason}\n{note}"),
         None => reason,
     };
-    Some(json!({ "decision": "block", "reason": reason }))
+    Stopped {
+        output: Some(json!({ "decision": "block", "reason": reason })),
+        reasons,
+        hk_blocked,
+    }
 }
 
 /// What the stop says about the `jouet job`s this session started in this

@@ -92,6 +92,27 @@ TOML
 	refute_output --partial 'large-read'
 }
 
+@test "python-edit is off by default, and the primer no longer forbids Python" {
+	unset JOUET_RULES_ENABLE
+	run --separate-stderr jouet hook claude session-start <<<'{"session_id":"s1","source":"startup"}'
+	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
+	refute_output --partial 'python-edit'
+	refute_output --partial 'never Python'
+	assert_output --partial 'git-stash'
+
+	script="python3 - <<'E'
+p='a.rs'
+open(p,'w').write(open(p).read().replace('a', 'b'))
+E"
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload "$script")"
+	assert_success
+	refute_output --partial 'python-edit'
+	run --separate-stderr env JOUET_RULES_ENABLE=python-edit jouet hook claude pre-tool-use <<<"$(bash_payload "$script")"
+	assert_output --partial '[jouet rule: python-edit]'
+	run --separate-stderr jouet rule list
+	assert_line --regexp 'python-edit.*disabled'
+}
+
 @test "session-start tells the agent about a Luau rule file to convert" {
 	mkdir -p "$XDG_CONFIG_HOME/jouet/rules"
 	printf -- '--- why: old\nreturn { check = function() end }\n' >"$XDG_CONFIG_HOME/jouet/rules/old.luau"
@@ -121,6 +142,51 @@ TOML
 	bash_payload 'cargo test --workspace' | jq -c '. + {hook_event_name: "PostToolUse"}' | jouet hook claude post-tool-use
 	run --separate-stderr jouet hook claude stop <<<'{"session_id":"s1","stop_hook_active":false}'
 	assert_output ""
+}
+
+@test "by default the stop gate observes: it records a would-block once and lets the agent finish" {
+	unset JOUET_HOOKS_GATE
+	jq -cn '{session_id: "s1", hook_event_name: "PostToolUseFailure", tool_name: "Bash",
+		tool_input: {command: "cargo test --workspace"}, error: "Exit code 101\ntest result: FAILED", is_interrupt: false}' |
+		jouet hook claude post-tool-use-failure
+
+	run --separate-stderr jouet hook claude stop <<<'{"session_id":"s1","stop_hook_active":false}'
+	assert_success
+	assert_output ""
+	# Raised once, as a block would be: the next stop records nothing new.
+	run --separate-stderr jouet hook claude stop <<<'{"session_id":"s1","stop_hook_active":false}'
+	assert_output ""
+	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	run jq -c 'select(.event == "stop") | .decisions // [] | map(.rule + ":" + .action + ":" + .scope)' "$ledger"
+	assert_line --index 0 '["verify:would-block:failed-test"]'
+	assert_line --index 1 '[]'
+
+	# An edit is recorded, for `jouet stats` to judge the would-block by.
+	jq -cn '{session_id: "s1", tool_name: "Edit", tool_input: {file_path: "a.rs"}}' | jouet hook claude post-edit
+	run jq -c 'select(.event == "edit") | [.tool, .session]' "$ledger"
+	assert_output '["Edit","s1"]'
+	run --separate-stderr jouet stats --json
+	assert_success
+	run jq -c '.measured.gate' <<<"$output"
+	assert_output '[{"reason":"failed-test","action":"would-block","stops":1,"right":1}]'
+
+	# Set to block, the same reason blocks and is recorded as a block.
+	jq -cn '{session_id: "s2", hook_event_name: "PostToolUseFailure", tool_name: "Bash",
+		tool_input: {command: "cargo test --workspace"}, error: "Exit code 101", is_interrupt: false}' |
+		jouet hook claude post-tool-use-failure
+	run --separate-stderr env JOUET_HOOKS_GATE=block jouet hook claude stop <<<'{"session_id":"s2","stop_hook_active":false}'
+	run jq -r .decision <<<"$output"
+	assert_output block
+	run jq -c 'select(.event == "stop" and .session == "s2") | .decisions | map(.action + ":" + .scope)' "$ledger"
+	assert_output '["block:failed-test"]'
+}
+
+@test "observing, the session-start primer does not say the stop gate blocks" {
+	unset JOUET_HOOKS_GATE
+	run --separate-stderr jouet hook claude session-start <<<'{"session_id":"s1","source":"startup"}'
+	refute_output --partial 'They also stop you finishing'
+	run --separate-stderr env JOUET_HOOKS_GATE=block jouet hook claude session-start <<<'{"session_id":"s1","source":"startup"}'
+	assert_output --partial 'They also stop you finishing'
 }
 
 # A finished command in the work tree at ./repo, as Claude Code reports it.

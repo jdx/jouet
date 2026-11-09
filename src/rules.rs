@@ -13,6 +13,11 @@ pub(crate) struct Loaded {
     pub sets: Vec<Set>,
 }
 
+/// Built-in rules that load turned off unless `[rules] enable` names them.
+/// python-edit is off until a controlled comparison shows its denials,
+/// and the primer's "never Python" that goes with it, pay for themselves.
+pub(crate) const OFF_BY_DEFAULT: &[&str] = &["python-edit"];
+
 /// `~/.config/jouet/rules`, when there is a home directory.
 pub(crate) fn user_dir() -> Option<PathBuf> {
     jouet_output::paths::config_dir().map(|d| d.join("rules"))
@@ -80,7 +85,7 @@ pub(crate) fn load_with(cwd: &Path, how: &Load) -> Loaded {
         rule_sources,
         Options {
             has_command: Box::new(crate::spec::has_command),
-            disabled: settings.rules.disable.unwrap_or_default(),
+            disabled: settings.rules.disabled(),
             budget: Budget::default(),
             cache_dir: jouet_output::paths::cache_dir().map(|d| d.join("luau")),
         },

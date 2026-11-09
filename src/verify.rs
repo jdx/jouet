@@ -332,7 +332,7 @@ impl Run {
         {
             return true;
         }
-        if ran == wanted {
+        if ran == wanted || bats_covers(&self.command, &failed.command) {
             return true;
         }
         // Selections leave out the runner, which these two read words by.
@@ -631,6 +631,123 @@ impl<'a> VitestSelection<'a> {
         }
         selection.options.sort();
         Some(selection)
+    }
+}
+
+/// Whether the bats run `ran` ran every test the bats run `wanted` did: it
+/// selected no tests by name, tag or status, and each file or directory
+/// `wanted` named is one `ran` named, or a `.bats` file in a directory
+/// `ran` named (at any depth with `-r`). So `bats -j 8 test/` covers a
+/// failed `bats test/rule.bats -f name`. An option this does not know, in
+/// either, is never covered.
+fn bats_covers(ran: &str, wanted: &str) -> bool {
+    let (Some(ran), Some(wanted)) = (
+        BatsRun::parse(&runner_argv(ran)),
+        BatsRun::parse(&runner_argv(wanted)),
+    ) else {
+        return false;
+    };
+    !ran.narrowed
+        && (ran.recursive || !wanted.recursive)
+        && wanted.paths.iter().all(|path| {
+            ran.paths.iter().any(|dir| {
+                let dir = dir.as_str();
+                if path == dir {
+                    return true;
+                }
+                let rest = if dir == "." {
+                    Some(path.as_str())
+                } else {
+                    path.strip_prefix(dir).and_then(|r| r.strip_prefix('/'))
+                };
+                !dir.ends_with(".bats")
+                    && path.ends_with(".bats")
+                    && rest.is_some_and(|rest| {
+                        !rest.split('/').any(|part| part == "..")
+                            && (ran.recursive || !rest.contains('/'))
+                    })
+            })
+        })
+}
+
+/// What a bats run selected.
+struct BatsRun {
+    /// The files and directories it named, without `./` or a trailing `/`.
+    paths: Vec<String>,
+    /// `-r`: the directories' subdirectories too.
+    recursive: bool,
+    /// It ran only the tests a name, tag or status picked.
+    narrowed: bool,
+}
+
+impl BatsRun {
+    /// None for anything but bats, an option this does not know, or a run
+    /// that names no file.
+    fn parse(argv: &[String]) -> Option<Self> {
+        let (program, args) = argv.split_first()?;
+        if program.rsplit('/').next() != Some("bats") {
+            return None;
+        }
+        let mut run = Self {
+            paths: Vec::new(),
+            recursive: false,
+            narrowed: false,
+        };
+        let mut args = args.iter();
+        while let Some(arg) = args.next() {
+            let (flag, inline) = match arg.split_once('=') {
+                Some((flag, value)) if flag.starts_with("--") => (flag, Some(value)),
+                _ => (arg.as_str(), None),
+            };
+            let mut value = || inline.is_some() || args.next().is_some();
+            match flag {
+                "-r" | "--recursive" => run.recursive = true,
+                "-t"
+                | "--tap"
+                | "-p"
+                | "--pretty"
+                | "-T"
+                | "--timing"
+                | "-x"
+                | "--trace"
+                | "--verbose-run"
+                | "--print-output-on-failure"
+                | "--show-output-of-passing-tests"
+                | "--no-tempdir-cleanup"
+                | "--no-parallelize-across-files"
+                | "--no-parallelize-within-files"
+                | "--abort" => {}
+                "-j"
+                | "--jobs"
+                | "-F"
+                | "--formatter"
+                | "-o"
+                | "--output"
+                | "--report-formatter"
+                | "--gather-test-outputs-in"
+                | "--code-quote-style"
+                | "--line-reference-format"
+                | "--parallel-binary-name" => {
+                    if !value() {
+                        return None;
+                    }
+                }
+                "-f" | "--filter" | "--filter-status" | "--filter-tags" => {
+                    if !value() {
+                        return None;
+                    }
+                    run.narrowed = true;
+                }
+                "--" => {}
+                _ if flag.starts_with('-') => return None,
+                path => {
+                    let path = path.trim_start_matches("./").trim_end_matches('/');
+                    run.paths
+                        .push(if path.is_empty() { "." } else { path }.to_string());
+                }
+            }
+        }
+        (!run.paths.is_empty()).then_some(run)
     }
 }
 
@@ -979,6 +1096,12 @@ pub(crate) struct Checks {
     /// The newest lint run through hk (`hk check`, `jouet diag check`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hk: Option<Run>,
+    /// The newest hk check that passed and covered every changed file,
+    /// which a later check of only some files does not undo at its tree.
+    /// Kept apart from `passes`, whose cap other lint runs would push it
+    /// out of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hk_whole: Option<Run>,
     /// What the stop hook last blocked for, until a run is recorded here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raised: Option<Raised>,
@@ -1259,6 +1382,26 @@ pub(crate) struct Block {
     /// What to keep in each tree's checks once the stop is blocked, by
     /// root.
     pub raised: Vec<(String, Raised)>,
+}
+
+impl Block {
+    /// What each reason raised now is about, for the ledger: `failed-test`,
+    /// `failed-lint` or `failed-build` for a failure nothing has cleared,
+    /// `changed-after-pass` for files changed after the last passing test
+    /// run, `hk-partial` for an hk check of only some files, and
+    /// `hk-changed` for files changed after the last hk check passed.
+    pub(crate) fn about(&self) -> Vec<String> {
+        self.raised
+            .iter()
+            .flat_map(|(_, raised)| &raised.told)
+            .filter_map(|key| key.split('\u{0}').next())
+            .map(|about| match about {
+                "untested" => "changed-after-pass".to_string(),
+                "hk-partial" | "hk-changed" => about.to_string(),
+                kind => format!("failed-{kind}"),
+            })
+            .collect()
+    }
 }
 
 /// The `jouet test --baseline` run that compares the failed full run's own
@@ -1859,6 +2002,9 @@ impl Checks {
                 }
             }
             if kind == Kind::Lint && through_hk(&run.command) {
+                if run.passed() && run.covers_changes() {
+                    self.hk_whole = Some(run.clone());
+                }
                 self.hk = Some(run.clone());
             }
             self.runs.insert(kind, run);
@@ -2050,6 +2196,15 @@ impl Checks {
             return None;
         }
         if !hk.covers_changes() {
+            // A check of every changed file that passed at these files
+            // still stands after a narrower one.
+            let whole_now = self
+                .hk_whole
+                .as_ref()
+                .is_some_and(|p| self.same_files(p.tree.as_deref(), tree().as_deref()));
+            if whole_now {
+                return None;
+            }
             let keyed = |reason| (reason, told_key("hk-partial", hk));
             return Some(keyed(format!(
                 "The last hk check passed for only some files (`{}`). Run `jouet diag check --changed` before you finish, or say why it isn't needed. [jouet: verify]",
@@ -3584,6 +3739,66 @@ mod tests {
     }
 
     #[test]
+    fn a_bats_run_of_a_directory_covers_its_files() {
+        // As the checks rule records bats: partial, with no selector.
+        let bats = |command: &str, code| Record {
+            selector: None,
+            ..test(command, code, "")
+        };
+        let covered = |ran: &str, failed: &str| {
+            let mut state = Checks::default();
+            state.record([bats(failed, 1)], Some("t1"));
+            state.record([bats(ran, 0)], Some("t1"));
+            reason(&state, "t1").is_none()
+        };
+        assert!(covered(
+            "jouet test --cmd -- bats -j 8 test/",
+            "jouet test --cmd -- bats test/rule.bats"
+        ));
+        assert!(covered("bats --jobs=8 --tap test", "bats ./test/rule.bats"));
+        assert!(covered(
+            "env PATH=target/debug:/usr/bin test/bats/bin/bats -j 8 test",
+            "bats test/rule.bats -f name"
+        ));
+        assert!(covered("bats test", "bats test/a.bats test/b.bats"));
+        assert!(covered("bats -r test", "bats test/sub/a.bats"));
+        assert!(covered("bats .", "bats a.bats"));
+        // Not a subdirectory without -r, nor a sibling or a name filter.
+        assert!(!covered("bats test", "bats test/sub/a.bats"));
+        assert!(!covered("bats test", "bats tests/a.bats"));
+        assert!(!covered("bats test", "bats test/../other/a.bats"));
+        assert!(!covered("bats -f name test", "bats test/a.bats"));
+        assert!(!covered("bats --filter-tags slow test", "bats test/a.bats"));
+        assert!(!covered("bats test/a.bats", "bats test/b.bats"));
+        assert!(!covered("bats test", "bats -r test"));
+        assert!(!covered("bats --unknown test", "bats test/a.bats"));
+        assert!(!covered("bats -c test", "bats test/a.bats"));
+        assert!(!covered("bats-core test", "bats test/a.bats"));
+        assert!(!covered("cargo test", "bats test/a.bats"));
+    }
+
+    #[test]
+    fn a_block_names_what_each_reason_is_about() {
+        let mut state = Checks::default();
+        let lint = |command: &str, code: i32, scope: &str| record(Kind::Lint, command, code, scope);
+        state.record([test("cargo test", 0, "full")], Some("t1"));
+        state.record([lint("hk check src/a.rs", 0, "files src/a.rs")], Some("t1"));
+        state.record(
+            [record(Kind::Build, "cargo build", 101, "full")],
+            Some("t1"),
+        );
+        let raised = state.block(|| Some("t2".into()), true, true).unwrap();
+        let block = Block {
+            reason: String::new(),
+            raised: vec![(String::new(), raised)],
+        };
+        assert_eq!(
+            block.about(),
+            ["failed-build", "changed-after-pass", "hk-partial"]
+        );
+    }
+
+    #[test]
     fn a_pass_of_another_runner_never_widens_to_cover_a_failure() {
         let mut state = Checks::default();
         state.record([test("mise run test", 0, "full")], Some("t1"));
@@ -4035,12 +4250,31 @@ mod tests {
         assert_eq!(state.block_reason(|| Some("t2".into()), false), None);
         state.record([lint("hk check src/a.rs", 0, "files src/a.rs")], Some("t1"));
         assert!(!state.hk_passed_at(|| Some("t1".into())));
-        // At the same tree, a check of some files still asks for the changed ones.
-        let why = state.block_reason(|| Some("t1".into()), true).unwrap();
+        // At the same tree, the check of the changed files that passed
+        // there still stands.
+        assert_eq!(state.block_reason(|| Some("t1".into()), true), None);
+        // At another, a check of some files asks for the changed ones.
+        state.record([lint("hk check src/a.rs", 0, "files src/a.rs")], Some("t2"));
+        let why = state.block_reason(|| Some("t2".into()), true).unwrap();
         assert!(
             why.starts_with("The last hk check passed for only some files (`hk check src/a.rs`)"),
             "{why}"
         );
+        // Until a full one passes there, however many other lint runs
+        // pass after it.
+        state.record([lint("hk check --all", 0, "full")], Some("t2"));
+        for n in 0..20 {
+            let file = format!("src/{n}.rs");
+            state.record(
+                [lint(
+                    &format!("hk check {file}"),
+                    0,
+                    &format!("files {file}"),
+                )],
+                Some("t2"),
+            );
+        }
+        assert_eq!(state.block_reason(|| Some("t2".into()), true), None);
         // A failing hk check is a lint failure like any other.
         state.record([lint("hk check --all", 1, "full")], Some("t3"));
         let why = state.block_reason(|| Some("t3".into()), true).unwrap();
