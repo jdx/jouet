@@ -38,6 +38,8 @@ pub(crate) struct Project {
 pub(crate) struct Checks {
     /// The whole suite.
     pub(crate) full: Option<String>,
+    /// A verified project-specific invocation of the affected selector.
+    pub(crate) affected: Option<String>,
     /// A focused check by what it covers: `unit`, `e2e`, `bats` and so on.
     pub(crate) focused: BTreeMap<String, String>,
     pub(crate) lint: Option<String>,
@@ -100,7 +102,17 @@ pub(crate) fn read(root: &Path) -> Option<Result<Project, String>> {
 }
 
 pub(crate) fn parse(text: &str) -> Result<Project, String> {
-    toml::from_str(text).map_err(|e: toml::de::Error| e.message().to_string())
+    let project: Project =
+        toml::from_str(text).map_err(|e: toml::de::Error| e.message().to_string())?;
+    if project
+        .checks
+        .affected
+        .as_deref()
+        .is_some_and(|command| inline_command(command).is_none())
+    {
+        return Err("checks.affected must be a nonempty single-line command of at most 200 characters without backticks".to_string());
+    }
+    Ok(project)
 }
 
 /// One line for the session-start primer naming the project's checks, when
@@ -122,6 +134,24 @@ pub(crate) fn primer_line(cwd: &Path) -> Option<String> {
 pub(crate) fn trusted(root: &Path) -> Option<Result<Project, String>> {
     let project = read(root)?;
     repo_trusted(root).then_some(project)
+}
+
+/// A short, trusted command suitable for the inline session primer.
+pub(crate) fn affected_command(cwd: &Path) -> Option<String> {
+    let root = crate::verify::root_of(cwd);
+    let command = trusted(Path::new(&root))?.ok()?.checks.affected?;
+    inline_command(&command).map(str::to_string)
+}
+
+fn inline_command(command: &str) -> Option<&str> {
+    let command = command.trim();
+    if command.is_empty()
+        || command.chars().count() > 200
+        || command.chars().any(|c| c.is_control() || c == '`')
+    {
+        return None;
+    }
+    Some(command)
 }
 
 /// Whether the repository's jouet files at `root` run.
@@ -232,6 +262,30 @@ fn line(checks: &Checks) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn affected_command_is_a_bounded_single_line() {
+        let project =
+            parse("[checks]\naffected = 'env -u NO_COLOR jouet test --affected'\n").unwrap();
+        assert_eq!(
+            inline_command(project.checks.affected.as_deref().unwrap()),
+            Some("env -u NO_COLOR jouet test --affected")
+        );
+        assert_eq!(inline_command(" "), None);
+        assert_eq!(inline_command("first\nsecond"), None);
+        assert_eq!(inline_command("echo `bad`"), None);
+        assert_eq!(inline_command(&"x".repeat(201)), None);
+        assert!(
+            parse("[checks]\naffected = ''\n")
+                .unwrap_err()
+                .contains("checks.affected")
+        );
+        assert!(
+            parse("[checks]\naffected = 'echo `bad`'\n")
+                .unwrap_err()
+                .contains("checks.affected")
+        );
+    }
 
     #[test]
     fn the_map_is_named_with_its_length_not_inlined() {

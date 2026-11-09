@@ -45,6 +45,7 @@ The skill records the checks it established in `.jouet/project.toml`, which you 
 ```toml
 [checks]
 full = "mise run test"
+affected = "env -u NO_COLOR jouet test --affected" # when this project needs it
 lint = "jouet diag check --changed"
 before_push = ["cargo clippy --workspace --all-targets -- -D warnings"]
 
@@ -62,6 +63,8 @@ e2e = "mise run test:e2e"
 Once the repository's jouet files are trusted, the session-start primer names them in one line: `jouet: prefer these project-specific checks over generic examples when applicable (.jouet/project.toml): bats …; unit …; full suite …; before pushing …`. Every later session then starts knowing how this project runs its focused tests and what CI enforces, instead of looking for it. In the benchmark, agents that did not know a project's focused bats command spent several requests finding a way to run it. The keys are `full`, `lint`, `before_push` (a list), `focused` (a table, by what each check covers), `ci` and `broken`.
 
 When the check list exceeds the primer budget, jouet omits whole entries and gives their count and the configuration path; it never prints part of a command.
+
+When a project needs an environment adjustment for affected tests, `checks.affected` supplies the verified command in the primer in place of the generic example. It is used only for a trusted project with an available affected-test adapter. The command is guidance for the agent; jouet does not execute it at session start. It must be a nonempty single line of at most 200 characters without backticks. Verify that it selects the intended tests with a representative change before recording it; on a clean repository, a suitable historical change can be selected with `--since` without modifying the working tree.
 
 The skill runs each check once before it records it. For a focused command with a test placeholder, it verifies representative tests for the packages and test types the command claims to cover; configurations can include one kind of test and exclude another. A file placeholder accepts a complete path unless the check is explicitly scoped to a subset. The skill carries required environment settings into every check that may run the affected test. If a run selects no tests or affected projects, that does not establish coverage, and an unverified scope is reported instead of recorded as working. A check that is slow, or needs services or tools only CI has, goes in `ci`: the primer tells agents to push and [`jouet wait ci`](/commands/wait) instead of running it. A check that already fails before any change, for a reason outside the code, goes in `broken` with that reason. The primer tells agents it is not theirs to fix, and a failed run of it does not hold up finishing, as a failure that [blames the machine](/setup#what-clears-a-failure) does not. Remove the entry once the environment is fixed. An unknown key makes the file unreadable, so a typo is not silently dropped.
 

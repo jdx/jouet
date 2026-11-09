@@ -106,6 +106,7 @@ check instead of looking for it:
 ```toml
 [checks]
 full = "mise run test"                     # the whole suite
+affected = "env -u NO_COLOR jouet test --affected" # only when verified and needed here
 lint = "jouet diag check --changed"
 before_push = ["cargo clippy --workspace --all-targets -- -D warnings"]
 
@@ -121,6 +122,18 @@ e2e = "mise run test:e2e"
 ```
 
 These are an example; write this project's own commands, not these.
+
+When an affected-test adapter is available, verify the exact affected command
+in the agent's environment with a representative changed file and a nonempty
+test selection. If it needs project-specific environment settings, record the
+verified invocation as `checks.affected`; it replaces the generic affected
+example in the primer. Do not assume `mise x` applies settings declared only
+inside a task. If no representative selection is available, do not record a
+command as verified; report the gap and use the project's established checks.
+When a clean repository has suitable history, `--since` the parent of a recent
+representative source change can provide a nonempty selection without editing
+the working tree. Confirm the selected tests actually cover that change; do
+not treat a configuration-only commit or an empty plan as evidence.
 
 List only commands you confirmed from the project's tasks and instructions,
 and checked where you can (a dry-run selection, `--help`, or a run the task
