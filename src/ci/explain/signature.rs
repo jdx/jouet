@@ -438,11 +438,24 @@ Diff in /w/src/a.rs at line 4:",
         );
         assert_eq!(test.infrastructure(), None);
 
+        let compile = Signature::of(
+            None,
+            &lines(&format!(
+                "error[E0425]: cannot find value `missing`\n{download}"
+            )),
+        );
+        assert_eq!(compile.infrastructure(), None);
+
         let missing = Signature::of(
             None,
             &lines("Could not download https://example.com/file (HTTP 404):"),
         );
         assert_eq!(missing.infrastructure(), None);
+        let missing_curl = Signature::of(
+            None,
+            &lines("curl: (22) The requested URL returned error: 404"),
+        );
+        assert_eq!(missing_curl.infrastructure(), None);
     }
 
     #[test]
