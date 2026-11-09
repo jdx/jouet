@@ -68,9 +68,12 @@ pub(crate) fn run(args: &CostArgs, out: &Output) -> Exit {
         Some(Err(e)) => return out.error(Exit::Usage, &format!("--min: {e}")),
     };
     let costs = Costs::load(&cwd);
-    let sequences = if args.sequences {
+    let (sequences, sequences_filtered_out) = if args.sequences {
         match crate::cost::sequences::load(&cwd) {
-            Ok(found) => Some(found.into_iter().filter(|s| s.median_ms >= min).collect()),
+            Ok(found) => {
+                let (matching, filtered_out) = filter_sequences(found, min);
+                (Some(matching), filtered_out)
+            }
             Err(e) => {
                 return out.error(
                     Exit::Precondition,
@@ -79,7 +82,7 @@ pub(crate) fn run(args: &CostArgs, out: &Output) -> Exit {
             }
         }
     } else {
-        None
+        (None, false)
     };
     let report = Report {
         commands: costs.table().into_iter().filter(|e| e.ms >= min).collect(),
@@ -90,11 +93,13 @@ pub(crate) fn run(args: &CostArgs, out: &Output) -> Exit {
             .sequences
             .then(|| crate::settings::Settings::load().cost.sequences),
     };
-    out.result(&report, || text(&report, costs.is_empty(), min));
+    out.result(&report, || {
+        text(&report, costs.is_empty(), sequences_filtered_out)
+    });
     Exit::Ok
 }
 
-fn text(report: &Report, empty: bool, min: u64) -> String {
+fn text(report: &Report, empty: bool, sequences_filtered_out: bool) -> String {
     let mut s = String::new();
     if empty {
         let _ = writeln!(
@@ -141,8 +146,8 @@ fn text(report: &Report, empty: bool, min: u64) -> String {
         }
         s.push_str("\nSuccessive recorded checks in the same session and worktree (other work and cache changes may intervene):\n");
         if sequences.is_empty() {
-            if min > 0 {
-                s.push_str("  no sequences meet --min (at least 3 matching pairs are needed)\n");
+            if sequences_filtered_out {
+                s.push_str("  no sequences meet --min\n");
             } else {
                 s.push_str("  not enough observations (at least 3 matching pairs are needed)\n");
             }
@@ -163,6 +168,13 @@ fn text(report: &Report, empty: bool, min: u64) -> String {
     s
 }
 
+fn filter_sequences(found: Vec<Observation>, min: u64) -> (Vec<Observation>, bool) {
+    let had_sequences = !found.is_empty();
+    let matching: Vec<_> = found.into_iter().filter(|s| s.median_ms >= min).collect();
+    let filtered_out = had_sequences && matching.is_empty();
+    (matching, filtered_out)
+}
+
 /// Keep sequence bounds exact: truncating the maximum could put an observed
 /// duration outside the range shown to the reader.
 fn sequence_bound(ms: u64) -> String {
@@ -181,7 +193,7 @@ fn runs(n: usize) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{Observation, Report, sequence_bound, text};
+    use super::{Observation, Report, filter_sequences, sequence_bound, text};
 
     #[test]
     fn sequence_bounds_keep_millisecond_precision() {
@@ -208,7 +220,7 @@ mod tests {
             sequences_recording: Some(true),
         };
         assert!(
-            text(&report, false, 0)
+            text(&report, false, false)
                 .contains("median 1.500s for the second check (3 pairs; range 1.200s–1.800s)")
         );
     }
@@ -222,10 +234,28 @@ mod tests {
             sequences: Some(Vec::new()),
             sequences_recording: Some(false),
         };
-        let filtered = text(&report, true, 60_000);
+        let filtered = text(&report, true, true);
         assert!(filtered.contains("no individual command timings yet"));
         assert!(filtered.contains("no sequences meet --min"));
         assert!(!filtered.contains("not enough observations"));
-        assert!(text(&report, true, 0).contains("not enough observations"));
+        assert!(!filtered.contains("at least 3 matching pairs are needed"));
+        assert!(text(&report, true, false).contains("not enough observations"));
+    }
+
+    #[test]
+    fn sequence_filter_distinguishes_missing_from_filtered_observations() {
+        let observation = || Observation {
+            before: "build".into(),
+            after: "test".into(),
+            median_ms: 1_500,
+            min_ms: 1_200,
+            max_ms: 1_800,
+            samples: 3,
+        };
+        assert!(!filter_sequences(Vec::new(), 60_000).1);
+        assert!(filter_sequences(vec![observation()], 60_000).1);
+        let (matching, filtered_out) = filter_sequences(vec![observation()], 1_500);
+        assert_eq!(matching.len(), 1);
+        assert!(!filtered_out);
     }
 }
