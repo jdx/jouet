@@ -1096,6 +1096,12 @@ pub(crate) struct Checks {
     /// The newest lint run through hk (`hk check`, `jouet diag check`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hk: Option<Run>,
+    /// The newest hk check that passed and covered every changed file,
+    /// which a later check of only some files does not undo at its tree.
+    /// Kept apart from `passes`, whose cap other lint runs would push it
+    /// out of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hk_whole: Option<Run>,
     /// What the stop hook last blocked for, until a run is recorded here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raised: Option<Raised>,
@@ -1996,6 +2002,9 @@ impl Checks {
                 }
             }
             if kind == Kind::Lint && through_hk(&run.command) {
+                if run.passed() && run.covers_changes() {
+                    self.hk_whole = Some(run.clone());
+                }
                 self.hk = Some(run.clone());
             }
             self.runs.insert(kind, run);
@@ -2189,13 +2198,10 @@ impl Checks {
         if !hk.covers_changes() {
             // A check of every changed file that passed at these files
             // still stands after a narrower one.
-            let whole_now = self.passes.get(&Kind::Lint).is_some_and(|passes| {
-                passes.iter().any(|p| {
-                    through_hk(&p.command)
-                        && p.covers_changes()
-                        && self.same_files(p.tree.as_deref(), tree().as_deref())
-                })
-            });
+            let whole_now = self
+                .hk_whole
+                .as_ref()
+                .is_some_and(|p| self.same_files(p.tree.as_deref(), tree().as_deref()));
             if whole_now {
                 return None;
             }
@@ -4254,9 +4260,20 @@ mod tests {
             why.starts_with("The last hk check passed for only some files (`hk check src/a.rs`)"),
             "{why}"
         );
-        // Until a full one passes there.
+        // Until a full one passes there, however many other lint runs
+        // pass after it.
         state.record([lint("hk check --all", 0, "full")], Some("t2"));
-        state.record([lint("hk check src/b.rs", 0, "files src/b.rs")], Some("t2"));
+        for n in 0..20 {
+            let file = format!("src/{n}.rs");
+            state.record(
+                [lint(
+                    &format!("hk check {file}"),
+                    0,
+                    &format!("files {file}"),
+                )],
+                Some("t2"),
+            );
+        }
         assert_eq!(state.block_reason(|| Some("t2".into()), true), None);
         // A failing hk check is a lint failure like any other.
         state.record([lint("hk check --all", 1, "full")], Some("t3"));
