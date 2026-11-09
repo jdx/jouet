@@ -55,6 +55,25 @@ primer() {
 	assert_output '["codex",["interrupt","stop"],false]'
 }
 
+@test "named transcript paths are detected from contents" {
+	cp "$CODEX_FILE" "$HOME/copied.jsonl"
+	run --separate-stderr jouet wind digest "$HOME/copied.jsonl" --harness codex --json
+	assert_success
+	run jq -r '.digests[0].harness' <<<"$output"
+	assert_output codex
+
+	cp "$CLAUDE_FILE" "$HOME/rollout-copied.jsonl"
+	run --separate-stderr jouet wind digest "$HOME/rollout-copied.jsonl" --json
+	assert_success
+	run jq -r '.digests[0].harness' <<<"$output"
+	assert_output claude
+
+	printf '%s\n' '{"type":"thread.started","thread_id":"example"}' >"$HOME/agent.jsonl"
+	run --separate-stderr jouet wind digest "$HOME/agent.jsonl"
+	assert_failure 3
+	[[ "$stderr" == *"event stream, not a supported rollout transcript"* ]]
+}
+
 @test "digest picks the last session, or every session since a time" {
 	run --separate-stderr jouet wind digest --last --json
 	assert_success

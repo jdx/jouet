@@ -3,6 +3,7 @@
 
 use jouet_audit::digest::{self, Digest, Options};
 use jouet_audit::{ClaudeCode, Codex, Filter, Gitleaks, Reader, Source};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
 /// Sessions read for one `--since` at most, the most recent kept.
@@ -53,6 +54,17 @@ impl Readers {
         out
     }
 
+    /// The reader for an explicitly named transcript, regardless of its filename.
+    fn for_transcript(&self, path: &Path) -> Result<&dyn Reader, String> {
+        let harness = transcript_harness(path)?;
+        let reader: Option<&dyn Reader> = match harness {
+            "codex" => self.codex.as_ref().map(|r| r as &dyn Reader),
+            "claude" => self.claude.as_ref().map(|r| r as &dyn Reader),
+            _ => None,
+        };
+        reader.ok_or_else(|| format!("no {harness} harness is selected for {}", path.display()))
+    }
+
     /// The reader a transcript's path belongs to: Codex names its files
     /// `rollout-*`, Claude Code by session ID.
     fn for_path(&self, path: &Path) -> Option<&dyn Reader> {
@@ -69,6 +81,49 @@ impl Readers {
 pub(crate) struct Found<'a> {
     reader: &'a dyn Reader,
     pub source: Source,
+}
+
+/// Detect supported rollout formats from a bounded prefix, including compressed files.
+/// Codex JSON event streams are not rollout transcripts and cannot be digested here.
+fn transcript_harness(path: &Path) -> Result<&'static str, String> {
+    let input = jouet_audit::open(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+    let input = BufReader::new(input.take(4 * 1024 * 1024));
+    for line in input.split(b'\n') {
+        let line = line.map_err(|e| format!("reading {}: {e}", path.display()))?;
+        let Ok(record) = serde_json::from_slice::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let kind = record.get("type").and_then(serde_json::Value::as_str);
+        if matches!(
+            kind,
+            Some("thread.started" | "item.started" | "jouet.ephemeral")
+        ) {
+            return Err(format!(
+                "{} is a Codex event stream, not a supported rollout transcript",
+                path.display()
+            ));
+        }
+        if matches!(
+            kind,
+            Some("session_meta" | "turn_context" | "response_item" | "event_msg")
+        ) && record
+            .get("payload")
+            .is_some_and(serde_json::Value::is_object)
+        {
+            return Ok("codex");
+        }
+        if matches!(kind, Some("user" | "assistant"))
+            && record
+                .get("message")
+                .is_some_and(serde_json::Value::is_object)
+        {
+            return Ok("claude");
+        }
+    }
+    Err(format!(
+        "cannot identify a supported transcript in the first 4 MiB of {}",
+        path.display()
+    ))
 }
 
 /// A session's own transcript, not one of its subagents'.
@@ -109,9 +164,7 @@ pub(crate) fn find<'a>(
     if let Select::Named(name) = select {
         let path = Path::new(name);
         if path.is_file() {
-            let reader = readers
-                .for_path(path)
-                .ok_or_else(|| format!("no harness reads {name}"))?;
+            let reader = readers.for_transcript(path)?;
             let source = Source::from_path(path.to_path_buf())
                 .map_err(|e| format!("reading {name}: {e}"))?;
             return Ok((vec![Found { reader, source }], 0));
@@ -321,6 +374,82 @@ pub(crate) fn digest_path(harness: &str, path: &Path, redactor: &Redactor) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_transcripts_are_detected_by_content_not_filename() {
+        let dir = tempfile::tempdir().unwrap();
+        let codex = dir.path().join("copied.jsonl");
+        let claude = dir.path().join("rollout-copied.jsonl");
+        std::fs::write(
+            &codex,
+            b"\xff\n{\"type\":\"session_meta\",\"payload\":{\"id\":\"x\"}}\n",
+        )
+        .unwrap();
+        std::fs::write(&claude, b"{\"type\":\"file-history-snapshot\"}\n{\"type\":\"user\",\"message\":{\"content\":\"hi\"}}\n").unwrap();
+        let readers = Readers {
+            codex: Some(Codex {
+                root: dir.path().into(),
+            }),
+            claude: Some(ClaudeCode {
+                root: dir.path().into(),
+            }),
+        };
+        assert_eq!(
+            find(&readers, &Select::Named(codex.to_str().unwrap()), None)
+                .unwrap()
+                .0[0]
+                .reader
+                .harness(),
+            "codex"
+        );
+        assert_eq!(
+            find(&readers, &Select::Named(claude.to_str().unwrap()), None)
+                .unwrap()
+                .0[0]
+                .reader
+                .harness(),
+            "claude"
+        );
+        let codex_only = Readers {
+            codex: readers.codex.clone(),
+            claude: None,
+        };
+        assert!(
+            find(&codex_only, &Select::Named(claude.to_str().unwrap()), None)
+                .err()
+                .unwrap()
+                .contains("no claude harness")
+        );
+    }
+
+    #[test]
+    fn compressed_codex_rollouts_are_detected() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("crates/jouet-audit/tests/fixtures/home/codex/archived_sessions/rollout-2026-10-28T09-00-00-01a00000-0000-7000-8000-000000000003.jsonl.zst");
+        assert_eq!(transcript_harness(&path).unwrap(), "codex");
+    }
+
+    #[test]
+    fn named_event_streams_and_unknown_files_are_not_empty_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent.jsonl");
+        std::fs::write(
+            &path,
+            b"{\"type\":\"jouet.ephemeral\"}\n{\"type\":\"thread.started\"}\n",
+        )
+        .unwrap();
+        assert!(
+            transcript_harness(&path)
+                .unwrap_err()
+                .contains("event stream")
+        );
+        std::fs::write(&path, b"{\"hello\":\"world\"}\n").unwrap();
+        assert!(
+            transcript_harness(&path)
+                .unwrap_err()
+                .contains("cannot identify")
+        );
+    }
 
     #[test]
     fn ids_come_from_file_names() {
