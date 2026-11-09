@@ -56,7 +56,11 @@ class FnoxBatsTest(unittest.TestCase):
     def test_hidden_timeout_recognizes_only_named_tap_failures(self):
         name = "FNOX_AGE_KEY outranks an unknown FNOX_AGE_IDENTITY"
         self.assertTrue(hidden_checker.failed_hidden(f"1..5\nnot ok 3 {name}\n".encode()))
+        self.assertTrue(hidden_checker.failed_hidden(f"1..5\nnot ok 3 {name} # in 12 ms\n"))
+        self.assertTrue(hidden_checker.failed_hidden(f"1..5\nnot ok 3 {name} in 12ms\n"))
         self.assertFalse(hidden_checker.failed_hidden(f"1..5\nok 3 {name}\n"))
+        self.assertFalse(hidden_checker.failed_hidden(f"1..5\nnot ok 3 {name} # skip unavailable\n"))
+        self.assertFalse(hidden_checker.failed_hidden(f"1..5\nnot ok 3 {name} # TODO\n"))
         self.assertFalse(hidden_checker.failed_hidden("not ok 3 another test\n"))
         self.assertFalse(hidden_checker.failed_hidden(f"# not ok 3 {name}\n"))
         self.assertFalse(hidden_checker.failed_hidden(None))

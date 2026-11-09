@@ -13,7 +13,9 @@ def failed_hidden(output):
     if isinstance(output, bytes):
         output = output.decode(errors="replace")
     names = set(re.findall(r'^\s*@test\s+"([^"]+)"\s*\{', SOURCE.read_text(), re.MULTILINE))
-    return any(name.strip() in names for name in re.findall(r'^not ok [1-9]\d*\s+([^\n]+)$', output or "", re.MULTILINE))
+    results = re.findall(r'^not ok [1-9]\d*\s+([^\n]+)$', output or "", re.MULTILINE)
+    return any(name.strip() in names or re.sub(r'(?: # in \d+ ms| in \d+ms)$', '', name).strip() in names
+               for name in results)
 
 
 def run_hidden(run):
