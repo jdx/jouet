@@ -1157,6 +1157,43 @@ SH
 	assert_output --partial 'baseline checkout has no project-local node_modules executable'
 }
 
+@test "--baseline does not pass an incomplete nextest run" {
+	cp "$PROJECT_ROOT/src/testlog/fixtures/nextest.txt" nextest-output
+	mkdir -p "$BATS_TEST_TMPDIR/bin"
+	cat >"$BATS_TEST_TMPDIR/bin/cargo" <<'SH'
+#!/bin/sh
+cat nextest-output
+exit 100
+SH
+	chmod +x "$BATS_TEST_TMPDIR/bin/cargo"
+	git add nextest-output
+	git commit -qm base
+	git checkout -qb work
+	printf 'change\n' >change
+
+	run --separate-stderr env JOUET_SESSION_ID=s1 jouet test --baseline --cmd -- cargo nextest run
+	assert_failure 1
+	assert_output --partial 'tests were not run'
+	run jq -c '[.trees[].failures.test // [] | length]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+	assert_output '[1]'
+	run --separate-stderr jouet test --baseline --json --cmd -- cargo nextest run
+	assert_failure 1
+	run jq -e '.ok == false and .suites[0].nextest_incomplete == true and (has("baseline") | not)' <<<"$output"
+	assert_success
+	# Even an inconsistent zero exit cannot turn the incomplete report green.
+	cat >"$BATS_TEST_TMPDIR/bin/cargo" <<'SH'
+#!/bin/sh
+cat nextest-output
+exit 0
+SH
+	chmod +x "$BATS_TEST_TMPDIR/bin/cargo"
+	run --separate-stderr jouet test --cmd -- cargo nextest run
+	assert_failure 4
+	assert_output --partial 'tests were not run'
+	assert_output --partial 'command exited 0 but nextest reported unrun tests'
+	refute_output --partial 'cmd: passed in'
+}
+
 @test "--baseline keeps an unnamed failure unresolved when the merge base passes" {
 	cat >check-command <<'SH'
 #!/bin/sh

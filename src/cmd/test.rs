@@ -244,6 +244,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     let stream = !out.json && out.mode == Mode::Human;
     let budget = args.budget.unwrap_or(testlog::DEFAULT_BUDGET);
     let mut exit = Exit::Ok;
+    let mut nextest_incomplete = false;
     // What each failed suite's output names, for --baseline.
     let mut failed: Vec<(&Job, Option<baseline::Evidence>, u64, u64)> = Vec::new();
     // How long the slowest failed suite took, which decides whether a
@@ -359,6 +360,8 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             let output = std::fs::read(&log).unwrap_or_default();
             let output = String::from_utf8_lossy(&output);
             let mut digest = testlog::digest_with(&output, code != 0, budget, &formats);
+            let incomplete_suite = digest.nextest_incomplete;
+            nextest_incomplete |= incomplete_suite;
             if code == 0 && digest.passed_names.is_empty() && !digest.passed_all.is_empty() {
                 digest.passed_changed = changed_tests(&digest.passed_all, &added);
             }
@@ -383,7 +386,11 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                     [record] => Some(record.command.as_str()),
                     _ => None,
                 };
-                ticket.finish(command, ms, code == 0 && !empty_test && !contradictory);
+                ticket.finish(
+                    command,
+                    ms,
+                    code == 0 && !empty_test && !contradictory && !incomplete_suite,
+                );
             }
             if code != 0 {
                 environment.push(testlog::environment_cause(&output, &formats));
@@ -416,7 +423,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 slowest_failure = slowest_failure.max(ms);
             }
             suite.digest = Some(digest);
-            let suite_exit = if empty_test || contradictory {
+            let suite_exit = if incomplete_suite && code != 0 {
+                Exit::Failed
+            } else if empty_test || contradictory || incomplete_suite {
                 Exit::Precondition
             } else {
                 (job.exit)(code)
@@ -432,14 +441,16 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // Every failed suite blames the machine: said here, where the agent
     // reads it, and not run again at the merge base, which fails the same
     // way on this machine.
-    let blamed = (!environment.is_empty() && environment.iter().all(Option::is_some))
-        .then(|| environment.iter().flatten().next().cloned())
-        .flatten();
+    let blamed =
+        (!nextest_incomplete && !environment.is_empty() && environment.iter().all(Option::is_some))
+            .then(|| environment.iter().flatten().next().cloned())
+            .flatten();
     // Every failed suite only refused its arguments: no test ran, so none
     // failed, and the run is not recorded as a failed test run.
-    let misuse = (!misused.is_empty() && misused.iter().all(Option::is_some))
-        .then(|| misused.iter().flatten().next().cloned())
-        .flatten();
+    let misuse =
+        (!nextest_incomplete && !misused.is_empty() && misused.iter().all(Option::is_some))
+            .then(|| misused.iter().flatten().next().cloned())
+            .flatten();
     if let Some(line) = &misuse
         && !out.json
     {
@@ -457,6 +468,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // Every failure is a test the change does not reach: said here, and
     // not run again at the merge base to prove what the selection shows.
     let unrelated = (exit == Exit::Failed
+        && !nextest_incomplete
         && blamed.is_none()
         && misuse.is_none()
         && !args.affected
@@ -476,7 +488,14 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             "unrelated: the failing tests are in packages this change does not reach ({cause}): `jouet test --affected` selects none of them, so finishing is not held up for them\n"
         ));
     }
-    let base = base.filter(|_| (blamed.is_none() && unrelated.is_none()) || args.baseline);
+    if nextest_incomplete && !out.json {
+        emit(
+            "incomplete: nextest says tests were not run after a failure; rerun with --no-fail-fast before comparing at the merge base\n",
+        );
+    }
+    let base = base.filter(|_| {
+        !nextest_incomplete && ((blamed.is_none() && unrelated.is_none()) || args.baseline)
+    });
     if let (Some(base), Exit::Failed) = (base, exit) {
         let unnamed = failed.iter().any(|(_, names, _, _)| names.is_none());
         // Set when only a kept comparison could be used, and none was.
@@ -1523,7 +1542,12 @@ fn text(report: &Report) -> String {
 /// agent (`!streamed`) the failures it found, cut to the budget.
 fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory: bool) -> String {
     let secs = suite.duration_ms.unwrap_or(0) as f64 / 1000.0;
+    let incomplete = suite.digest.as_ref().is_some_and(|d| d.nextest_incomplete);
     let mut s = match suite.exit_code {
+        Some(0) if incomplete => format!(
+            "{}: command exited 0 but nextest reported unrun tests in {secs:.1}s",
+            suite.adapter
+        ),
         Some(0) if empty_test => format!("{}: no test ran in {secs:.1}s", suite.adapter),
         Some(0) if contradictory => format!(
             "{}: command exited 0 but reported failing tests in {secs:.1}s",
@@ -1542,11 +1566,15 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
         let _ = write!(s, ": {counts}");
     }
     // A person watching saw them go by.
-    if suite.exit_code == Some(0) && !contradictory && !streamed && !digest.passed_names.is_empty()
+    if suite.exit_code == Some(0)
+        && !contradictory
+        && !incomplete
+        && !streamed
+        && !digest.passed_names.is_empty()
     {
         let _ = write!(s, " ({})", digest.passed_names.join(", "));
     }
-    if suite.exit_code == Some(0) && !streamed && !digest.passed_changed.is_empty() {
+    if suite.exit_code == Some(0) && !incomplete && !streamed && !digest.passed_changed.is_empty() {
         let _ = write!(
             s,
             ", among them the changed {}",
@@ -1563,7 +1591,9 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
             && argv.iter().any(|w| w == "--bin" || w.starts_with("--bin="))
             && !argv.iter().any(|w| w == "--lib")
     });
-    if empty_test && bin_only {
+    if incomplete && suite.exit_code == Some(0) {
+        s.push_str(" (exit 4)");
+    } else if empty_test && bin_only {
         s.push_str(
             ": a filter that matched nothing, or --bin, which runs only the binary's own tests? a crate's lib tests run with --lib (exit 4)",
         );
@@ -1574,7 +1604,7 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
     } else if digest.no_tests && suite.exit_code == Some(0) {
         s.push_str(", but no test ran: a filter or path that matched nothing?");
     }
-    if streamed || (suite.exit_code == Some(0) && !contradictory) {
+    if streamed || (suite.exit_code == Some(0) && !contradictory && !incomplete) {
         let _ = writeln!(s, " (full log: {log})");
         // A few warnings by name, so the agent can tell its own without
         // reading the log.

@@ -18,6 +18,35 @@ fn counts(d: &Digest) -> [u64; 3] {
 }
 
 #[test]
+fn nextest_reports_when_fail_fast_left_tests_unrun() {
+    let d = digest(&fixture("nextest"), true, DEFAULT_BUDGET);
+    assert!(d.nextest_incomplete);
+    let colored = "\x1b[33mwarning:\x1b[0m 4/43 tests were not run due to test failure (run with --no-fail-fast)";
+    assert!(digest(colored, true, DEFAULT_BUDGET).nextest_incomplete);
+    let nested = fixture("cargo-test-nested-nextest").replace(
+        "Summary [   1.343s] 4 tests run: 4 passed, 0 skipped",
+        "Summary [   1.343s] 4 tests run: 4 passed, 0 skipped\nwarning: 4/43 tests were not run due to test failure",
+    );
+    assert!(!digest(&nested, true, DEFAULT_BUDGET).nextest_incomplete);
+    assert!(
+        !digest(
+            "warning: 0/43 tests were not run due to test failure",
+            true,
+            DEFAULT_BUDGET
+        )
+        .nextest_incomplete
+    );
+    assert!(
+        !digest(
+            "warning: 4/43 tests were skipped by a filter",
+            true,
+            DEFAULT_BUDGET
+        )
+        .nextest_incomplete
+    );
+}
+
+#[test]
 fn playwright_failures_keep_the_test_path_and_assertion() {
     let output = "Running 3 tests using 1 worker\n\n  1) [chromium] › e2e/balance.spec.ts:5:3 › account › updates balance ───\n\n    Error: expect(locator).toHaveText(expected) failed\n    Expected: \"42.00\"\n    Received: \"17.00\"\n\n    attachment #1: screenshot ───\n    test-results/screenshot.png\n\n  2) e2e/account.test.ts:9:2 › account › opens\n\n    TimeoutError: waiting for button\n\n  2 failed\n    e2e/balance.spec.ts:5:3 › account › updates balance\n    e2e/account.test.ts:9:2 › account › opens\n  1 passed (12s)\n";
     let d = digest(output, true, DEFAULT_BUDGET);
