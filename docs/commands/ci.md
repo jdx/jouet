@@ -187,7 +187,7 @@ Jobs that failed the same way are reported together and judged once. Jobs that f
 | `flaky` | The same job passed on this commit in another attempt or run. Or the failed test passed on this commit in another job on the same OS. Or the same test failed on another branch's commit, and that branch passed later. |
 | `unknown` | Anything else, for example a test that failed once and has not failed in the other runs looked at. The evidence says what was checked. |
 
-A job that failed only because another one did, such as a `needs:` job that reports the result and has no failure of its own, *follows* that job and gets no verdict. A job whose cancellation completed after a failure is also listed as following it, but timing alone does not establish the cause. Earlier cancellations, or those without usable timestamps, are examined independently within the log limit.
+A job that failed only because another one did, such as a `needs:` job that reports the result and has no failure of its own, *follows* that job and gets no verdict. A job whose cancellation completed in or after the second when a failed step ended is also listed as following it, but timing alone does not establish the cause. If no failed step has a timestamp, the job completion time is used. Earlier cancellations, or those without usable timestamps, are examined independently within the log limit, including while a run is in progress.
 
 A test that fails on one OS and passes on another is not taken for a flake: a command, path or tool that behaves differently there fails the same way on every run on that OS. So it is `real`, and `--rerun` refuses it. It is `flaky` only once the same job, or another job on the same OS, has passed on the same commit.
 

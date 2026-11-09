@@ -296,6 +296,18 @@ impl Job {
         )
     }
 
+    fn failure_time(&self) -> Option<i64> {
+        self.doc["steps"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|step| step["conclusion"] == "failure")
+            .filter_map(|step| step["completed_at"].as_str())
+            .filter_map(jouet_output::time::parse_utc)
+            .min()
+            .or(self.completed_at)
+    }
+
     fn passed(&self) -> bool {
         self.conclusion == "success"
     }
@@ -792,7 +804,7 @@ fn explain_run(
     });
     let first_failed = reads
         .iter()
-        .filter_map(|r| r.job.completed_at.map(|end| (end, r.job.name.clone())))
+        .filter_map(|r| r.job.failure_time().map(|end| (end, r.job.name.clone())))
         .min();
     let cancelled: Vec<&Job> = jobs
         .iter()
@@ -801,7 +813,7 @@ fn explain_run(
     for job in cancelled {
         if let Some((_, name)) = first_failed
             .as_ref()
-            .filter(|(end, _)| job.completed_at.is_some_and(|time| time > *end))
+            .filter(|(end, _)| job.completed_at.is_some_and(|time| time >= *end))
         {
             following.push(Following {
                 name: job.name.clone(),
@@ -809,7 +821,7 @@ fn explain_run(
                 conclusion: job.conclusion.clone(),
                 follows: name.clone(),
             });
-        } else if run.completed() {
+        } else if run.completed() || !failed.is_empty() {
             // Earlier cancellations, and those with unknown timing, can have
             // their own cause. Keep the log-reading budget for the whole run.
             if reads.len() < OWN_LOGS {
