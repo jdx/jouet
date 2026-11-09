@@ -241,7 +241,7 @@ npm_deps() {
 }
 
 npm_install() {
-	local dir="$DEPS/$1"
+	local dir="${2:-$DEPS}/$1"
 	[[ -x "$dir/node_modules/.bin/$1" ]] && return 0
 	mkdir -p "$dir"
 	cp "$FIXTURES/$1/package.json" "$dir/"
@@ -249,20 +249,18 @@ npm_install() {
 }
 
 @test "a failed npm fixture install reports its error" {
-	DEPS="$BATS_TEST_TMPDIR/npm-deps"
 	cat >"$BATS_TEST_TMPDIR/bin/npm" <<'SH'
 #!/bin/sh
 echo 'fixture registry unavailable' >&2
 exit 1
 SH
 	chmod +x "$BATS_TEST_TMPDIR/bin/npm"
-	run --separate-stderr npm_install jest
+	run --separate-stderr npm_install jest "$BATS_TEST_TMPDIR/npm-deps"
 	assert_failure
 	assert_equal "$stderr" 'fixture registry unavailable'
 }
 
 @test "a successful npm fixture install is reused" {
-	DEPS="$BATS_TEST_TMPDIR/npm-deps"
 	cat >"$BATS_TEST_TMPDIR/bin/npm" <<'SH'
 #!/bin/sh
 printf 'install\n' >>"$BATS_TEST_TMPDIR/npm-invocations"
@@ -271,9 +269,9 @@ touch node_modules/.bin/jest
 chmod +x node_modules/.bin/jest
 SH
 	chmod +x "$BATS_TEST_TMPDIR/bin/npm"
-	run --separate-stderr npm_install jest
+	run --separate-stderr npm_install jest "$BATS_TEST_TMPDIR/npm-deps"
 	assert_success
-	run --separate-stderr npm_install jest
+	run --separate-stderr npm_install jest "$BATS_TEST_TMPDIR/npm-deps"
 	assert_success
 	assert_equal "$(cat "$BATS_TEST_TMPDIR/npm-invocations")" 'install'
 }
