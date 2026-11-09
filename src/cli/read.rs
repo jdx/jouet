@@ -22,8 +22,9 @@ use usage_rs::Args;
 /// whole too (with its outline in --json), since reading it after its
 /// outline would cost another call. Code is printed with line numbers, at most
 /// --max-lines lines (default 400; 0 is no limit) with a marker for the
-/// rest. Inside an agent session, lines this session was already shown, from
-/// a file unchanged since, collapse to one line; --again prints them.
+/// rest. Inside an agent session, a selection whose lines were all already
+/// shown, from a file unchanged since, collapses to one line; --again prints
+/// it. A partly overlapping selection is printed again.
 /// Definitions come from tree-sitter, for Rust, Python, JavaScript,
 /// TypeScript, Go, Ruby, Java, C, C++ and Luau.
 ///
