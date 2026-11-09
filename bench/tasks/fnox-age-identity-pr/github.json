@@ -1,5 +1,6 @@
 {
   "repo": "jdx/demo",
+  "repo_aliases": ["jdx/fnox"],
   "rest": {
     "/repos/jdx/demo/pulls/1099": {
       "number": 1099,

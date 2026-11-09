@@ -3,6 +3,7 @@ import json
 import unittest
 import urllib.request
 import zipfile
+from pathlib import Path
 
 from jbench.fake_github import FakeGitHub, materialize
 
@@ -95,6 +96,29 @@ class ServerTest(unittest.TestCase):
         with FakeGitHub(FIXTURE) as fake:
             status, _, body = get(fake.url + "/repos/jdx/demo/actions/runs/1/attempts/1/jobs?per_page=100")
         self.assertEqual((status, json.loads(body)["total_count"]), (200, 1))
+
+    def test_opt_in_repo_alias_shares_rest_state(self):
+        with FakeGitHub({**FIXTURE, "repo_aliases": ["jdx/fnox"]}) as fake:
+            status, _, body = get(fake.url + "/repos/jdx/fnox/actions/runs/1/attempts/1/jobs?per_page=100")
+            self.assertEqual((status, json.loads(body)["total_count"]), (200, 1))
+            status, reply = post(fake.url + "/repos/jdx/fnox/pulls/7/comments/11/replies", {"body": "done"})
+            self.assertEqual((status, reply["in_reply_to_id"]), (201, 11))
+            comments = json.loads(get(fake.url + "/repos/jdx/demo/pulls/7/comments")[2])
+            self.assertEqual([c["body"] for c in comments], ["rename this", "done"])
+            self.assertEqual(fake.world.log[0]["path"], "/repos/jdx/fnox/actions/runs/1/attempts/1/jobs?per_page=100")
+            self.assertEqual(get(fake.url + "/repos/jdx/fnox-extra/pulls/7")[0], 404)
+            self.assertEqual(get(fake.url + "/repos/other/fnox/pulls/7")[0], 404)
+        with FakeGitHub(FIXTURE) as fake:
+            self.assertEqual(get(fake.url + "/repos/jdx/fnox/pulls/7")[0], 404)
+
+    def test_fnox_task_accepts_the_real_repo_run_url(self):
+        fixture = json.loads((Path(__file__).parents[1] /
+                              "tasks/fnox-age-identity-pr/github.json").read_text())
+        with FakeGitHub(fixture) as fake:
+            canonical = get(fake.url + "/repos/jdx/demo/actions/runs/9001")
+            alias = get(fake.url + "/repos/jdx/fnox/actions/runs/9001")
+        self.assertEqual(canonical[0], 200)
+        self.assertEqual(alias, canonical)
 
     def test_text_status_and_zip(self):
         with FakeGitHub(FIXTURE) as fake:

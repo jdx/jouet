@@ -10,6 +10,7 @@ Both arms reach the same fake: `gh` through a wrapper that points it at
   JSON response, to text in `{"$text": ...}` or a zip archive of files in
   `{"$zip": {name: text}}`, with `"$status"` for an error; plus a pull request's
   review comments derived from its GraphQL threads, and replies to them;
+- optional `repo_aliases` map other repository names to that same REST state;
 - time: any object with `"$until": SECONDS` and `"$before": {...}` reads as
   its `$before` overlay until that many seconds after the server started,
   which is how checks stay pending and then fail.
@@ -171,6 +172,11 @@ class World:
     def rest(self, method: str, path: str, body: Any) -> tuple[int, Any]:
         """A REST response, or 404 when the fixture has none."""
         repo = self.fixture.get("repo", "")
+        for alias in self.fixture.get("repo_aliases", []):
+            prefix = f"/repos/{alias}/"
+            if path.startswith(prefix):
+                path = f"/repos/{repo}/" + path[len(prefix):]
+                break
         bare = urlsplit(path).path.rstrip("/")
         elapsed = self.elapsed()
         if method == "GET":

@@ -73,6 +73,11 @@ args = ["pr", "threads", "reply", "55503", "1099", "--body", "FNOX_AGE_IDENTITY 
 
 [[probe]]
 tool = "gh"
+args = ["api", "repos/jdx/fnox/actions/runs/9001", "--jq", ".id"]
+stdout_contains = "9001"
+
+[[probe]]
+tool = "gh"
 args = ["pr", "checks", "1099"]
 exit = 1
 

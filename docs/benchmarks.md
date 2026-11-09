@@ -28,6 +28,8 @@ The Commander checker also runs the original versions of changed or removed test
 
 A checker can report incomplete evidence through `_check.UNVERIFIED` and `_check.finish()`. If no assertion failed, the helper prints the reasons and a `JOUET_BENCH_UNVERIFIED_V1` marker, then exits 3. Exit 3 without that marker remains a failure. A checker timeout is also unverified. Runs with unverified checks are excluded from performance comparisons; an agent that fails or is stopped still counts as a failure in success rates and paired outcomes. `check-tasks` reports unverified results and does not claim the reference solution was validated; run details remain in `check.log`.
 
+A fake GitHub fixture may list `repo_aliases` alongside `repo`. REST requests under an alias use the same recorded responses and review state as the fixture's canonical repository; the original request path remains in the log, and response URLs still name the canonical repository. Other names remain unanswered.
+
 A Codex run whose independent checker passes but whose event stream is missing, incomplete or inconsistent is also unverified. This includes a started command without a completion: it might have been a check the agent relied on. The checker result stays in the run record, but the outcome and performance pair are excluded. Re-rendering an older report applies the same rule when its run records include command-activity evidence; missing historical event evidence cannot be recovered this way.
 
 Older SWE-bench results may have counted skipped or unnamed regression tests as passing. Re-run those tasks with this checker before relying on their accuracy or performance comparisons; rewriting an old report cannot recover missing coverage evidence.
