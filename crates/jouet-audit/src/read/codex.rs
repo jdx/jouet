@@ -353,6 +353,7 @@ impl State {
             calls: self.request_start..t.calls.len(),
             // A token count carries no ID to recognise a copy by.
             id: None,
+            ..Request::default()
         });
         self.request_start = t.calls.len();
     }

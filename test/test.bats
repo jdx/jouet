@@ -659,9 +659,11 @@ ran() {
 		jq -cn --arg c "$1" --arg cwd "$PWD" '{session_id: "s1", cwd: $cwd, tool_name: "Bash", tool_input: {command: $c}}'
 	}
 
-	# No test run yet: the first full run is not iterating.
+	# No test run yet: the first full run is not iterating. It gets only its
+	# 10-minute timeout.
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload pytest)"
-	assert_output ""
+	run jq -c '.hookSpecificOutput | del(.updatedInput)' <<<"$output"
+	assert_output '{"hookEventName":"PreToolUse"}'
 
 	ran 'pytest' 0
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload pytest)"
@@ -672,7 +674,8 @@ ran() {
 	# After an affected run, a full run is the one that has to happen.
 	ran 'jouet test --affected' 0
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload pytest)"
-	assert_output ""
+	run jq -c '.hookSpecificOutput | del(.updatedInput)' <<<"$output"
+	assert_output '{"hookEventName":"PreToolUse"}'
 }
 
 @test "the whole suite run again after its output was cut is not iterating" {
@@ -685,7 +688,8 @@ ran() {
 	# whole run again: affected-tests leaves that run alone.
 	ran 'pytest 2>&1 | tail -5' 0
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'jouet test')"
-	assert_output ""
+	run jq -c '.hookSpecificOutput | del(.updatedInput)' <<<"$output"
+	assert_output '{"hookEventName":"PreToolUse"}'
 
 	# Once it saw a whole run, running it whole again is iterating.
 	ran 'jouet test' 0
@@ -1162,7 +1166,8 @@ hint: jouet test --budget BYTES --cmd -- mise run test:e2e test_a"
 	done
 
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'cargo test > out.log 2>&1')"
-	assert_output ""
+	run jq -c '.hookSpecificOutput | del(.updatedInput)' <<<"$output"
+	assert_output '{"hookEventName":"PreToolUse"}'
 
 	# The whole suite, cut: plain `jouet test` runs it.
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'python3 -m unittest discover -v 2>&1 | tail -5')"

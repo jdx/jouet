@@ -277,6 +277,7 @@ fn read_one(
                     .unreadable
                     .push(unreadable(io::Error::other(error), true));
             }
+            transcript.start_tokens = transcript.requests.iter().find_map(|r| r.input_tokens);
             if let Some(since) = filter.since_ms {
                 transcript
                     .requests

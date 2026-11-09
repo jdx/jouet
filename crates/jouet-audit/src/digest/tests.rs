@@ -18,7 +18,10 @@ fn codex_exec_envelopes_are_not_reported_as_jouet_output() {
             calls: vec![call],
             ..Default::default()
         };
-        assert!(jouet_findings(&transcript).is_empty(), "{name}");
+        assert!(
+            jouet_findings(&transcript.calls.iter().collect::<Vec<_>>()).is_empty(),
+            "{name}"
+        );
     }
 }
 
@@ -33,7 +36,9 @@ fn codex_exec_command_specific_failure_is_still_reported() {
         ..Default::default()
     };
     assert_eq!(
-        jouet_findings(&transcript)[0].found.kind,
+        jouet_findings(&transcript.calls.iter().collect::<Vec<_>>())[0]
+            .found
+            .kind,
         jouet::Kind::Crash
     );
 }

@@ -129,6 +129,8 @@ fn shows_shapes_and_only_redacted_examples() {
     assert!(json.contains("gh pr checks 12 --repo acme/app"), "{json}");
     assert!(json.contains("Bearer <redacted>"), "{json}");
     assert!(json.contains("<heredoc: 3 lines>"), "{json}");
+    // Files are named only with examples.
+    assert!(json.contains(r#""file":"src/lib.rs""#), "{json}");
     for private in ["FAKE", "a - b", "write_text"] {
         assert!(!json.contains(private), "{private} leaked: {json}");
     }

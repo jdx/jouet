@@ -5,12 +5,15 @@
 
 Report where coding-agent sessions spend tokens and time
 
-Reads Claude Code's transcripts (~/.claude/projects) and Codex's rollouts (~/.codex/sessions and archived_sessions) on this machine, and ranks what their requests spent input tokens on: CI polling, process polling, PR threads, PR status, edits, builds and tests, reads and searches, git and more. For each costly category it names the jouet command or rule that addresses it, with an estimate of the saving, and it counts recurring patterns such as sleep loops. Nothing leaves the machine. Commands are shown only as shapes, with every value replaced, unless --examples asks for redacted examples.
+Reads Claude Code's transcripts (~/.claude/projects) and Codex's rollouts (~/.codex/sessions and archived_sessions) on this machine, and ranks what their requests spent input tokens on: CI polling, process polling, PR threads, PR status, edits, builds and tests, reads and searches, git and more. For each costly category it names the jouet command or rule that addresses it, with an estimate of the saving, and it counts recurring patterns such as sleep loops. For Claude Code it also lists the fixed context: each tool, skill and MCP server definition sent with every request, its tokens times those requests next to its calls, the setting that removes one nothing called, and how the total changed by week. Nothing leaves the machine. Commands are shown only as shapes, with every value replaced, unless --examples asks for redacted examples.
 
 ## Flags
 - **`--since <TIME>`** — Only requests made since TIME: a duration ago such as 7d or 12h, a date such as 2026-10-01, or RFC 3339
+- **`--until <TIME>`** — Only requests made before TIME, in the same forms as --since: with it, a past window such as the six hours an earlier audit covered
 - **`--harness <HARNESS>`** — Which transcripts to read: claude, codex or all (default all)
 - **`--project <PATH>`** — Only sessions that ran in PATH or a directory below it
 - **`--top <N>`** — Categories to list per harness in text (default 10; 0 lists all). --json lists every category
 - **`--examples`** — Show one redacted example command per shape and pattern
+- **`--what-if <SPEC>`** — Replay the sessions with fewer definitions or a smaller compaction window, and show the input they would have read: `window=200k,deny=Workflow,Artifact`. A denial replays exactly (up to its size estimate); a window is a range, from compaction at the window to 33k below it
+- **`--jouet`** — Report jouet's own costs instead, per session: stop blocks and whether a passing check resolved each, denials and what the agent ran next (from the hook ledger), usage errors, crashes and answers dropped for the raw command, and test logs read right after `jouet test`
 - **`-h --help`** — Print help

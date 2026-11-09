@@ -62,7 +62,7 @@ hook_command() {
 	assert_success
 	assert_output --partial "would create $HOME/.claude/settings.json"
 	assert_output --partial '+            "command": "sh -c '"'"'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude pre-tool-use'"'"'",'
-	assert_line "would create $HOME/.claude/skills/jouet-init/SKILL.md"
+	refute_output --partial jouet-init
 	assert [ ! -e "$HOME/.claude" ]
 }
 
@@ -82,9 +82,14 @@ hook_command() {
 	assert_line "created $HOME/.claude/skills/jouet/SKILL.md"
 }
 
-@test "setup installs onboarding by default for every harness and prints its invocation" {
+@test "setup installs onboarding only when asked, for every harness, and prints its invocation" {
+	run --separate-stderr jouet setup claude
+	assert_success
+	refute_output --partial jouet-init
+	assert [ ! -e "$HOME/.claude/skills/jouet-init" ]
+
 	for harness in claude codex cursor gemini copilot; do
-		run --separate-stderr jouet setup "$harness" --json
+		run --separate-stderr jouet setup "$harness" --init-skill --json
 		assert_success
 		if [[ "$harness" == claude ]]; then
 			skill_path="$HOME/.claude/skills/jouet-init/SKILL.md"
@@ -98,17 +103,24 @@ hook_command() {
 		assert_line 'name: jouet-init'
 	done
 
-	run --separate-stderr jouet setup claude
+	run --separate-stderr jouet setup claude --init-skill
 	assert_line --partial 'ask: /jouet-init'
-	run --separate-stderr jouet setup codex
+	run --separate-stderr jouet setup codex --init-skill
 	assert_line --partial "ask: \$jouet-init"
+
+	# Without the flag, an earlier setup's unedited copy goes.
+	run --separate-stderr jouet setup claude
+	assert_success
+	assert_line "removed $HOME/.claude/skills/jouet-init/SKILL.md"
+	assert [ ! -e "$HOME/.claude/skills/jouet-init" ]
+	refute_output --partial 'next:'
 }
 
 @test "onboarding is idempotent, uninstalled when unedited, and preserves local edits" {
-	jouet setup codex >/dev/null
+	jouet setup codex --init-skill >/dev/null
 	skill_path="$HOME/.agents/skills/jouet-init/SKILL.md"
 	cp "$skill_path" before-skill
-	run --separate-stderr jouet setup codex
+	run --separate-stderr jouet setup codex --init-skill
 	assert_success
 	assert_line "unchanged $skill_path"
 	run cmp before-skill "$skill_path"
@@ -120,10 +132,10 @@ hook_command() {
 	assert [ ! -e "$skill_path" ]
 	refute_output --partial 'next:'
 
-	jouet setup codex >/dev/null
+	jouet setup codex --init-skill >/dev/null
 	printf '\nmy project notes\n' >>"$skill_path"
 	cp "$skill_path" edited-skill
-	run --separate-stderr jouet setup codex
+	run --separate-stderr jouet setup codex --init-skill
 	assert_success
 	assert_line "kept $skill_path"
 	run --separate-stderr jouet setup codex --uninstall
@@ -272,7 +284,7 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	assert_success
 	assert_line "created $work/.claude/settings.local.json"
 	assert_line "created $work/.claude/skills/jouet/SKILL.md"
-	assert_line "note: git does not ignore .claude/settings.local.json or .claude/skills/jouet/SKILL.md or .claude/skills/jouet-init/SKILL.md, so \`git add\` could commit them: list them in .gitignore, or in .git/info/exclude for this clone alone"
+	assert_line "note: git does not ignore .claude/settings.local.json or .claude/skills/jouet/SKILL.md, so \`git add\` could commit them: list them in .gitignore, or in .git/info/exclude for this clone alone"
 	assert_golden "$work/.claude/settings.local.json" claude-hooks.json
 	assert [ ! -e "$work/.claude/settings.json" ]
 
@@ -296,27 +308,27 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 
 @test "Claude Code's project skill links to the shared .agents copy, and uninstalling removes only the link" {
 	init_repo
-	jouet setup codex --shared >/dev/null
-	jouet setup claude --shared >/dev/null
+	jouet setup codex --shared --init-skill >/dev/null
+	jouet setup claude --shared --init-skill >/dev/null
 	assert [ -L .claude/skills/jouet-init ]
 	assert_equal "$(readlink .claude/skills/jouet-init)" ../../.agents/skills/jouet-init
 	assert [ -f .agents/skills/jouet-init/SKILL.md ]
 	# Running it again changes nothing.
-	run --separate-stderr jouet setup claude --shared --json
+	run --separate-stderr jouet setup claude --shared --init-skill --json
 	assert_success
 	run jq -r '.files[] | select(.path | contains("jouet-init")) | .action' <<<"$output"
 	# The shared copy and the link to it.
 	assert_output $'unchanged\nunchanged'
-	jouet setup claude --shared --uninstall >/dev/null
+	jouet setup claude --shared --init-skill --uninstall >/dev/null
 	assert [ ! -e .claude/skills/jouet-init ]
 	assert [ -f .agents/skills/jouet-init/SKILL.md ]
 }
 
 @test "uninstalling Claude Code's shared skill, with no other harness set up, removes the shared copy too" {
 	init_repo
-	jouet setup claude --shared >/dev/null
+	jouet setup claude --shared --init-skill >/dev/null
 	assert [ -L .claude/skills/jouet-init ]
-	jouet setup claude --shared --uninstall >/dev/null
+	jouet setup claude --shared --init-skill --uninstall >/dev/null
 	assert [ ! -e .claude/skills/jouet-init ]
 	assert [ ! -e .agents/skills/jouet-init ]
 }
@@ -324,21 +336,21 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 @test "a dry run shows the shared copy and the link, and other harnesses keep the copy Claude Code links to" {
 	init_repo
 	work=$(pwd -P)
-	run --separate-stderr jouet setup claude --shared --dry-run
+	run --separate-stderr jouet setup claude --shared --init-skill --dry-run
 	assert_success
 	assert_line "would create $work/.agents/skills/jouet-init/SKILL.md"
 	assert_line "would link $work/.claude/skills/jouet-init"
 	assert [ ! -e .claude/skills/jouet-init ]
-	jouet setup claude --shared >/dev/null
-	jouet setup codex --shared >/dev/null
+	jouet setup claude --shared --init-skill >/dev/null
+	jouet setup codex --shared --init-skill >/dev/null
 	# Uninstalling Codex leaves the copy Claude Code still reads.
-	run --separate-stderr jouet setup codex --shared --uninstall
+	run --separate-stderr jouet setup codex --shared --init-skill --uninstall
 	assert_success
 	assert_line "kept $work/.agents/skills/jouet-init/SKILL.md"
 	assert [ -f .claude/skills/jouet-init/SKILL.md ]
 	# A dangling link from an older jouet is made whole again.
 	rm -r .agents/skills/jouet-init
-	jouet setup claude --shared >/dev/null
+	jouet setup claude --shared --init-skill >/dev/null
 	assert [ -L .claude/skills/jouet-init ]
 	assert [ -f .claude/skills/jouet-init/SKILL.md ]
 }
@@ -348,10 +360,10 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	work=$(pwd -P)
 	mkdir -p .agents/skills .claude
 	ln -s ../.agents/skills .claude/skills
-	jouet setup codex --shared >/dev/null
-	jouet setup claude --shared >/dev/null
+	jouet setup codex --shared --init-skill >/dev/null
+	jouet setup claude --shared --init-skill >/dev/null
 	assert [ ! -L .claude/skills/jouet-init ]
-	run --separate-stderr jouet setup codex --shared --uninstall
+	run --separate-stderr jouet setup codex --shared --init-skill --uninstall
 	assert_success
 	assert_line "kept $work/.agents/skills/jouet-init/SKILL.md"
 	assert [ -f .claude/skills/jouet-init/SKILL.md ]
@@ -363,11 +375,11 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	mkdir -p mine/jouet-init .claude/skills
 	echo "my skill" >mine/jouet-init/SKILL.md
 	ln -s ../../mine/jouet-init .claude/skills/jouet-init
-	run --separate-stderr jouet setup claude --shared
+	run --separate-stderr jouet setup claude --shared --init-skill
 	assert_success
 	assert_line "kept $work/.claude/skills/jouet-init/SKILL.md"
 	assert_equal "$(readlink .claude/skills/jouet-init)" ../../mine/jouet-init
-	run --separate-stderr jouet setup claude --shared --uninstall
+	run --separate-stderr jouet setup claude --shared --init-skill --uninstall
 	assert_success
 	assert_equal "$(readlink .claude/skills/jouet-init)" ../../mine/jouet-init
 	assert_content mine/jouet-init/SKILL.md $'my skill\n'
@@ -378,9 +390,9 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	work=$(pwd -P)
 	mkdir -p .agents/skills .claude
 	ln -s ../.agents/skills .claude/skills
-	jouet setup codex --shared >/dev/null
-	jouet setup claude --shared >/dev/null
-	run --separate-stderr jouet setup claude --shared --uninstall
+	jouet setup codex --shared --init-skill >/dev/null
+	jouet setup claude --shared --init-skill >/dev/null
+	run --separate-stderr jouet setup claude --shared --init-skill --uninstall
 	assert_success
 	assert_line "kept $work/.claude/skills/jouet-init/SKILL.md"
 	assert [ -f .agents/skills/jouet-init/SKILL.md ]
@@ -388,19 +400,19 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 
 @test "an earlier setup's own Claude Code skill directory becomes the link" {
 	init_repo
-	jouet setup claude --shared >/dev/null
+	jouet setup claude --shared --init-skill >/dev/null
 	rm .claude/skills/jouet-init
 	mkdir -p .claude/skills/jouet-init
 	cp .agents/skills/jouet-init/SKILL.md .claude/skills/jouet-init/SKILL.md
 	rm -r .agents/skills/jouet-init
-	jouet setup claude --shared >/dev/null
+	jouet setup claude --shared --init-skill >/dev/null
 	assert [ -L .claude/skills/jouet-init ]
 	assert [ -f .agents/skills/jouet-init/SKILL.md ]
 	# A directory of someone else's is left as it is.
 	rm .claude/skills/jouet-init
 	mkdir -p .claude/skills/jouet-init
 	echo "mine" >.claude/skills/jouet-init/notes.md
-	jouet setup claude --shared >/dev/null
+	jouet setup claude --shared --init-skill >/dev/null
 	assert [ ! -L .claude/skills/jouet-init ]
 	assert [ -f .claude/skills/jouet-init/notes.md ]
 }
@@ -637,4 +649,104 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	command=$(jq -r '.hooks.BeforeTool[0].hooks[0].command' "$HOME/.gemini/settings.json")
 	run --separate-stderr sh -c "$command" <<<"$input"
 	assert_output --partial '"decision":"deny"'
+}
+
+# Writes N Claude Code sessions under $HOME/.claude/projects that carried the
+# Bash and Workflow tools, the visualize MCP server and the docx skill, and
+# called only Bash, each reaching CONTEXT tokens.
+claude_sessions() {
+	local n=$1 context=${2:-50000} dir="$HOME/.claude/projects/-src-app" i
+	mkdir -p "$dir"
+	for ((i = 0; i < n; i++)); do
+		{
+			jq -nc '{type: "attachment", isSidechain: false, attachment: {type: "prompt_snapshot", tools: [
+				{name: "Bash", description: "Runs a command", input_schema: {}},
+				{name: "Workflow", description: ("x" * 4600), input_schema: {}},
+				{name: "mcp__visualize__show_widget", description: ("y" * 2300), input_schema: {}}]}}'
+			jq -nc '{type: "attachment", isSidechain: false, attachment: {type: "skill_listing",
+				content: "- docx: Word documents\n- loop: run a prompt on an interval"}}'
+			jq -nc --argjson c "$context" '{type: "assistant", message: {usage: {input_tokens: 0, cache_read_input_tokens: $c},
+				content: [{type: "tool_use", name: "Bash", input: {command: "ls"}}]}}'
+		} >"$dir/session-$i.jsonl"
+	done
+	jq -nc '{type: "user", message: {content: "<command-name>/loop</command-name>"}}' >>"$dir/session-0.jsonl"
+}
+
+@test "setup notes the context budget it could set, and writes none of it unasked" {
+	claude_sessions 20 640000
+	run --separate-stderr jouet setup claude
+	assert_success
+	assert_output --partial "note: setup can also cut what each request carries, changing nothing unless asked: \`jouet setup claude --compact-window 200k\` (20 of your last 20 sessions went past 200k tokens of context, up to 640k); and \`jouet setup claude --deny-unused\` (3 definitions none of your last 20 sessions used"
+	assert_output --partial 'tools Workflow; MCP servers visualize; 1 skills;'
+	run jq -c '[.autoCompactWindow, .permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
+	assert_output '[null,["Artifact","ArtifactComments","ArtifactData"],null]'
+	run --separate-stderr jouet setup claude --dry-run --json
+	run jq -c '.context_budget | [.compact_window, .past_window, [.unused[] | [.kind, .name]]]' <<<"$output"
+	assert_output '[200000,20,[["tool","Workflow"],["mcp","visualize"],["skill","docx"]]]'
+}
+
+@test "setup asked at a terminal writes nothing without a yes" {
+	claude_sessions 20 640000
+	run in_tty "XDG_STATE_HOME=$XDG_STATE_HOME" jouet setup claude
+	assert_success
+	assert_output --partial 'Compact conversations at 200k tokens of context (autoCompactWindow: 200000)?'
+	assert_output --partial 'Deny them? Skills stay available as /name.'
+	run jq -c '[.autoCompactWindow, .skillOverrides]' "$HOME/.claude/settings.json"
+	assert_output '[null,null]'
+}
+
+@test "a 200k model's sessions are not offered a window, and few sessions no denials" {
+	claude_sessions 19 150000
+	run --separate-stderr jouet setup claude
+	assert_success
+	refute_output --partial 'setup can also cut'
+	run --separate-stderr jouet setup claude --deny-unused
+	assert_success
+	assert_output --partial 'note: nothing to deny: only 19 recent sessions recorded their tools, and it takes 20'
+}
+
+@test "each context budget choice is one undo, and uninstall takes back both" {
+	claude_sessions 20
+	jq -n '{permissions: {deny: ["Bash(rm:*)"]}, skillOverrides: {loop: "off"}}' >"$HOME/.claude/settings.json"
+	run --separate-stderr jouet setup claude --compact-window 300k --deny-unused
+	assert_success
+	assert_output --partial "note: set autoCompactWindow to 300000; \`jouet setup claude --undo window\` takes it back"
+	assert_output --partial 'note: denied 2 unused tools and MCP servers and hid 1 unused skills from the model'
+	run jq -c '[.autoCompactWindow, .permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
+	assert_output '[300000,["Bash(rm:*)","Artifact","ArtifactComments","ArtifactData","Workflow","mcp__visualize"],{"loop":"off","docx":"user-invocable-only"}]'
+
+	run --separate-stderr jouet setup claude --undo window --dry-run
+	assert_success
+	assert_line "note: would remove the autoCompactWindow of 300000 that setup set"
+	run jq .autoCompactWindow "$HOME/.claude/settings.json"
+	assert_output 300000
+
+	run --separate-stderr jouet setup claude --undo window
+	assert_success
+	assert_line "note: removed the autoCompactWindow of 300000 that setup set"
+	run jq -c '[.autoCompactWindow, (.permissions.deny | length)]' "$HOME/.claude/settings.json"
+	assert_output '[null,6]'
+
+	run --separate-stderr jouet setup claude --undo unused
+	assert_success
+	run jq -c '[.permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
+	assert_output '[["Bash(rm:*)","Artifact","ArtifactComments","ArtifactData"],{"loop":"off"}]'
+
+	run --separate-stderr jouet setup claude --compact-window 200k --deny-unused
+	run --separate-stderr jouet setup claude --uninstall
+	assert_success
+	run jq -c . "$HOME/.claude/settings.json"
+	assert_output '{"permissions":{"deny":["Bash(rm:*)"]},"skillOverrides":{"loop":"off"}}'
+}
+
+@test "the context budget flags are for Claude Code's own settings" {
+	run --separate-stderr jouet setup codex --deny-unused
+	assert_failure 2
+	run --separate-stderr jouet setup claude --shared --compact-window 200k
+	assert_failure 2
+	run --separate-stderr jouet setup claude --compact-window 50k
+	assert_failure 2
+	assert_stderr --partial 'from 100k to 1m tokens'
+	run --separate-stderr jouet setup claude --uninstall --undo window
+	assert_failure 2
 }

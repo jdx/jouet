@@ -7,15 +7,15 @@ description: Use the jouet-init skill to have an agent fit jouet to a project's 
 `jouet setup` connects jouet to your agent. Fitting it to one project takes judgment about that project: which tests matter, which runs are expensive, and which repeated work is worth turning into a task or a rule. That part is a skill, **jouet-init**, which an agent runs in the project.
 
 ::: warning Breaking change before 1.0
-The `jouet-init` skill replaces the `jouet init` command. Run `jouet setup` again to install it, then invoke the skill in your agent.
+The `jouet-init` skill replaces the `jouet init` command. Run `jouet setup HARNESS --init-skill` to install it, then invoke the skill in your agent.
 :::
 
 ## Running it
 
-`jouet setup` installs the skill along with the hooks, and says what to do next:
+`jouet setup` installs the skill along with the hooks when you pass `--init-skill`, and says what to do next:
 
 ```sh
-jouet setup codex   # or: claude, cursor, gemini, copilot
+jouet setup codex --init-skill   # or: claude, cursor, gemini, copilot
 ```
 
 Start a new agent session in the project and run `$jouet-init` in Codex or `/jouet-init` in Claude Code, or ask:

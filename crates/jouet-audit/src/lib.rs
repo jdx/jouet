@@ -32,10 +32,13 @@
 //! look inside a script's body.
 
 mod analyze;
+mod carry;
 mod category;
 pub mod digest;
 mod event;
+mod fixed;
 mod gitleaks;
+mod own;
 mod pattern;
 mod read;
 mod record;
@@ -45,14 +48,20 @@ mod shape;
 pub mod stats;
 mod structure;
 mod time;
+mod whatif;
 
 pub use analyze::{
     Analyzer, CategoryReport, HarnessReport, PatternReport, Report, Saving, ShapeCount, Suggestion,
     Totals,
 };
+pub use carry::{Carried, CarriedCategory, CarriedFile};
 pub use category::{Category, categorize};
-pub use event::{Call, Message, MessageKind, Request, Tool, Transcript};
+pub use event::{
+    Call, Definition, DefinitionKind, Definitions, Message, MessageKind, Request, Tool, Transcript,
+};
+pub use fixed::{FixedContext, FixedItem, FixedPeriod, Growth, ItemKind};
 pub use gitleaks::Gitleaks;
+pub use own::{LogRead, OwnFinding, OwnSession};
 pub use pattern::{Pattern, Patterns, detect};
 pub use read::{
     ClaudeCode, Codex, Filter, Reader, Scan, ScanStats, Source, Unreadable, home, open, scan,
@@ -62,3 +71,4 @@ pub use redact::{example, redact};
 pub use shape::shape;
 pub use structure::{Part, structure};
 pub use time::parse_timestamp;
+pub use whatif::{Denied, Scenario, WhatIf, WhatIfReport};

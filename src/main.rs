@@ -4,6 +4,7 @@
 
 mod affected;
 mod agents;
+mod budget;
 mod ci;
 mod cli;
 mod cmd;

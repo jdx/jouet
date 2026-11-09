@@ -56,7 +56,7 @@ jouet --version
 
 ## Connect your agent {#tell-your-agent}
 
-For Claude Code, Codex, Cursor, Gemini CLI or Copilot, `jouet setup` adds jouet's hooks to the harness's settings file and installs the jouet-init skill:
+For Claude Code, Codex, Cursor, Gemini CLI or Copilot, `jouet setup` adds jouet's hooks to the harness's settings file:
 
 ```sh
 jouet setup claude   # or: codex, cursor, gemini, copilot
@@ -76,7 +76,7 @@ For another harness, add the snippet that `jouet skill --format agents-md` print
 
 ## Initialize your project
 
-Then start a new agent session in the project and ask it to use jouet-init: `/jouet-init` in Claude Code, `$jouet-init` in Codex, or in any harness:
+This is optional. Install the jouet-init skill with `jouet setup claude --init-skill` (or your harness), then start a new agent session in the project and ask it to use jouet-init: `/jouet-init` in Claude Code, `$jouet-init` in Codex, or in any harness:
 
 ```text
 Use the jouet-init skill to configure jouet for this project.

@@ -365,7 +365,7 @@ Print a shell completion script
 .SH "JOUET AUDIT"
 Report where coding\-agent sessions spend tokens and time
 
-Reads Claude Code's transcripts (~/.claude/projects) and Codex's rollouts (~/.codex/sessions and archived_sessions) on this machine, and ranks what their requests spent input tokens on: CI polling, process polling, PR threads, PR status, edits, builds and tests, reads and searches, git and more. For each costly category it names the jouet command or rule that addresses it, with an estimate of the saving, and it counts recurring patterns such as sleep loops. Nothing leaves the machine. Commands are shown only as shapes, with every value replaced, unless \-\-examples asks for redacted examples.
+Reads Claude Code's transcripts (~/.claude/projects) and Codex's rollouts (~/.codex/sessions and archived_sessions) on this machine, and ranks what their requests spent input tokens on: CI polling, process polling, PR threads, PR status, edits, builds and tests, reads and searches, git and more. For each costly category it names the jouet command or rule that addresses it, with an estimate of the saving, and it counts recurring patterns such as sleep loops. For Claude Code it also lists the fixed context: each tool, skill and MCP server definition sent with every request, its tokens times those requests next to its calls, the setting that removes one nothing called, and how the total changed by week. Nothing leaves the machine. Commands are shown only as shapes, with every value replaced, unless \-\-examples asks for redacted examples.
 .PP
 \fBUsage:\fR jouet audit [OPTIONS]
 .PP
@@ -374,6 +374,9 @@ Reads Claude Code's transcripts (~/.claude/projects) and Codex's rollouts (~/.co
 .TP
 \fB\-\-since\fR \fI<TIME>\fR
 Only requests made since TIME: a duration ago such as 7d or 12h, a date such as 2026\-10\-01, or RFC 3339
+.TP
+\fB\-\-until\fR \fI<TIME>\fR
+Only requests made before TIME, in the same forms as \-\-since: with it, a past window such as the six hours an earlier audit covered
 .TP
 \fB\-\-harness\fR \fI<HARNESS>\fR
 Which transcripts to read: claude, codex or all (default all)
@@ -386,6 +389,12 @@ Categories to list per harness in text (default 10; 0 lists all). \-\-json lists
 .TP
 \fB\-\-examples\fR
 Show one redacted example command per shape and pattern
+.TP
+\fB\-\-what\-if\fR \fI<SPEC>\fR
+Replay the sessions with fewer definitions or a smaller compaction window, and show the input they would have read: `window=200k,deny=Workflow,Artifact`. A denial replays exactly (up to its size estimate); a window is a range, from compaction at the window to 33k below it
+.TP
+\fB\-\-jouet\fR
+Report jouet's own costs instead, per session: stop blocks and whether a passing check resolved each, denials and what the agent ran next (from the hook ledger), usage errors, crashes and answers dropped for the raw command, and test logs read right after `jouet test`
 .TP
 \fB\-h, \-\-help\fR
 Print help
@@ -3106,7 +3115,9 @@ Print help
 .SH "JOUET SETUP"
 Install jouet's hooks into a coding agent's harness
 
-Merges hooks into Claude Code's settings.json, Codex's hooks.json, Cursor's hooks.json, Gemini CLI's settings.json or Copilot's hooks/jouet.json, keeping every other hook. The session\-start hook primes each session with the commands and rules, so the skill, which says the same, is installed only with \-\-skill or when priming is off ([hooks] prime). Running it again changes nothing. The jouet\-init project onboarding skill is always installed; \-\-uninstall removes only what jouet added. The hooks do nothing where jouet is not on PATH.
+Merges hooks into Claude Code's settings.json, Codex's hooks.json, Cursor's hooks.json, Gemini CLI's settings.json or Copilot's hooks/jouet.json, keeping every other hook. The session\-start hook primes each session with the commands and rules, so the skill, which says the same, is installed only with \-\-skill or when priming is off ([hooks] prime). Running it again changes nothing. The jouet\-init project onboarding skill is installed only with \-\-init\-skill; \-\-uninstall removes only what jouet added. The hooks do nothing where jouet is not on PATH.
+
+For Claude Code, setup also offers a context budget from your own recent sessions: a compaction window when they run on a 1M\-token model, and denying what none of them used. Asked at a terminal, otherwise only noted: nothing is written without \-\-compact\-window or \-\-deny\-unused, and \-\-undo takes each back.
 .PP
 \fBUsage:\fR jouet setup [OPTIONS] <HARNESS>
 .PP
@@ -3131,8 +3142,20 @@ Remove jouet's hooks and skills
 \fB\-\-skill\fR
 Install the skill as well, which the session\-start primer otherwise stands in for
 .TP
+\fB\-\-init\-skill\fR
+Install the jouet\-init skill, with which an agent fits jouet to a project's checks
+.TP
 \fB\-\-benchmark\fR
 Print a prompt for an agent to benchmark jouet on this project
+.TP
+\fB\-\-compact\-window\fR \fI<TOKENS>\fR
+Claude Code: compact a conversation once its context reaches TOKENS (100k to 1m), by setting autoCompactWindow. It pays on a 1M\-token model; a 200k one already compacts there
+.TP
+\fB\-\-deny\-unused\fR
+Claude Code: deny the tools and MCP servers that none of your last 50 sessions called, and hide from the model the skills none used (still there as /name)
+.TP
+\fB\-\-undo\fR \fI<CHOICE>\fR
+Claude Code: take back what \-\-compact\-window (window) or \-\-deny\-unused (unused) added, and nothing else
 .TP
 \fB\-h, \-\-help\fR
 Print help

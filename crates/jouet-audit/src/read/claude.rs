@@ -8,7 +8,10 @@
 
 use super::json::{Flag, Num, Obj, Output, Str};
 use super::{Filter, Reader, Source, files_under, home, lines, sources};
-use crate::event::{self, Call, MessageKind, Request, Tool, Transcript, Wait};
+use crate::event::{
+    self, Call, Definition, DefinitionKind, Definitions, MessageKind, Request, Tool, Transcript,
+    Wait,
+};
 use crate::time::parse_timestamp;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -100,6 +103,15 @@ impl Reader for ClaudeCode {
         t.truncated = lines(input, |line| {
             t.lines += 1;
             state.line_no = t.lines;
+            if state.definitions(&mut t, line) {
+                return true;
+            }
+            if memchr::memmem::find(line, COMPACT_BOUNDARY).is_some()
+                && memchr::memmem::find(line, b"\"type\":\"system\"").is_some()
+            {
+                state.compacted = true;
+                return true;
+            }
             let assistant = memchr::memmem::find(line, b"\"type\":\"assistant\"").is_some();
             if !assistant && memchr::memmem::find(line, b"\"type\":\"user\"").is_none() {
                 return true;
@@ -178,7 +190,24 @@ struct State {
     /// Calls waiting for their result, by tool-use ID.
     pending: HashMap<String, usize>,
     wait_boundary: bool,
+    /// The parts of the definitions snapshot already read: the tools, the
+    /// skill listing, MCP instructions. Only the first of each counts.
+    tools_read: bool,
+    skills_read: bool,
+    mcp_read: bool,
+    /// A compaction was recorded since the last request.
+    compacted: bool,
 }
+
+/// How Claude Code records a compaction.
+const COMPACT_BOUNDARY: &[u8] = b"\"subtype\":\"compact_boundary\"";
+
+/// How an attachment line names its type, and the types a definitions
+/// snapshot is made of.
+const ATTACHMENT: &[u8] = b"\"type\":\"attachment\"";
+const SNAPSHOT: &[u8] = b"\"type\":\"prompt_snapshot\"";
+const SKILL_LISTING: &[u8] = b"\"type\":\"skill_listing\"";
+const MCP_INSTRUCTIONS: &[u8] = b"\"type\":\"mcp_instructions_delta\"";
 
 /// What a refused call's result says, before the reason the user gave.
 /// Whether a user line is a CI-monitor event that reports failing checks:
@@ -209,6 +238,71 @@ const REASON: &str = "the user said:\n";
 const INTERRUPTED: &str = "[Request interrupted by user";
 
 impl State {
+    /// Reads a line that is part of the definitions snapshot: the first
+    /// prompt snapshot that lists tools, the first skill listing, the first
+    /// MCP instructions. Whether the line was one of them.
+    fn definitions(&mut self, t: &mut Transcript, line: &[u8]) -> bool {
+        let has = |marker: &[u8]| memchr::memmem::find(line, marker).is_some();
+        let wanted = !self.tools_read && has(SNAPSHOT)
+            || !self.skills_read && has(SKILL_LISTING)
+            || !self.mcp_read && has(MCP_INSTRUCTIONS);
+        if !wanted || !has(ATTACHMENT) {
+            return false;
+        }
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) else {
+            t.bad_lines += 1;
+            return true;
+        };
+        if value["type"] != "attachment" {
+            return false;
+        }
+        let a = &value["attachment"];
+        let mut items = Vec::new();
+        match a["type"].as_str() {
+            Some("prompt_snapshot") if !self.tools_read => {
+                let Some(tools) = a["tools"].as_array() else {
+                    return true;
+                };
+                self.tools_read = true;
+                for tool in tools {
+                    let Some(name) = tool["name"].as_str() else {
+                        continue;
+                    };
+                    items.push(Definition {
+                        kind: DefinitionKind::Tool,
+                        name: name.to_string(),
+                        bytes: tool.to_string().len() as u64,
+                    });
+                }
+            }
+            Some("skill_listing") if !self.skills_read => {
+                self.skills_read = true;
+                items = skill_lines(a["content"].as_str().unwrap_or_default());
+            }
+            Some("mcp_instructions_delta") if !self.mcp_read => {
+                self.mcp_read = true;
+                let names = a["addedNames"].as_array().map_or(&[][..], Vec::as_slice);
+                let blocks = a["addedBlocks"].as_array().map_or(&[][..], Vec::as_slice);
+                for (name, block) in names.iter().zip(blocks) {
+                    if let (Some(name), Some(block)) = (name.as_str(), block.as_str()) {
+                        items.push(Definition {
+                            kind: DefinitionKind::McpInstructions,
+                            name: name.to_string(),
+                            bytes: block.len() as u64,
+                        });
+                    }
+                }
+            }
+            _ => return false,
+        }
+        let definitions = t.definitions.get_or_insert_with(Definitions::default);
+        if definitions.at.is_none() {
+            definitions.at = value["timestamp"].as_str().and_then(parse_timestamp);
+        }
+        definitions.items.extend(items);
+        true
+    }
+
     /// A user line that holds no tool result: a prompt, an interruption, or
     /// text the harness wrote in the user's place, which is left out.
     fn prompt(&mut self, t: &mut Transcript, parsed: &Line, line: &[u8]) {
@@ -281,6 +375,7 @@ impl State {
             t.requests.push(Request {
                 at,
                 calls: start..start,
+                compacted: std::mem::take(&mut self.compacted),
                 id: id.as_deref().map(request_id),
                 ..Default::default()
             });
@@ -300,6 +395,7 @@ impl State {
             if input > 0 && request.input_tokens.is_none() {
                 request.input_tokens = Some(input);
                 request.cached_input_tokens = usage.cache_read_input_tokens.u64();
+                request.cache_write_tokens = usage.cache_creation_input_tokens.u64();
                 request.input_tokens_complete = usage.input_tokens.u64().is_some()
                     && usage.cache_creation_input_tokens.u64().is_some()
                     && usage.cache_read_input_tokens.u64().is_some();
@@ -338,10 +434,13 @@ impl State {
                     });
                 }
             }
+            call.name = Some(name.to_string());
+            if name == "Skill" {
+                call.skill = input.as_ref().and_then(|i| i.skill.0.clone());
+            }
+            call.target = input.as_ref().and_then(Input::target);
             if self.detail {
                 call.line = self.line_no;
-                call.name = Some(name.to_string());
-                call.target = input.as_ref().and_then(Input::target);
             }
             if call.tool == Tool::Shell {
                 call.command = input.and_then(|i| i.command.0);
@@ -396,6 +495,26 @@ impl State {
             }
         }
     }
+}
+
+/// The skill listing's entries: each `- name: description` line with the
+/// lines that continue it, and their size. A plugin's skills are named
+/// `plugin:skill`, so the name ends at the first `: `.
+fn skill_lines(content: &str) -> Vec<Definition> {
+    let mut out: Vec<Definition> = Vec::new();
+    for line in content.split_inclusive('\n') {
+        if let Some(entry) = line.strip_prefix("- ") {
+            let name = entry.split_once(": ").map_or(entry.trim_end(), |(n, _)| n);
+            out.push(Definition {
+                kind: DefinitionKind::Skill,
+                name: name.to_string(),
+                bytes: line.len() as u64,
+            });
+        } else if let Some(last) = out.last_mut() {
+            last.bytes += line.len() as u64;
+        }
+    }
+    out
 }
 
 /// A message ID as a request identity. The hash is fixed, so the same ID
@@ -574,6 +693,8 @@ struct Input {
     #[serde(default)]
     bash_id: Str,
     #[serde(default)]
+    skill: Str,
+    #[serde(default)]
     block: serde_json::Value,
 }
 
@@ -725,6 +846,41 @@ mod tests {
             ..Default::default()
         };
         assert!(read(SESSION, &outside).is_none());
+    }
+
+    #[test]
+    fn keeps_the_first_snapshot_of_definitions_and_what_skill_a_call_loaded() {
+        let text = [
+            r#"{"type":"attachment","timestamp":"2026-11-09T10:00:00Z","attachment":{"type":"prompt_snapshot","systemPrompt":"x"}}"#,
+            r#"{"type":"attachment","timestamp":"2026-11-09T10:00:01Z","attachment":{"type":"prompt_snapshot","tools":[{"name":"Bash","description":"run"},{"name":"mcp__ccd_turn__update_plan","description":"p"}]}}"#,
+            r#"{"type":"attachment","attachment":{"type":"skill_listing","content":"- loop: run it\nagain and again\n- anthropic-skills:pdf: PDFs\n","names":["loop","anthropic-skills:pdf"]}}"#,
+            r#"{"type":"attachment","attachment":{"type":"mcp_instructions_delta","addedNames":["computer-use"],"addedBlocks":["use it well"]}}"#,
+            r#"{"type":"attachment","attachment":{"type":"prompt_snapshot","tools":[{"name":"Later"}]}}"#,
+            r#"{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":5},"content":[{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"loop"}}]}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"text","text":"{\"type\":\"attachment\",\"attachment\":{\"type\":\"skill_listing\"}}"}]}}"#,
+        ]
+        .join("\n");
+        let t = read(&text, &Filter::default()).unwrap();
+        let d = t.definitions.unwrap();
+        assert_eq!(d.at, parse_timestamp("2026-11-09T10:00:01Z"));
+        let items: Vec<(DefinitionKind, &str, u64)> = d
+            .items
+            .iter()
+            .map(|i| (i.kind, i.name.as_str(), i.bytes))
+            .collect();
+        assert_eq!(
+            items,
+            [
+                (DefinitionKind::Tool, "Bash", 35),
+                (DefinitionKind::Tool, "mcp__ccd_turn__update_plan", 55),
+                (DefinitionKind::Skill, "loop", 31),
+                (DefinitionKind::Skill, "anthropic-skills:pdf", 29),
+                (DefinitionKind::McpInstructions, "computer-use", 11),
+            ]
+        );
+        assert_eq!(t.calls[0].name.as_deref(), Some("Skill"));
+        assert_eq!(t.calls[0].skill.as_deref(), Some("loop"));
+        assert_eq!(t.bad_lines, 0);
     }
 
     #[test]
