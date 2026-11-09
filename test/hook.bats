@@ -875,15 +875,15 @@ claude_payload() {
 			jouet hook codex session-start | jq -r '.hookSpecificOutput.additionalContext'
 	}
 	run affected_start
-	assert_output --partial 'Test with `jouet test --affected`'
+	assert_output --partial "Test with \`jouet test --affected\`"
 	refute_output --partial 'env -u NO_COLOR jouet test --affected'
 	(cd repo && jouet trust --yes >/dev/null)
 	run affected_start
-	assert_output --partial 'Test with `env -u NO_COLOR jouet test --affected`'
-	refute_output --partial 'Test with `jouet test --affected`'
+	assert_output --partial "Test with \`env -u NO_COLOR jouet test --affected\`"
+	refute_output --partial "Test with \`jouet test --affected\`"
 	printf '\n# changed\n' >>repo/.jouet/project.toml
 	run affected_start
-	assert_output --partial 'Test with `jouet test --affected`'
+	assert_output --partial "Test with \`jouet test --affected\`"
 	refute_output --partial 'env -u NO_COLOR jouet test --affected'
 	printf '[checks]\naffected = ""\n' >repo/.jouet/project.toml
 	run bash -c 'cd repo && jouet trust --yes'
