@@ -656,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "jouet"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "jouet-audit",
  "jouet-edit",
@@ -694,7 +694,7 @@ dependencies = [
 
 [[package]]
 name = "jouet-audit"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "memchr",
  "regex",
@@ -707,7 +707,7 @@ dependencies = [
 
 [[package]]
 name = "jouet-edit"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -718,7 +718,7 @@ dependencies = [
 
 [[package]]
 name = "jouet-git"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "jouet-output",
  "mise-agent-env",
@@ -731,7 +731,7 @@ dependencies = [
 
 [[package]]
 name = "jouet-github"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "jouet-output",
  "rustls",
@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "jouet-graph"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "ignore",
  "jouet-output",
@@ -767,7 +767,7 @@ dependencies = [
 
 [[package]]
 name = "jouet-output"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "mise-agent-env",
  "serde",
@@ -778,7 +778,7 @@ dependencies = [
 
 [[package]]
 name = "jouet-routines"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "jouet-edit",
  "jouet-git",
@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "jouet-rules"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "jouet-git",
  "jouet-github",
@@ -813,7 +813,7 @@ dependencies = [
 
 [[package]]
 name = "jouet-search"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "ast-grep-core",
  "grep-regex",
@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "jouet-secrets"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "aho-corasick",
  "ignore",
@@ -852,7 +852,7 @@ dependencies = [
 
 [[package]]
 name = "jouet-wait"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "jouet-github",
  "jouet-output",
