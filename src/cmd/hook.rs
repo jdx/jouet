@@ -742,7 +742,14 @@ fn session_start(
     let fallback = std::env::current_dir().ok();
     let cwd = cwd.or(fallback.as_deref());
     let affected = cwd.is_some_and(|cwd| !crate::affected::near(cwd).is_empty());
-    let command = cwd.and_then(crate::project::affected_command);
+    let command = cwd
+        .map(crate::project::affected_command)
+        .unwrap_or_default();
+    let (affected, command) = match command {
+        crate::project::AffectedCommand::Default => (affected, None),
+        crate::project::AffectedCommand::Configured(command) => (affected, Some(command)),
+        crate::project::AffectedCommand::Broken => (false, None),
+    };
     let mut context = guide::summary(
         &rules,
         verify,

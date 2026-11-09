@@ -893,6 +893,17 @@ claude_payload() {
 	run affected_start
 	assert_output --partial "Test with \`env -u NO_COLOR jouet test --affected\`"
 	refute_output --partial "Test with \`jouet test --affected\`"
+	printf '[checks]\naffected = "env -u NO_COLOR jouet test --affected"\n[checks.broken]\n"env -u NO_COLOR jouet test --affected" = "missing dependency"\n' >repo/.jouet/project.toml
+	(cd repo && jouet trust --yes >/dev/null)
+	run affected_start
+	assert_output --partial 'Test with `jouet test --cmd'
+	refute_output --partial 'Test with `env -u NO_COLOR jouet test --affected`'
+	printf '[checks.broken]\n"jouet test --affected" = "missing dependency"\n' >repo/.jouet/project.toml
+	(cd repo && jouet trust --yes >/dev/null)
+	run affected_start
+	assert_output --partial 'Test with `jouet test --cmd'
+	refute_output --partial 'Test with `jouet test --affected`'
+	printf '[checks]\naffected = "env -u NO_COLOR jouet test --affected"\n' >repo/.jouet/project.toml
 	printf '\n# changed\n' >>repo/.jouet/project.toml
 	run affected_start
 	assert_output --partial "Test with \`jouet test --affected\`"

@@ -136,11 +136,34 @@ pub(crate) fn trusted(root: &Path) -> Option<Result<Project, String>> {
     repo_trusted(root).then_some(project)
 }
 
-/// A short, trusted command suitable for the inline session primer.
-pub(crate) fn affected_command(cwd: &Path) -> Option<String> {
+/// The affected check to recommend in the session primer.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) enum AffectedCommand {
+    #[default]
+    Default,
+    Configured(String),
+    Broken,
+}
+
+pub(crate) fn affected_command(cwd: &Path) -> AffectedCommand {
     let root = crate::verify::root_of(cwd);
-    let command = trusted(Path::new(&root))?.ok()?.checks.affected?;
-    inline_command(&command).map(str::to_string)
+    trusted(Path::new(&root))
+        .and_then(Result::ok)
+        .map_or(AffectedCommand::Default, |project| {
+            affected_for(&project.checks)
+        })
+}
+
+fn affected_for(checks: &Checks) -> AffectedCommand {
+    let configured = checks.affected.as_deref().and_then(inline_command);
+    let selected = configured.unwrap_or("jouet test --affected");
+    if checks.broken(selected).is_some() {
+        AffectedCommand::Broken
+    } else if let Some(command) = configured {
+        AffectedCommand::Configured(command.to_string())
+    } else {
+        AffectedCommand::Default
+    }
 }
 
 fn inline_command(command: &str) -> Option<&str> {
@@ -285,6 +308,30 @@ mod tests {
                 .unwrap_err()
                 .contains("checks.affected")
         );
+    }
+
+    #[test]
+    fn known_broken_affected_checks_are_not_recommended() {
+        let override_command = "env -u NO_COLOR jouet test --affected";
+        let mut checks = Checks {
+            affected: Some(override_command.into()),
+            ..Checks::default()
+        };
+        assert_eq!(
+            affected_for(&checks),
+            AffectedCommand::Configured(override_command.into())
+        );
+        checks
+            .broken
+            .insert(override_command.into(), "broken".into());
+        assert_eq!(affected_for(&checks), AffectedCommand::Broken);
+
+        checks.affected = None;
+        assert_eq!(affected_for(&checks), AffectedCommand::Default);
+        checks
+            .broken
+            .insert("jouet test --affected".into(), "broken".into());
+        assert_eq!(affected_for(&checks), AffectedCommand::Broken);
     }
 
     #[test]
