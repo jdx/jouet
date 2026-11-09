@@ -78,6 +78,11 @@ stdout_contains = "9001"
 
 [[probe]]
 tool = "gh"
+args = ["pr", "view", "1099", "--json", "files", "--jq", ".files[0].changeType"]
+stdout_contains = "MODIFIED"
+
+[[probe]]
+tool = "gh"
 args = ["pr", "checks", "1099"]
 exit = 1
 

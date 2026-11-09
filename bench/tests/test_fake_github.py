@@ -124,6 +124,17 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(canonical[0], 200)
         self.assertEqual(alias, canonical)
 
+    def test_fnox_changed_files_have_change_types(self):
+        fixture = json.loads((Path(__file__).parents[1] /
+                              "tasks/fnox-age-identity-pr/github.json").read_text())
+        query = "{ repository { pullRequest(number: 1099) { files(first: 100) { nodes { path changeType } } } } }"
+        with FakeGitHub(fixture) as fake:
+            _, response = post(fake.url + "/graphql", {"query": query})
+            self.assertEqual(fake.world.summary()["unanswered"], 0)
+        files = response["data"]["repository"]["pullRequest"]["files"]["nodes"]
+        self.assertEqual(len(files), 8)
+        self.assertTrue(all(file["changeType"] == "MODIFIED" for file in files))
+
     def test_text_status_and_zip(self):
         with FakeGitHub(FIXTURE) as fake:
             self.assertEqual(get(fake.url + "/repos/jdx/demo/actions/jobs/1/logs")[0], 404)
