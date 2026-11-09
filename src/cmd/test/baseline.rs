@@ -575,10 +575,44 @@ impl From<String> for NotCompared {
 /// into the checkout written from its root, so every worktree of the
 /// repository shares it.
 fn command_key(job: &Job, root: &Path) -> String {
+    command_key_with_env(job, root, std::env::vars_os())
+}
+
+fn command_key_with_env(
+    job: &Job,
+    root: &Path,
+    inherited: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> String {
+    fn part(hash: &mut Sha256, bytes: &[u8]) {
+        hash.update((bytes.len() as u64).to_le_bytes());
+        hash.update(bytes);
+    }
+
     let dot = Path::new(".");
-    let words: Vec<String> = job.argv.iter().map(|w| rebase(w, root, dot)).collect();
     let dir = job.dir.strip_prefix(root).unwrap_or(Path::new(""));
-    format!("{} @{}", words.join(" "), dir.display())
+    let mut hash = Sha256::new();
+    part(&mut hash, b"jouet baseline command v2");
+    part(&mut hash, dir.as_os_str().as_encoded_bytes());
+    part(&mut hash, &(job.argv.len() as u64).to_le_bytes());
+    for word in &job.argv {
+        part(&mut hash, rebase(word, root, dot).as_bytes());
+    }
+    let mut env: BTreeMap<std::ffi::OsString, std::ffi::OsString> = inherited.into_iter().collect();
+    env.extend(
+        job.env
+            .iter()
+            .map(|(key, value)| (key.into(), value.into())),
+    );
+    for (key, value) in env {
+        part(&mut hash, key.as_encoded_bytes());
+        part(&mut hash, value.as_encoded_bytes());
+    }
+    let digest: String = hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("v2:{digest}")
 }
 
 /// A worktree of the merge base, checked out when a job first needs it.
@@ -1385,11 +1419,41 @@ mod tests {
             exit: Box::new(|_| Exit::Ok),
         };
         let here = command_key(&job("/src/app"), Path::new("/src/app"));
-        assert_eq!(
-            here,
-            "cargo test --manifest-path=./crates/a/Cargo.toml @crates/a"
-        );
+        assert!(here.starts_with("v2:"));
         assert_eq!(command_key(&job("/wt/app-2"), Path::new("/wt/app-2")), here);
+    }
+
+    #[test]
+    fn baseline_cache_distinguishes_job_environment_and_argument_boundaries() {
+        let make = |argv: &[&str], env: &[(&str, &str)]| Job {
+            argv: argv.iter().map(|s| (*s).into()).collect(),
+            env: env
+                .iter()
+                .map(|(k, v)| ((*k).into(), (*v).into()))
+                .collect(),
+            dir: PathBuf::from("/repo"),
+            exit: Box::new(|_| Exit::Ok),
+        };
+        let root = Path::new("/repo");
+        assert_ne!(
+            command_key(&make(&["test"], &[("FEATURE", "on")]), root),
+            command_key(&make(&["test"], &[("FEATURE", "off")]), root),
+        );
+        assert_ne!(
+            command_key(&make(&["test", "a b"], &[]), root),
+            command_key(&make(&["test", "a", "b"], &[]), root),
+        );
+        let job = make(&["test"], &[]);
+        let env = |value: &str| [("FEATURE".into(), value.into())];
+        assert_ne!(
+            command_key_with_env(&job, root, env("on")),
+            command_key_with_env(&job, root, env("off")),
+        );
+        let overridden = make(&["test"], &[("FEATURE", "on")]);
+        assert_eq!(
+            command_key_with_env(&overridden, root, env("on")),
+            command_key_with_env(&overridden, root, env("off")),
+        );
     }
 
     #[test]
