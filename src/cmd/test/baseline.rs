@@ -872,6 +872,24 @@ fn git_stdout(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
     output.status.success().then_some(output.stdout)
 }
 
+/// A finding at another location may have shifted or may be a new occurrence.
+/// It is unresolved, never counted as pre-existing without matching details.
+fn possible_shifted_ruff(name: &str, at_base: &BTreeSet<String>) -> bool {
+    fn identity(name: &str) -> Option<(&str, &str)> {
+        let (location, rule) = name.strip_prefix("ruff ")?.rsplit_once(' ')?;
+        let (location, column) = location.rsplit_once(':')?;
+        let (file, line) = location.rsplit_once(':')?;
+        if file.is_empty() || line.parse::<u64>().is_err() || column.parse::<u64>().is_err() {
+            return None;
+        }
+        Some((file, rule))
+    }
+    let Some(current) = identity(name) else {
+        return false;
+    };
+    at_base.iter().any(|base| identity(base) == Some(current))
+}
+
 /// Sorts each failed job's failures into those the merge base has too and
 /// the new ones, from what [`known`] keeps for the job at `base`, or by
 /// running it again in a worktree of `base` and keeping what came of it.
@@ -1107,7 +1125,7 @@ pub(super) fn compare(
                     unknown.insert(name.clone());
                     job_unknown = true;
                 }
-            } else if short {
+            } else if short || possible_shifted_ruff(name, &at_base) {
                 unknown.insert(name.clone());
                 job_unknown = true;
             } else {
@@ -1380,6 +1398,31 @@ mod tests {
             failure_names("something broke\n", &[], Path::new("/x"), false),
             None
         );
+    }
+
+    #[test]
+    fn shifted_ruff_findings_are_ambiguous_only_with_same_file_and_rule() {
+        let base = BTreeSet::from([
+            "ruff a file.py:421:20 PLW1510".to_string(),
+            "ruff a file.py:495:24 PLW1510".to_string(),
+        ]);
+        assert!(possible_shifted_ruff(
+            "ruff a file.py:425:20 PLW1510",
+            &base
+        ));
+        assert!(!possible_shifted_ruff(
+            "ruff other.py:425:20 PLW1510",
+            &base
+        ));
+        assert!(!possible_shifted_ruff("ruff a file.py:425:20 F821", &base));
+        assert!(!possible_shifted_ruff(
+            "ruff a file.py:abc:20 PLW1510",
+            &base
+        ));
+        assert!(!possible_shifted_ruff(
+            "pytest a file.py:425:20 PLW1510",
+            &base
+        ));
     }
 
     #[test]
