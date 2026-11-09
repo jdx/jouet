@@ -232,6 +232,9 @@ pub struct JouetFinding {
     /// The command, raw: whoever keeps it reduces it to a shape first.
     #[serde(skip)]
     pub command: String,
+    /// When it ran, in milliseconds since the Unix epoch.
+    #[serde(skip)]
+    pub at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -347,7 +350,7 @@ pub fn digest(harness: &str, transcript: &Transcript, path: &str, options: &Opti
         rereads: Vec::new(),
         retyped: Vec::new(),
         patterns: Vec::new(),
-        jouet: jouet_findings(t),
+        jouet: jouet_findings(&t.calls.iter().collect::<Vec<_>>()),
         reads: BTreeMap::new(),
         commands: BTreeMap::new(),
     };
@@ -974,10 +977,11 @@ fn exit_code(call: &Call) -> Option<i32> {
     rest.split_whitespace().next()?.parse().ok()
 }
 
-fn jouet_findings(t: &Transcript) -> Vec<JouetFinding> {
-    let shells: Vec<&Call> = t
-        .calls
+/// What [`jouet::scan`] finds in `calls`, in the order they were made.
+pub(crate) fn jouet_findings(calls: &[&Call]) -> Vec<JouetFinding> {
+    let shells: Vec<&Call> = calls
         .iter()
+        .copied()
         .filter(|c| c.tool == Tool::Shell && c.command.is_some())
         .collect();
     let runs: Vec<jouet::Run<'_>> = shells
@@ -1008,6 +1012,7 @@ fn jouet_findings(t: &Transcript) -> Vec<JouetFinding> {
         .map(|found| JouetFinding {
             span: Span::at(shells[found.index].line),
             command: runs[found.index].command.to_string(),
+            at: shells[found.index].at,
             found,
         })
         .collect()

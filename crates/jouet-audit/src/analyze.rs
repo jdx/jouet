@@ -8,6 +8,8 @@
 
 use crate::category::{Category, categorize};
 use crate::event::{Tool, Transcript};
+use crate::fixed::{FixedAcc, FixedContext};
+use crate::own::{OwnAcc, OwnSession};
 use crate::pattern::{Pattern, detect_call};
 use crate::redact::{example, redact};
 use crate::shape::shape;
@@ -23,6 +25,7 @@ pub struct Analyzer {
     harnesses: HashMap<String, Acc>,
     examples: bool,
     home: Option<String>,
+    own: Option<OwnAcc>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -45,6 +48,7 @@ struct Acc {
     categories: [CatAcc; Category::ALL.len()],
     patterns: [PatAcc; Pattern::ALL.len()],
     waits: ProcessWaits,
+    fixed: FixedAcc,
 }
 
 /// Linked observations and the narrower set that could have been combined.
@@ -154,12 +158,16 @@ impl Analyzer {
             harnesses: HashMap::new(),
             examples,
             home,
+            own: None,
         }
     }
 
     /// An analyzer with the same settings and nothing counted.
     pub(crate) fn empty_like(&self) -> Self {
-        Self::new(self.examples, self.home.clone())
+        Self {
+            own: self.own.as_ref().map(|_| OwnAcc::default()),
+            ..Self::new(self.examples, self.home.clone())
+        }
     }
 
     /// Adds a transcript. Calls count only through the requests that issued
@@ -175,6 +183,10 @@ impl Analyzer {
             acc.sessions.insert(transcript.session.clone());
         }
         acc.transcripts += 1;
+        acc.fixed.add(transcript);
+        if let Some(own) = &mut self.own {
+            own.add(harness, transcript, home.as_deref());
+        }
         let mut previous = 0u32;
         // The shape of the last command, when it failed.
         let mut last_failure: Option<String> = None;
@@ -292,6 +304,7 @@ impl Analyzer {
                 let first_here = mask & bit(category) == 0;
                 mask |= bit(category);
                 let duration = call.duration_ms.unwrap_or(0);
+                acc.fixed.count(call);
                 acc.calls += 1;
                 acc.tool_ms += duration;
                 acc.output_bytes += call.output_bytes;
@@ -419,7 +432,27 @@ impl Analyzer {
                 *ours.waits.avoidable_cached_input_tokens.get_or_insert(0) += cached;
             }
             ours.waits.cached_unknown |= theirs.waits.cached_unknown;
+            ours.fixed.merge(theirs.fixed);
         }
+        if let (Some(ours), Some(theirs)) = (&mut self.own, other.own) {
+            ours.merge(theirs);
+        }
+    }
+
+    /// Also look for jouet's own costs in each transcript: see
+    /// [`Analyzer::own`]. It needs transcripts read in
+    /// [detail](crate::Filter::detail).
+    #[must_use]
+    pub fn with_own(mut self) -> Self {
+        self.own = Some(OwnAcc::default());
+        self
+    }
+
+    /// What jouet itself cost in each session, by session ID: usage errors,
+    /// crashes and abandoned answers, and test logs read right after `jouet
+    /// test`. Empty unless [`Analyzer::with_own`] asked for it.
+    pub fn own(&self) -> Vec<OwnSession> {
+        self.own.as_ref().map(OwnAcc::sessions).unwrap_or_default()
     }
 
     /// The report: harnesses in name order, each with its categories ranked
@@ -573,6 +606,7 @@ fn harness_report(name: &str, acc: &Acc, top_shapes: usize) -> HarnessReport {
         }),
         suggestions,
         patterns,
+        fixed_context: acc.fixed.report(acc.input_tokens),
     }
 }
 
@@ -658,8 +692,8 @@ fn suggest(category: Category, c: &CatAcc, acc: &Acc) -> Option<Suggestion> {
             ),
         ),
         Category::BuildTestLint => (
-            "mbx",
-            "builds and tests cost time more than tokens; mbx shares one build cache and scheduler between worktrees. jouet has no command for this",
+            "jouet test",
+            "`--cmd` keeps a run's whole log out of context and prints its failures, `--affected` runs only the tests a change affects; builds cost time more than tokens, and mbx shares one build cache between worktrees",
             None,
         ),
         Category::Github => (
@@ -697,6 +731,10 @@ pub struct HarnessReport {
     pub suggestions: Vec<Suggestion>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub patterns: Vec<PatternReport>,
+    /// The definitions sent with every request, for a harness whose
+    /// transcripts record them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fixed_context: Option<FixedContext>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

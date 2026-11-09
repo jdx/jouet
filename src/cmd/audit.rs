@@ -1,9 +1,12 @@
 //! `jouet audit`.
 
+mod own;
+
 use super::Output;
 use crate::cli::AuditArgs;
 use jouet_audit::{
-    Analyzer, CategoryReport, ClaudeCode, Codex, Filter, HarnessReport, Reader, Report, ScanStats,
+    Analyzer, CategoryReport, ClaudeCode, Codex, Filter, FixedContext, FixedItem, HarnessReport,
+    Reader, Report, ScanStats,
 };
 use jouet_output::exit::Exit;
 use jouet_output::time;
@@ -27,6 +30,15 @@ pub(crate) fn run(args: &AuditArgs, out: &Output) -> Exit {
         },
         Some(Err(e)) => return out.error(Exit::Usage, &format!("--since: {e}")),
     };
+    let until_ms = match args.until.as_deref().map(|s| parse_since(s, now)) {
+        None => None,
+        Some(Ok(secs)) => match secs.checked_mul(1000) {
+            Some(ms) => Some(ms),
+            None => return out.error(Exit::Usage, "--until: too far back"),
+        },
+        Some(Err(e)) => return out.error(Exit::Usage, &format!("--until: {e}")),
+    };
+    let only = args.harness.as_deref().filter(|h| *h != "all");
     let (claude, codex) = match args.harness.as_deref().unwrap_or("all") {
         "all" => (true, true),
         "claude" => (true, false),
@@ -65,44 +77,67 @@ pub(crate) fn run(args: &AuditArgs, out: &Output) -> Exit {
         .collect();
     let filter = Filter {
         since_ms,
+        until_ms,
         project: project.clone(),
+        detail: args.jouet,
         ..Filter::default()
     };
     let home = jouet_audit::home().map(|h| h.to_string_lossy().into_owned());
     let threads = std::thread::available_parallelism().map_or(4, usize::from);
-    let scan = jouet_audit::scan(
-        &readers,
-        &filter,
-        Analyzer::new(args.examples, home),
-        threads,
-    );
+    let mut analyzer = Analyzer::new(args.examples, home);
+    if args.jouet {
+        analyzer = analyzer.with_own();
+    }
+    let scan = jouet_audit::scan(&readers, &filter, analyzer, threads);
+    if args.jouet {
+        let window = own::Window {
+            since_ms,
+            until_ms,
+            project: project.as_deref(),
+            harness: only,
+            roots: &roots,
+            threads,
+        };
+        return own::run(out, &scan, &window);
+    }
     let report = scan.analyzer.report(JSON_SHAPES);
 
     if report.harnesses.is_empty() {
-        let mut message = String::from("no transcripts");
-        if since_ms.is_some() || project.is_some() {
-            message.push_str(" matched");
-        } else {
-            message.push_str(" found");
-        }
-        let places: Vec<String> = roots.iter().map(|r| r.display().to_string()).collect();
-        if !places.is_empty() {
-            let _ = write!(message, " under {}", places.join(" and "));
-        }
-        return out.error_with_hint(
-            Exit::NotFound,
-            &message,
-            Some("Claude Code's directory is $CLAUDE_CONFIG_DIR or ~/.claude, Codex's is $CODEX_HOME or ~/.codex"),
-        );
+        return no_transcripts(out, since_ms.or(until_ms), project.as_deref(), &roots);
     }
     let doc = Doc {
         since: since_ms.map(|ms| time::format_utc(ms / 1000)),
+        until: until_ms.map(|ms| time::format_utc(ms / 1000)),
         project: project.as_ref().map(|p| p.display().to_string()),
         scan: ScanDoc::from(&scan.stats, threads),
         harnesses: &report.harnesses,
     };
     out.result(&doc, || text(&report, &scan.stats, &doc, top));
     Exit::Ok
+}
+
+/// Exit 3: no transcripts, or none that matched.
+fn no_transcripts(
+    out: &Output,
+    since_ms: Option<i64>,
+    project: Option<&Path>,
+    roots: &[PathBuf],
+) -> Exit {
+    let mut message = String::from("no transcripts");
+    if since_ms.is_some() || project.is_some() {
+        message.push_str(" matched");
+    } else {
+        message.push_str(" found");
+    }
+    let places: Vec<String> = roots.iter().map(|r| r.display().to_string()).collect();
+    if !places.is_empty() {
+        let _ = write!(message, " under {}", places.join(" and "));
+    }
+    out.error_with_hint(
+        Exit::NotFound,
+        &message,
+        Some("Claude Code's directory is $CLAUDE_CONFIG_DIR or ~/.claude, Codex's is $CODEX_HOME or ~/.codex"),
+    )
 }
 
 /// `--since`: a duration ago (`7d`, `12h`, `1h30m`), a date, or RFC 3339.
@@ -147,6 +182,8 @@ pub(crate) fn lexical(path: &Path) -> PathBuf {
 struct Doc<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     since: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    until: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     project: Option<String>,
     scan: ScanDoc,
@@ -213,6 +250,9 @@ fn text(report: &Report, stats: &ScanStats, doc: &Doc<'_>, top: usize) -> String
     let _ = write!(s, "jouet audit: {}", plural(sessions, "session"));
     if let Some(since) = &doc.since {
         let _ = write!(s, " since {since}");
+    }
+    if let Some(until) = &doc.until {
+        let _ = write!(s, " until {until}");
     }
     if let Some(project) = &doc.project {
         let _ = write!(s, " in {project}");
@@ -335,22 +375,7 @@ fn harness_text(s: &mut String, h: &HarnessReport, top: usize) {
             bytes(c.output_bytes),
         ]);
     }
-    let widths: Vec<usize> = (0..7)
-        .map(|i| {
-            table
-                .iter()
-                .map(|r| r[i].chars().count())
-                .max()
-                .unwrap_or(0)
-        })
-        .collect();
-    for row in &table {
-        let _ = write!(s, "  {:<w$}", row[0], w = widths[0]);
-        for (i, cell) in row.iter().enumerate().skip(1) {
-            let _ = write!(s, "  {cell:>w$}", w = widths[i]);
-        }
-        s.push('\n');
-    }
+    columns(s, &table);
     let hidden = h.categories.len() - rows.len();
     if hidden > 0 {
         let _ = writeln!(s, "  … {hidden} more categories (--top 0 lists all)");
@@ -431,6 +456,141 @@ fn harness_text(s: &mut String, h: &HarnessReport, top: usize) {
         if let Some(example) = &p.example {
             let _ = writeln!(s, "      e.g. {}", indent(example));
         }
+    }
+    if let Some(f) = &h.fixed_context {
+        fixed_text(s, f, top);
+    }
+}
+
+/// The definitions sent with every request: the costliest, the ones
+/// nothing called with the setting that removes each, and the weeks.
+fn fixed_text(s: &mut String, f: &FixedContext, top: usize) {
+    let _ = writeln!(
+        s,
+        "\n  fixed context: tool, skill and MCP definitions sent with every request, from each transcript's first snapshot (estimated tokens):"
+    );
+    let _ = writeln!(
+        s,
+        "  {} per request on average, over {} in {}: {} tokens, {:.1}% of input",
+        per_request(f.mean_tokens),
+        plural(f.requests, "request"),
+        plural(f.transcripts, "transcript"),
+        tokens(f.input_tokens),
+        f.share * 100.0
+    );
+    let rows: Vec<&FixedItem> = f.items.iter().take(top).collect();
+    let mut table = vec![[
+        "definition".to_string(),
+        "kind".into(),
+        "per request".into(),
+        "transcripts".into(),
+        "tokens".into(),
+        "calls".into(),
+    ]];
+    for i in &rows {
+        table.push([
+            i.name.clone(),
+            i.kind.label().into(),
+            per_request(i.tokens_per_request),
+            count(i.transcripts),
+            tokens(i.input_tokens),
+            count(i.calls),
+        ]);
+    }
+    columns(s, &table);
+    let hidden = f.items.len() - rows.len();
+    if hidden > 0 {
+        let _ = writeln!(
+            s,
+            "  … {} (--top 0 lists all)",
+            plural(hidden as u64, "more definition")
+        );
+    }
+    let unused: Vec<&FixedItem> = f.items.iter().filter(|i| i.remove.is_some()).collect();
+    if !unused.is_empty() {
+        let per: u64 = unused.iter().map(|i| i.tokens_per_request).sum();
+        let _ = writeln!(
+            s,
+            "\n  never called: {} of up to {} per request; what removes each:",
+            plural(unused.len() as u64, "definition"),
+            per_request(per)
+        );
+        for i in unused.iter().take(top) {
+            let _ = writeln!(
+                s,
+                "  - {} ({}, {} per request, {} tokens): {}",
+                i.name,
+                i.kind.label(),
+                per_request(i.tokens_per_request),
+                tokens(i.input_tokens),
+                i.remove.as_deref().unwrap_or_default()
+            );
+        }
+        if unused.len() > top {
+            let _ = writeln!(
+                s,
+                "  … {} (--top 0 lists all)",
+                plural((unused.len() - top) as u64, "more unused definition")
+            );
+        }
+    }
+    if f.periods.len() > 1 {
+        let _ = writeln!(s, "\n  by week (from Monday, UTC):");
+        for p in &f.periods {
+            let _ = write!(
+                s,
+                "  {}  {} per request, {}",
+                p.start,
+                per_request(p.mean_tokens),
+                plural(p.transcripts, "transcript")
+            );
+            for (what, list, sign) in [("grew", &p.grew, '+'), ("shrank", &p.shrank, '−')] {
+                if list.is_empty() {
+                    continue;
+                }
+                let names: Vec<String> = list
+                    .iter()
+                    .map(|g| {
+                        format!(
+                            "{} {sign}{}",
+                            g.name,
+                            per_request(g.after.abs_diff(g.before))
+                        )
+                    })
+                    .collect();
+                let _ = write!(s, "; {what}: {}", names.join(", "));
+            }
+            s.push('\n');
+        }
+    }
+}
+
+/// A table, its first column left-aligned and the rest right-aligned.
+fn columns<const N: usize>(s: &mut String, table: &[[String; N]]) {
+    let widths: Vec<usize> = (0..N)
+        .map(|i| {
+            table
+                .iter()
+                .map(|r| r[i].chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    for row in table {
+        let _ = write!(s, "  {:<w$}", row[0], w = widths[0]);
+        for (i, cell) in row.iter().enumerate().skip(1) {
+            let _ = write!(s, "  {cell:>w$}", w = widths[i]);
+        }
+        s.push('\n');
+    }
+}
+
+/// `950`, `1.8k`, `85k`: a definition's tokens, one decimal under 100k.
+fn per_request(n: u64) -> String {
+    if (1000..100_000).contains(&n) {
+        format!("{:.1}k", n as f64 / 1e3)
+    } else {
+        tokens(n)
     }
 }
 
@@ -604,6 +764,7 @@ mod tests {
         let stats = ScanStats::default();
         let doc = Doc {
             since: None,
+            until: None,
             project: None,
             scan: ScanDoc::from(&stats, 1),
             harnesses: &report.harnesses,

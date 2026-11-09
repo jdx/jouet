@@ -110,10 +110,16 @@ fn expected(subject: &str, code: i32) -> bool {
         || subject.starts_with("jouet pr next") && matches!(code, 10 | 20)
 }
 
-/// `panicked at src/x.rs:41:9`, without the message, which may hold a value.
+/// `panicked at src/x.rs:41:9`, without the message, which may hold a value:
+/// jouet's own panic, a line of its own starting `thread 'main'`. A test
+/// that `jouet test` ran, or a file `jouet search` matched, can print
+/// `panicked at` too, and is no crash of jouet's.
 fn panic_site(output: &str) -> Option<String> {
-    let at = output.find("panicked at ")?;
-    let rest = &output[at + "panicked at ".len()..];
+    let line = output
+        .lines()
+        .find(|l| l.starts_with("thread 'main'") && l.contains("panicked at "))?;
+    let at = line.find("panicked at ")?;
+    let rest = &line[at + "panicked at ".len()..];
     let site: String = rest
         .chars()
         .take_while(|c| !c.is_whitespace())
@@ -121,6 +127,16 @@ fn panic_site(output: &str) -> Option<String> {
         .trim_end_matches(':')
         .to_string();
     Some(format!("panicked at {site}"))
+}
+
+/// A run's script is one command, a `cd` before it aside: its exit code
+/// and output are that command's.
+fn alone(command: &str) -> bool {
+    crate::structure::simple_words(command)
+        .iter()
+        .filter(|(words, _)| words.first().map(String::as_str) != Some("cd"))
+        .count()
+        == 1
 }
 
 /// A run's whole script is one jouet command with `--json`, its stdout not
@@ -143,9 +159,10 @@ pub fn scan(runs: &[Run<'_>]) -> Vec<Found> {
             detail,
         };
         let output = run.output.unwrap_or_default();
-        let alone = crate::structure::simple_words(run.command).len() == 1;
-        if alone && (run.exit_code == Some(101) || output.contains("panicked at ")) {
-            let site = panic_site(output).unwrap_or_else(|| "exit 101".into());
+        let alone = alone(run.command);
+        let panic = panic_site(output);
+        if alone && (run.exit_code == Some(101) || panic.is_some()) {
+            let site = panic.unwrap_or_else(|| "exit 101".into());
             out.push(found(Kind::Crash, site));
             continue;
         }
@@ -278,7 +295,23 @@ mod tests {
                 crash,
                 run("jouet wait ci", 7),
                 run("jouet pr next", 20),
-                run("jouet x", 127)
+                run("jouet x", 127),
+                Run {
+                    output: Some(
+                        "cmd: failed: 1 failed\nFAIL a::b\n  thread 'a::b' (12) panicked at tests/a.rs:4:5:\n  thread 'main' panicked at src/x.rs:1:1"
+                    ),
+                    ..run("jouet test --cmd -- cargo test", 1)
+                },
+                Run {
+                    output: Some("src/a.rs\n  3: thread 'main' panicked at )\").expect(\"thread"),
+                    ..run("jouet search panicked", 0)
+                },
+                Run {
+                    output: Some(
+                        "Exit code 1\nthread 'main' (77) panicked at src/cmd/read.rs:9:2:\nboom"
+                    ),
+                    ..run("jouet read a.rs", 1)
+                },
             ]),
             [
                 (
@@ -287,6 +320,11 @@ mod tests {
                     "panicked at src/cmd/threads.rs:41:9".into()
                 ),
                 (Kind::ExitCode, "jouet wait ci".into(), "exit 7".into()),
+                (
+                    Kind::Crash,
+                    "jouet read".into(),
+                    "panicked at src/cmd/read.rs:9:2".into()
+                ),
             ]
         );
     }
@@ -318,6 +356,8 @@ mod tests {
                 run("jouet wind digest x", 0),
                 run("jouet edit --nope", 2),
                 run("ls", 0),
+                run("cd /src/app; jouet read a.rs --range 1,5", 2),
+                run("cd /src/app && ls; jouet read a.rs --range 1,5", 2),
             ]),
             [
                 (
@@ -326,6 +366,11 @@ mod tests {
                     "exit 2, then retried with other flags".into()
                 ),
                 (Kind::Usage, "jouet edit".into(), "exit 2".into()),
+                (
+                    Kind::Usage,
+                    "jouet read".into(),
+                    "exit 2, then retried with other flags".into()
+                ),
             ]
         );
     }
