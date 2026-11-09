@@ -738,6 +738,94 @@ SH
 	assert_success
 }
 
+@test "--cmd reports gofmt previews that find unformatted files" {
+	mkdir bin
+	printf 'package p\nfunc f( ){ }\n' >example.go
+	cat >bin/gofmt <<'SH'
+#!/bin/sh
+[ "${GOFMT_EMPTY:-}" = 1 ] && exit 0
+case "$1" in
+  -d) printf 'diff example.go.orig example.go\n--- example.go.orig\n+++ example.go\n@@ -1 +1 @@\n-old\n+new\n' ;;
+  -l) printf '%s\n' "${GOFMT_LIST:-example.go}" ;;
+  -w) printf 'example.go\n' ;;
+esac
+exit 0
+SH
+	chmod +x bin/gofmt
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -d example.go
+	assert_failure 1
+	assert_output --partial 'unformatted'
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- env gofmt -l example.go
+	assert_failure 1
+	assert_output --partial 'unformatted'
+	local newline_name=$'line\nbreak.go'
+	printf 'package p\n' >"$newline_name"
+	PATH="$PWD/bin:$PATH" GOFMT_LIST="$newline_name" run --separate-stderr jouet test --cmd -- gofmt -l "$newline_name"
+	assert_failure 1
+	assert_output --partial 'unformatted'
+	PATH="$PWD/bin:$PATH" GOFMT_LIST=$'diagnostic\nline\nbreak.go' run --separate-stderr jouet test --cmd -- gofmt -l .
+	assert_failure 1
+	mkdir sub
+	local many="sub/"
+	for _ in {1..12}; do many+=$'line\n'; done
+	many+="end.go"
+	printf 'package p\n' >"$many"
+	PATH="$PWD/bin:$PATH" GOFMT_LIST=$'diagnostic\n'"$many" run --separate-stderr jouet test --cmd -- gofmt -l .
+	assert_failure 1
+	local extensionless=$'line\nbreak'
+	printf 'package p\n' >"$extensionless"
+	PATH="$PWD/bin:$PATH" GOFMT_LIST="$extensionless" run --separate-stderr jouet test --cmd -- gofmt -l "$extensionless"
+	assert_failure 1
+	PATH="$PWD/bin:$PATH" GOFMT_LIST='diagnostic only' run --separate-stderr jouet test --cmd -- gofmt -l .
+	assert_success
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --json --cmd -- env gofmt -l example.go
+	assert_failure 1
+	assert_equal "$(jq -c '[.ok, .suites[0].exit_code, .suites[0].format_changes]' <<<"$output")" '[false,0,true]'
+	git add example.go
+	git commit -qm base
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --baseline --cmd -- gofmt -l example.go
+	assert_failure 1
+	assert_output --partial 'baseline: not compared'
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --json --baseline --cmd -- gofmt -l example.go
+	assert_failure 1
+	assert_equal "$(jq -c '[.ok, .suites[0].format_changes]' <<<"$output")" '[false,true]'
+	[[ "$stderr" == *'baseline: not compared'* ]]
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -w example.go
+	assert_success
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -d -w example.go
+	assert_success
+	PATH="$PWD/bin:$PATH" GOFMT_EMPTY=1 run --separate-stderr jouet test --cmd -- gofmt -d example.go
+	assert_success
+}
+
+@test "--cmd follows Go flag syntax for gofmt previews" {
+	mkdir bin
+	printf 'package p\n' >example.go
+	cat >bin/gofmt <<'SH'
+#!/bin/sh
+printf '%s\n' "${GOFMT_OUTPUT:-example.go}"
+SH
+	chmod +x bin/gofmt
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt --l example.go
+	assert_failure 1
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -l=1 example.go
+	assert_failure 1
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -l=false --l=True example.go
+	assert_failure 1
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt --w=false -l=1 example.go
+	assert_failure 1
+	PATH="$PWD/bin:$PATH" GOFMT_OUTPUT='diff example.go.orig example.go' run --separate-stderr jouet test --cmd -- gofmt --d=1 example.go
+	assert_failure 1
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -l -l=false example.go
+	assert_success
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt --l -w=1 example.go
+	assert_success
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt -r -l example.go
+	assert_success
+	PATH="$PWD/bin:$PATH" run --separate-stderr jouet test --cmd -- gofmt example.go -l
+	assert_success
+}
+
 @test "--cmd refuses a recognised test run that selected no tests" {
 	mkdir bin
 	printf '#!/bin/sh\nprintf "running 0 tests\\ntest result: ok. 0 passed; 0 failed; 0 ignored; 3 filtered out\\n"\n' >bin/cargo

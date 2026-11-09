@@ -77,6 +77,9 @@ struct SuiteReport {
     log: Option<String>,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     digest: Option<Digest>,
+    /// A read-only formatter reported files that need changes.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    format_changes: bool,
     /// Answered from an earlier run of the command on the same files.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     reused: bool,
@@ -390,7 +393,10 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             suite.log = Some(log.display().to_string());
             let output = std::fs::read(&log).unwrap_or_default();
             let output = String::from_utf8_lossy(&output);
-            let mut digest = testlog::digest_with(&output, code != 0, budget, &formats);
+            let format_changes = code == 0 && gofmt_changes(&job.argv, &job.dir, &output);
+            suite.format_changes = format_changes;
+            let mut digest =
+                testlog::digest_with(&output, code != 0 || format_changes, budget, &formats);
             let incomplete_suite = digest.nextest_incomplete;
             nextest_incomplete |= incomplete_suite;
             if code == 0 && digest.passed_names.is_empty() && !digest.passed_all.is_empty() {
@@ -420,7 +426,11 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 ticket.finish(
                     command,
                     ms,
-                    code == 0 && !empty_test && !contradictory && !incomplete_suite,
+                    code == 0
+                        && !empty_test
+                        && !contradictory
+                        && !incomplete_suite
+                        && !format_changes,
                 );
             }
             if code != 0 {
@@ -454,7 +464,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 slowest_failure = slowest_failure.max(ms);
             }
             suite.digest = Some(digest);
-            let suite_exit = if incomplete_suite && code != 0 {
+            let suite_exit = if format_changes || (incomplete_suite && code != 0) {
                 Exit::Failed
             } else if empty_test || contradictory || incomplete_suite {
                 Exit::Precondition
@@ -527,7 +537,18 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     let base = base.filter(|_| {
         !nextest_incomplete && ((blamed.is_none() && unrelated.is_none()) || args.baseline)
     });
-    if let (Some(base), Exit::Failed) = (base, exit) {
+    if args.baseline && failed.is_empty() && report.suites.iter().any(|suite| suite.format_changes)
+    {
+        let message = "baseline: not compared; gofmt reported formatting changes with exit 0, so compare them at the merge base separately";
+        if out.json {
+            eprintln!("{message}");
+        } else {
+            emit(&format!("{message}\n"));
+        }
+    }
+    if let (Some(base), Exit::Failed) = (base, exit)
+        && !failed.is_empty()
+    {
         let unnamed = failed.iter().any(|(_, names, _, _)| names.is_none());
         // Set when only a kept comparison could be used, and none was.
         let mut slow = false;
@@ -754,6 +775,99 @@ const NOT_A_TEST: &[&str] = &[
     "--write",
     "--fix",
 ];
+
+/// Older gofmt versions exit zero for a diff; `-l` also exits zero when it
+/// names files. These read-only previews are checks when run through --cmd.
+fn gofmt_changes(argv: &[String], dir: &Path, output: &str) -> bool {
+    let script = jouet_rules::shell::parse(&command_line(argv));
+    let [command] = script.commands.as_slice() else {
+        return false;
+    };
+    if !script.nested.is_empty() || command.program() != Some("gofmt") {
+        return false;
+    }
+    // Go's flag package accepts one or two dashes, several boolean values,
+    // and repeated flags (the last value wins). It stops at the first file.
+    let (mut diff, mut list, mut write) = (false, false, false);
+    let mut args = command.argv().iter().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--" || arg == "-" || !arg.starts_with('-') {
+            break;
+        }
+        let flag = arg.trim_start_matches('-');
+        let (name, value) = flag.split_once('=').unwrap_or((flag, "true"));
+        if matches!(name, "r" | "cpuprofile") && !flag.contains('=') {
+            args.next();
+        }
+        let enabled = matches!(value, "1" | "t" | "T" | "true" | "TRUE" | "True");
+        match name {
+            "d" => diff = enabled,
+            "l" => list = enabled,
+            "w" => write = enabled,
+            _ => {}
+        }
+    }
+    if write {
+        return false;
+    }
+    (diff && output.lines().any(|line| line.starts_with("diff ")))
+        || (list && gofmt_listed_file(dir, output, command.argv()))
+}
+
+/// `gofmt -l` writes paths literally, so one path can span several lines.
+fn gofmt_listed_file(dir: &Path, output: &str, argv: &[String]) -> bool {
+    if output.lines().any(|line| dir.join(line).is_file()) {
+        return true;
+    }
+    // Explicit file arguments need not end in .go.
+    if argv.iter().skip(1).any(|arg| {
+        arg.contains('\n') && dir.join(arg).is_file() && output.contains(&format!("{arg}\n"))
+    }) {
+        return true;
+    }
+    // If the first separator appears on the first line, every candidate from
+    // that line needs the same existing directory prefix.
+    let starts: Vec<usize> = std::iter::once(0)
+        .chain(output.match_indices('\n').map(|(at, _)| at + 1))
+        .filter(|&start| {
+            let first_line = output[start..].split('\n').next().unwrap_or("");
+            match first_line.find(std::path::is_separator) {
+                Some(at) => dir.join(&first_line[..=at]).is_dir(),
+                None => true,
+            }
+        })
+        .collect();
+    // A path this long cannot be opened as one path on the respective OS.
+    // Windows permits up to 32767 UTF-16 units, each at most four UTF-8 bytes.
+    let max_path_bytes = if cfg!(windows) { 32767 * 4 } else { 4096 };
+    // Directory walks only list .go files. Find possible endings first so a
+    // long diagnostic with no such ending is scanned once, not once per line.
+    for (end, _) in output.match_indices('\n') {
+        if !output[..end].ends_with(".go") {
+            continue;
+        }
+        let boundary = starts.partition_point(|&start| start < end);
+        for &start in starts[..boundary]
+            .iter()
+            .rev()
+            .take_while(|&&start| end - start <= max_path_bytes)
+        {
+            let path = &output[start..end];
+            // A component longer than 1020 UTF-8 bytes exceeds even Windows'
+            // 255 UTF-16-unit limit. Single lines were already checked above.
+            if path.contains('\n')
+                && path
+                    .rsplit(['/', '\\'])
+                    .next()
+                    .is_some_and(|name| name.len() <= 1020)
+                && dir.join(path).is_file()
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
 
 /// A Ruff preview is not a test, even when wrapped in `sh -c`. Limit this
 /// to a single command so an unrelated test script with the same flags, or a
@@ -1182,6 +1296,7 @@ fn given(cwd: &Path, args: &TestArgs) -> (Report, Vec<Option<Job>>) {
         duration_ms: None,
         log: None,
         digest: None,
+        format_changes: false,
         reused: false,
     };
     let job = Job {
@@ -1229,6 +1344,7 @@ fn full(cwd: &Path, args: &TestArgs) -> Result<(Report, Vec<Option<Job>>), affec
             duration_ms: None,
             log: None,
             digest: None,
+            format_changes: false,
             reused: false,
         };
         let job = Job {
@@ -1438,6 +1554,7 @@ fn suite_report(suite: &Suite) -> SuiteReport {
         duration_ms: None,
         log: None,
         digest: None,
+        format_changes: false,
         reused: false,
     }
 }
@@ -1580,6 +1697,12 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
             suite.adapter
         ),
         Some(0) if empty_test => format!("{}: no test ran in {secs:.1}s", suite.adapter),
+        Some(0) if suite.format_changes => {
+            format!(
+                "{}: gofmt found unformatted files in {secs:.1}s",
+                suite.adapter
+            )
+        }
         Some(0) if contradictory => format!(
             "{}: command exited 0 but reported failing tests in {secs:.1}s",
             suite.adapter
@@ -1635,7 +1758,9 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
     } else if digest.no_tests && suite.exit_code == Some(0) {
         s.push_str(", but no test ran: a filter or path that matched nothing?");
     }
-    if streamed || (suite.exit_code == Some(0) && !contradictory && !incomplete) {
+    if streamed
+        || (suite.exit_code == Some(0) && !contradictory && !incomplete && !suite.format_changes)
+    {
         let _ = writeln!(s, " (full log: {log})");
         // A few warnings by name, so the agent can tell its own without
         // reading the log.
@@ -1667,7 +1792,11 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
     }
     s.push('\n');
     for failure in &digest.failures {
-        let _ = writeln!(s, "FAIL {}", failure.name);
+        if suite.format_changes {
+            s.push_str("Formatting differences:\n");
+        } else {
+            let _ = writeln!(s, "FAIL {}", failure.name);
+        }
         for line in &failure.lines {
             if line.is_empty() {
                 s.push('\n');
