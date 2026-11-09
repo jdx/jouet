@@ -1,5 +1,6 @@
 {
   "repo": "jdx/demo",
+  "repo_aliases": ["jdx/fnox"],
   "rest": {
     "/repos/jdx/demo/pulls/1099": {
       "number": 1099,
@@ -2581,48 +2582,56 @@
               "nodes": [
                 {
                   "__typename": "PullRequestChangedFile",
+                  "changeType": "MODIFIED",
                   "path": "crates/fnox-core/build/generate_providers.rs",
                   "additions": 2,
                   "deletions": 0
                 },
                 {
                   "__typename": "PullRequestChangedFile",
+                  "changeType": "MODIFIED",
                   "path": "crates/fnox-core/providers/age.toml",
                   "additions": 10,
                   "deletions": 0
                 },
                 {
                   "__typename": "PullRequestChangedFile",
+                  "changeType": "MODIFIED",
                   "path": "crates/fnox-core/src/env.rs",
                   "additions": 4,
                   "deletions": 0
                 },
                 {
                   "__typename": "PullRequestChangedFile",
+                  "changeType": "MODIFIED",
                   "path": "crates/fnox-core/src/providers/age.rs",
                   "additions": 48,
                   "deletions": 3
                 },
                 {
                   "__typename": "PullRequestChangedFile",
+                  "changeType": "MODIFIED",
                   "path": "crates/fnox-core/src/providers/mod.rs",
                   "additions": 10,
                   "deletions": 1
                 },
                 {
                   "__typename": "PullRequestChangedFile",
+                  "changeType": "MODIFIED",
                   "path": "docs/providers/age.md",
                   "additions": 27,
                   "deletions": 5
                 },
                 {
                   "__typename": "PullRequestChangedFile",
+                  "changeType": "MODIFIED",
                   "path": "docs/reference/environment.md",
                   "additions": 2,
                   "deletions": 0
                 },
                 {
                   "__typename": "PullRequestChangedFile",
+                  "changeType": "MODIFIED",
                   "path": "src/commands/provider/add.rs",
                   "additions": 2,
                   "deletions": 0

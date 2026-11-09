@@ -3,12 +3,14 @@ import json
 import unittest
 import urllib.request
 import zipfile
+from pathlib import Path
 
 from jbench.fake_github import FakeGitHub, materialize
 
 FIXTURE = {
     "repo": "jdx/demo",
     "rest": {
+        "/repos/jdx/demo": {"full_name": "jdx/demo"},
         "/repos/jdx/demo/pulls/7": {"number": 7, "head": {"sha": "abc"}},
         "/repos/jdx/demo/actions/jobs/1/logs": {"$text": "the log", "$until": 30, "$before": {"$status": 404}},
         "/repos/jdx/demo/actions/runs/1/logs": {"$zip": {"0_test.txt": "the log"}},
@@ -95,6 +97,43 @@ class ServerTest(unittest.TestCase):
         with FakeGitHub(FIXTURE) as fake:
             status, _, body = get(fake.url + "/repos/jdx/demo/actions/runs/1/attempts/1/jobs?per_page=100")
         self.assertEqual((status, json.loads(body)["total_count"]), (200, 1))
+
+    def test_opt_in_repo_alias_shares_rest_state(self):
+        with FakeGitHub({**FIXTURE, "repo_aliases": ["jdx/fnox"]}) as fake:
+            for path in ("/repos/jdx/fnox", "/repos/jdx/fnox?x=1"):
+                status, _, body = get(fake.url + path)
+                self.assertEqual((status, json.loads(body)["full_name"]), (200, "jdx/demo"))
+            status, _, body = get(fake.url + "/repos/jdx/fnox/actions/runs/1/attempts/1/jobs?per_page=100")
+            self.assertEqual((status, json.loads(body)["total_count"]), (200, 1))
+            status, reply = post(fake.url + "/repos/jdx/fnox/pulls/7/comments/11/replies", {"body": "done"})
+            self.assertEqual((status, reply["in_reply_to_id"]), (201, 11))
+            comments = json.loads(get(fake.url + "/repos/jdx/demo/pulls/7/comments")[2])
+            self.assertEqual([c["body"] for c in comments], ["rename this", "done"])
+            self.assertEqual(fake.world.log[2]["path"], "/repos/jdx/fnox/actions/runs/1/attempts/1/jobs?per_page=100")
+            self.assertEqual(get(fake.url + "/repos/jdx/fnox-extra/pulls/7")[0], 404)
+            self.assertEqual(get(fake.url + "/repos/other/fnox/pulls/7")[0], 404)
+        with FakeGitHub(FIXTURE) as fake:
+            self.assertEqual(get(fake.url + "/repos/jdx/fnox/pulls/7")[0], 404)
+
+    def test_fnox_task_accepts_the_real_repo_run_url(self):
+        fixture = json.loads((Path(__file__).parents[1] /
+                              "tasks/fnox-age-identity-pr/github.json").read_text())
+        with FakeGitHub(fixture) as fake:
+            canonical = get(fake.url + "/repos/jdx/demo/actions/runs/9001")
+            alias = get(fake.url + "/repos/jdx/fnox/actions/runs/9001")
+        self.assertEqual(canonical[0], 200)
+        self.assertEqual(alias, canonical)
+
+    def test_fnox_changed_files_have_change_types(self):
+        fixture = json.loads((Path(__file__).parents[1] /
+                              "tasks/fnox-age-identity-pr/github.json").read_text())
+        query = "{ repository { pullRequest(number: 1099) { files(first: 100) { nodes { path changeType } } } } }"
+        with FakeGitHub(fixture) as fake:
+            _, response = post(fake.url + "/graphql", {"query": query})
+            self.assertEqual(fake.world.summary()["unanswered"], 0)
+        files = response["data"]["repository"]["pullRequest"]["files"]["nodes"]
+        self.assertEqual(len(files), 8)
+        self.assertTrue(all(file["changeType"] == "MODIFIED" for file in files))
 
     def test_text_status_and_zip(self):
         with FakeGitHub(FIXTURE) as fake:
