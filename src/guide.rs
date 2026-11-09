@@ -871,6 +871,7 @@ pub(crate) fn summary(
     rules: &[(&str, Option<&str>)],
     verify: bool,
     affected: bool,
+    affected_command: Option<&str>,
     wait: Option<&str>,
 ) -> String {
     let commands = agent_commands();
@@ -907,6 +908,7 @@ pub(crate) fn summary(
     let wait = wait.map_or(String::new(), |w| format!("{w} "));
     if let ([commit, edit, reply], [_, selected, cmd]) = (usage.as_slice(), tests.as_slice()) {
         let test = if affected {
+            let selected = affected_command.unwrap_or(selected);
             format!(
                 "Test with `{selected}` (what your changes affect) or `{cmd}` (any other test or build)."
             )
@@ -1118,7 +1120,7 @@ mod tests {
     #[test]
     fn the_primer_leaves_out_affected_where_it_cannot_select() {
         // In a repository with no runner --affected knows, it exits 4.
-        let text = summary(&[], true, false, None);
+        let text = summary(&[], true, false, None, None);
         assert!(!text.contains("--affected"), "{text}");
         assert!(
             text.contains(
@@ -1126,6 +1128,33 @@ mod tests {
             ),
             "{text}"
         );
+    }
+
+    #[test]
+    fn the_primer_uses_a_project_affected_command_when_available() {
+        let text = summary(
+            &[],
+            true,
+            true,
+            Some("env -u NO_COLOR jouet test --affected"),
+            None,
+        );
+        assert!(
+            text.contains("Test with `env -u NO_COLOR jouet test --affected`"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("Test with `jouet test --affected`"),
+            "{text}"
+        );
+        let unsupported = summary(
+            &[],
+            true,
+            false,
+            Some("env -u NO_COLOR jouet test --affected"),
+            None,
+        );
+        assert!(!unsupported.contains("--affected"), "{unsupported}");
     }
 
     #[test]
@@ -1145,6 +1174,7 @@ mod tests {
             ],
             true,
             true,
+            None,
             None,
         );
         assert!(

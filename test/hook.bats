@@ -138,6 +138,18 @@ stop_reason() {
 		jouet hook claude stop | jq -r '.reason // empty'
 }
 
+@test "an environment-wrapped affected test clears its own failure" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+	ran 'env -u NO_COLOR jouet test --affected' 1
+	run stop_reason
+	assert_output --partial 'The last test run failed'
+	ran 'env -u NO_COLOR jouet test --affected' 0
+	run stop_reason
+	assert_output ""
+}
+
 @test "an excluded pnpm Vitest run does not clear a failed package test" {
 	git init -q repo
 	mkdir -p repo/admin
@@ -863,6 +875,43 @@ claude_payload() {
 	(cd repo && jouet trust --yes >/dev/null)
 	run start
 	assert_output --partial "jouet: prefer these project-specific checks over generic examples when applicable (.jouet/project.toml): bats \`jouet test --cmd -- mise run test:bats -- test/NAME.bats\`; full suite \`mise run test\`."
+}
+
+@test "session-start uses a project's affected command only while trusted" {
+	git init -q repo
+	mkdir -p repo/.jouet
+	printf '[package]\nname = "fixture"\nversion = "0.1.0"\n' >repo/Cargo.toml
+	printf '[checks]\naffected = "env -u NO_COLOR jouet test --affected"\n' >repo/.jouet/project.toml
+	affected_start() {
+		jq -cn --arg cwd "$PWD/repo" '{session_id: "s1", source: "startup", cwd: $cwd}' |
+			jouet hook codex session-start | jq -r '.hookSpecificOutput.additionalContext'
+	}
+	run affected_start
+	assert_output --partial "Test with \`jouet test --affected\`"
+	refute_output --partial 'env -u NO_COLOR jouet test --affected'
+	(cd repo && jouet trust --yes >/dev/null)
+	run affected_start
+	assert_output --partial "Test with \`env -u NO_COLOR jouet test --affected\`"
+	refute_output --partial "Test with \`jouet test --affected\`"
+	printf '[checks]\naffected = "env -u NO_COLOR jouet test --affected"\n[checks.broken]\n"env -u NO_COLOR jouet test --affected" = "missing dependency"\n' >repo/.jouet/project.toml
+	(cd repo && jouet trust --yes >/dev/null)
+	run affected_start
+	assert_output --partial "Test with \`jouet test --cmd"
+	refute_output --partial "Test with \`env -u NO_COLOR jouet test --affected\`"
+	printf '[checks.broken]\n"jouet test --affected" = "missing dependency"\n' >repo/.jouet/project.toml
+	(cd repo && jouet trust --yes >/dev/null)
+	run affected_start
+	assert_output --partial "Test with \`jouet test --cmd"
+	refute_output --partial "Test with \`jouet test --affected\`"
+	printf '[checks]\naffected = "env -u NO_COLOR jouet test --affected"\n' >repo/.jouet/project.toml
+	printf '\n# changed\n' >>repo/.jouet/project.toml
+	run affected_start
+	assert_output --partial "Test with \`jouet test --affected\`"
+	refute_output --partial 'env -u NO_COLOR jouet test --affected'
+	printf '[checks]\naffected = ""\n' >repo/.jouet/project.toml
+	run bash -c 'cd repo && jouet trust --yes'
+	assert_failure
+	assert_output --partial 'checks.affected must be a nonempty single-line command'
 }
 
 @test "session-start points at a trusted .jouet/map.md without inlining it" {

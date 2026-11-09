@@ -38,6 +38,8 @@ pub(crate) struct Project {
 pub(crate) struct Checks {
     /// The whole suite.
     pub(crate) full: Option<String>,
+    /// A verified project-specific invocation of the affected selector.
+    pub(crate) affected: Option<String>,
     /// A focused check by what it covers: `unit`, `e2e`, `bats` and so on.
     pub(crate) focused: BTreeMap<String, String>,
     pub(crate) lint: Option<String>,
@@ -100,7 +102,17 @@ pub(crate) fn read(root: &Path) -> Option<Result<Project, String>> {
 }
 
 pub(crate) fn parse(text: &str) -> Result<Project, String> {
-    toml::from_str(text).map_err(|e: toml::de::Error| e.message().to_string())
+    let project: Project =
+        toml::from_str(text).map_err(|e: toml::de::Error| e.message().to_string())?;
+    if project
+        .checks
+        .affected
+        .as_deref()
+        .is_some_and(|command| inline_command(command).is_none())
+    {
+        return Err("checks.affected must be a nonempty single-line command of at most 200 characters without backticks".to_string());
+    }
+    Ok(project)
 }
 
 /// One line for the session-start primer naming the project's checks, when
@@ -122,6 +134,47 @@ pub(crate) fn primer_line(cwd: &Path) -> Option<String> {
 pub(crate) fn trusted(root: &Path) -> Option<Result<Project, String>> {
     let project = read(root)?;
     repo_trusted(root).then_some(project)
+}
+
+/// The affected check to recommend in the session primer.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) enum AffectedCommand {
+    #[default]
+    Default,
+    Configured(String),
+    Broken,
+}
+
+pub(crate) fn affected_command(cwd: &Path) -> AffectedCommand {
+    let root = crate::verify::root_of(cwd);
+    trusted(Path::new(&root))
+        .and_then(Result::ok)
+        .map_or(AffectedCommand::Default, |project| {
+            affected_for(&project.checks)
+        })
+}
+
+fn affected_for(checks: &Checks) -> AffectedCommand {
+    let configured = checks.affected.as_deref().and_then(inline_command);
+    let selected = configured.unwrap_or("jouet test --affected");
+    if checks.broken(selected).is_some() {
+        AffectedCommand::Broken
+    } else if let Some(command) = configured {
+        AffectedCommand::Configured(command.to_string())
+    } else {
+        AffectedCommand::Default
+    }
+}
+
+fn inline_command(command: &str) -> Option<&str> {
+    let command = command.trim();
+    if command.is_empty()
+        || command.chars().count() > 200
+        || command.chars().any(|c| c.is_control() || c == '`')
+    {
+        return None;
+    }
+    Some(command)
 }
 
 /// Whether the repository's jouet files at `root` run.
@@ -232,6 +285,54 @@ fn line(checks: &Checks) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn affected_command_is_a_bounded_single_line() {
+        let project =
+            parse("[checks]\naffected = 'env -u NO_COLOR jouet test --affected'\n").unwrap();
+        assert_eq!(
+            inline_command(project.checks.affected.as_deref().unwrap()),
+            Some("env -u NO_COLOR jouet test --affected")
+        );
+        assert_eq!(inline_command(" "), None);
+        assert_eq!(inline_command("first\nsecond"), None);
+        assert_eq!(inline_command("echo `bad`"), None);
+        assert_eq!(inline_command(&"x".repeat(201)), None);
+        assert!(
+            parse("[checks]\naffected = ''\n")
+                .unwrap_err()
+                .contains("checks.affected")
+        );
+        assert!(
+            parse("[checks]\naffected = 'echo `bad`'\n")
+                .unwrap_err()
+                .contains("checks.affected")
+        );
+    }
+
+    #[test]
+    fn known_broken_affected_checks_are_not_recommended() {
+        let override_command = "env -u NO_COLOR jouet test --affected";
+        let mut checks = Checks {
+            affected: Some(override_command.into()),
+            ..Checks::default()
+        };
+        assert_eq!(
+            affected_for(&checks),
+            AffectedCommand::Configured(override_command.into())
+        );
+        checks
+            .broken
+            .insert(override_command.into(), "broken".into());
+        assert_eq!(affected_for(&checks), AffectedCommand::Broken);
+
+        checks.affected = None;
+        assert_eq!(affected_for(&checks), AffectedCommand::Default);
+        checks
+            .broken
+            .insert("jouet test --affected".into(), "broken".into());
+        assert_eq!(affected_for(&checks), AffectedCommand::Broken);
+    }
 
     #[test]
     fn the_map_is_named_with_its_length_not_inlined() {

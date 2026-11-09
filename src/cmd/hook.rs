@@ -154,8 +154,8 @@ fn handle(
         "session-start" => {
             log.append(log.entry("session-start"));
             let loaded = load_all(payload).filter(|_| hooks.prime)?;
-            let primer = session_start(&loaded.engine, hooks.steer, hooks.verify, harness);
             let cwd = payload.get("cwd").and_then(Value::as_str).map(Path::new);
+            let primer = session_start(&loaded.engine, hooks.steer, hooks.verify, harness, cwd);
             // The slow checks here, from the timings kept in git notes.
             let mut notes: Vec<String> = cwd
                 .and_then(|cwd| crate::cost::primer_line(&crate::cost::Costs::load(cwd)))
@@ -701,14 +701,26 @@ pub(crate) fn primer_tokens(settings: &Settings, cwd: &Path, harness: &str) -> u
     let Some(harness) = Harness::parse(harness).filter(|_| hooks.enabled && hooks.prime) else {
         return 0;
     };
-    let primer = session_start(&rules::load(cwd).engine, hooks.steer, hooks.verify, harness);
+    let primer = session_start(
+        &rules::load(cwd).engine,
+        hooks.steer,
+        hooks.verify,
+        harness,
+        Some(cwd),
+    );
     let chars = primer["hookSpecificOutput"]["additionalContext"]
         .as_str()
         .map_or(0, |s| s.chars().count());
     (chars as u64).div_ceil(4)
 }
 
-fn session_start(engine: &Engine, steer: bool, verify: bool, harness: Harness) -> Value {
+fn session_start(
+    engine: &Engine,
+    steer: bool,
+    verify: bool,
+    harness: Harness,
+    cwd: Option<&Path>,
+) -> Value {
     // Only the rules that deny: a warning costs the agent no call.
     let rules: Vec<(&str, Option<&str>)> = if steer {
         engine
@@ -727,8 +739,24 @@ fn session_start(engine: &Engine, steer: bool, verify: bool, harness: Harness) -
     } else {
         Vec::new()
     };
-    let affected = std::env::current_dir().is_ok_and(|cwd| !crate::affected::near(&cwd).is_empty());
-    let mut context = guide::summary(&rules, verify, affected, wait_hint(harness));
+    let fallback = std::env::current_dir().ok();
+    let cwd = cwd.or(fallback.as_deref());
+    let affected = cwd.is_some_and(|cwd| !crate::affected::near(cwd).is_empty());
+    let command = cwd
+        .map(crate::project::affected_command)
+        .unwrap_or_default();
+    let (affected, command) = match command {
+        crate::project::AffectedCommand::Default => (affected, None),
+        crate::project::AffectedCommand::Configured(command) => (affected, Some(command)),
+        crate::project::AffectedCommand::Broken => (false, None),
+    };
+    let mut context = guide::summary(
+        &rules,
+        verify,
+        affected,
+        command.as_deref(),
+        wait_hint(harness),
+    );
     // A deprecated Luau rule file: the agent can convert it.
     for note in engine
         .rules()
@@ -1991,7 +2019,7 @@ mod tests {
 
     #[test]
     fn winding_notes_follow_the_primer() {
-        let primer = session_start(&engine(Vec::new()), true, true, Harness::Claude);
+        let primer = session_start(&engine(Vec::new()), true, true, Harness::Claude, None);
         let before = primer["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap()
@@ -2036,7 +2064,7 @@ mod tests {
             None,
             false,
         ));
-        let out = session_start(&engine, true, true, Harness::Claude);
+        let out = session_start(&engine, true, true, Harness::Claude, None);
         // The slow checks are a session-start note, read from the notes of
         // the repository the session is in, never part of the primer.
         let context = out["hookSpecificOutput"]["additionalContext"]
@@ -2044,7 +2072,7 @@ mod tests {
             .unwrap();
         // How to wait for a long run in one call, for this harness.
         assert!(context.contains("a Bash `timeout` of 600000"), "{context}");
-        let codex = session_start(&engine, true, true, Harness::Codex);
+        let codex = session_start(&engine, true, true, Harness::Codex, None);
         let codex = codex["hookSpecificOutput"]["additionalContext"].to_string();
         assert!(codex.contains("loop on write_stdin"), "{codex}");
         assert!(!codex.contains("Bash `timeout`"), "{codex}");

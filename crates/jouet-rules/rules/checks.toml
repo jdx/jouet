@@ -130,6 +130,8 @@ fires = [
   { command = "jouet test", exit_code = 1, kind = "test", scope = "full" },
   { command = "jouet --json test", exit_code = 0, kind = "test", scope = "full" },
   { command = "jouet test --affected", exit_code = 0, kind = "test", scope = "partial --affected" },
+  { command = "env -u NO_COLOR jouet test --affected", exit_code = 0, kind = "test", scope = "partial --affected" },
+  { command = "env -u NO_COLOR jouet test --affected", exit_code = 1, kind = "test", scope = "partial --affected" },
   { command = "jouet test --affected --since origin/main --json", exit_code = 1, kind = "test", scope = "partial --affected --since origin/main" },
   { command = "jouet test --baseline --affected --since origin/main", exit_code = 0, kind = "test", scope = "partial --affected --since origin/main" },
   # `--baseline` reruns failures at the merge base; the run is still the whole suite.
