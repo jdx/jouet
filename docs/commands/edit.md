@@ -194,7 +194,7 @@ Symbol targets work for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C,
 
 ### Codex-style patch
 
-The format used by OpenAI Codex's `apply_patch`, accepted as is:
+The patch syntax used by OpenAI Codex's `apply_patch` is also accepted:
 
 ```spec
 *** Begin Patch
@@ -215,6 +215,7 @@ The format used by OpenAI Codex's `apply_patch`, accepted as is:
 - If a hunk matches more than once, add surrounding context lines until it matches once; the patch is not applied while a hunk is ambiguous.
 - `@@ TEXT` is an anchor: the hunk is searched for after the first line equal to `TEXT` (ignoring surrounding whitespace if no line is exactly equal). Several `@@` lines narrow the search one after another.
 - Hunks are searched for in order, each after the one before, and must match exactly once in what remains.
+- A patch that `apply_patch` accepts can still be ambiguous here: for example, an insertion after a bare `}` is refused if more than one `}` remains after the preceding hunk. Include enough adjacent lines in the same hunk to identify the intended location; jouet does not choose the first match.
 - `*** End of File` pins the hunk above it to the end of the file.
 - A patch without its `*** End Patch` line is refused, because it may have been cut short.
 
