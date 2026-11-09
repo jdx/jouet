@@ -166,6 +166,43 @@ fn jobs(doc: &Value) -> &Vec<Value> {
 }
 
 #[test]
+fn a_cancelled_job_that_finished_before_a_failure_is_examined() {
+    let fixture = format!("actions.runs.{MACOS_RUN}.attempts.1.jobs@per_page=100.json");
+    let mut response: Value =
+        serde_json::from_str(&std::fs::read_to_string(fixtures().join(&fixture)).unwrap()).unwrap();
+    let cancelled = response["jobs"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|job| job["conclusion"] == "cancelled")
+        .unwrap();
+    let name = cancelled["name"].as_str().unwrap().to_owned();
+    let id = cancelled["id"].as_u64().unwrap();
+    cancelled["completed_at"] = "2026-10-31T10:43:00Z".into();
+    let fake = github_with(vec![
+        (fixture, response.to_string()),
+        (format!("job-{id}.log"), "job was cancelled".into()),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let out = explain(&fake, dir.path(), &["--run", MACOS_RUN]);
+    let doc = json(&out);
+    let job = jobs(&doc).iter().find(|job| job["name"] == name).unwrap();
+    assert_eq!(job["verdict"], "unknown");
+    assert!(
+        doc["runs"][0]["following"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|job| job["name"] != name)
+    );
+    assert!(
+        fake.requests()
+            .iter()
+            .any(|r| r.path.contains(&format!("/actions/jobs/{id}/logs")))
+    );
+}
+
+#[test]
 fn a_macos_only_failure_is_an_os_difference_not_a_flake() {
     let fake = github();
     let dir = tempfile::tempdir().unwrap();
