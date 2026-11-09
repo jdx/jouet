@@ -10,6 +10,12 @@ use usage_rs::Args;
 /// changes nothing. The jouet-init project onboarding skill is always installed;
 /// --uninstall removes only what jouet added. The hooks do
 /// nothing where jouet is not on PATH.
+///
+/// For Claude Code, setup also offers a context budget from your own recent
+/// sessions: a compaction window when they run on a 1M-token model, and
+/// denying what none of them used. Asked at a terminal, otherwise only
+/// noted: nothing is written without --compact-window or --deny-unused, and
+/// --undo takes each back.
 #[derive(Args)]
 pub(crate) struct SetupArgs {
     /// claude, codex, cursor, gemini or copilot
@@ -40,4 +46,18 @@ pub(crate) struct SetupArgs {
     /// Print a prompt for an agent to benchmark jouet on this project
     #[usage(long)]
     pub(crate) benchmark: bool,
+    /// Claude Code: compact a conversation once its context reaches TOKENS
+    /// (100k to 1m), by setting autoCompactWindow. It pays on a 1M-token
+    /// model; a 200k one already compacts there
+    #[usage(long, value_name = "TOKENS")]
+    pub(crate) compact_window: Option<String>,
+    /// Claude Code: deny the tools and MCP servers that none of your last 50
+    /// sessions called, and hide from the model the skills none used (still
+    /// there as /name)
+    #[usage(long)]
+    pub(crate) deny_unused: bool,
+    /// Claude Code: take back what --compact-window (window) or
+    /// --deny-unused (unused) added, and nothing else
+    #[usage(long, value_name = "CHOICE", choices("window", "unused"))]
+    pub(crate) undo: Option<String>,
 }

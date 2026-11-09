@@ -638,3 +638,96 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	run --separate-stderr sh -c "$command" <<<"$input"
 	assert_output --partial '"decision":"deny"'
 }
+
+# Writes N Claude Code sessions under $HOME/.claude/projects that carried the
+# Bash and Workflow tools, the visualize MCP server and the docx skill, and
+# called only Bash, each reaching CONTEXT tokens.
+claude_sessions() {
+	local n=$1 context=${2:-50000} dir="$HOME/.claude/projects/-src-app" i
+	mkdir -p "$dir"
+	for ((i = 0; i < n; i++)); do
+		{
+			jq -nc '{type: "attachment", isSidechain: false, attachment: {type: "prompt_snapshot", tools: [
+				{name: "Bash", description: "Runs a command", input_schema: {}},
+				{name: "Workflow", description: ("x" * 4600), input_schema: {}},
+				{name: "mcp__visualize__show_widget", description: ("y" * 2300), input_schema: {}}]}}'
+			jq -nc '{type: "attachment", isSidechain: false, attachment: {type: "skill_listing",
+				content: "- docx: Word documents\n- loop: run a prompt on an interval"}}'
+			jq -nc --argjson c "$context" '{type: "assistant", message: {usage: {input_tokens: 0, cache_read_input_tokens: $c},
+				content: [{type: "tool_use", name: "Bash", input: {command: "ls"}}]}}'
+		} >"$dir/session-$i.jsonl"
+	done
+	jq -nc '{type: "user", message: {content: "<command-name>/loop</command-name>"}}' >>"$dir/session-0.jsonl"
+}
+
+@test "setup notes the context budget it could set, and writes none of it unasked" {
+	claude_sessions 20 640000
+	run --separate-stderr jouet setup claude
+	assert_success
+	assert_output --partial "note: setup can also cut what each request carries, changing nothing unless asked: \`jouet setup claude --compact-window 200k\` (20 of your last 20 sessions went past 200k tokens of context, up to 640k); and \`jouet setup claude --deny-unused\` (3 definitions none of your last 20 sessions used"
+	assert_output --partial 'tools Workflow; MCP servers visualize; 1 skills;'
+	run jq -c '[.autoCompactWindow, .permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
+	assert_output '[null,["Artifact","ArtifactComments","ArtifactData"],null]'
+	run --separate-stderr jouet setup claude --dry-run --json
+	run jq -c '.context_budget | [.compact_window, .past_window, [.unused[] | [.kind, .name]]]' <<<"$output"
+	assert_output '[200000,20,[["tool","Workflow"],["mcp","visualize"],["skill","docx"]]]'
+}
+
+@test "setup asked at a terminal writes nothing without a yes" {
+	claude_sessions 20 640000
+	run in_tty "XDG_STATE_HOME=$XDG_STATE_HOME" jouet setup claude
+	assert_success
+	assert_output --partial 'Compact conversations at 200k tokens of context (autoCompactWindow: 200000)?'
+	assert_output --partial 'Deny them? Skills stay available as /name.'
+	run jq -c '[.autoCompactWindow, .skillOverrides]' "$HOME/.claude/settings.json"
+	assert_output '[null,null]'
+}
+
+@test "a 200k model's sessions are not offered a window, and few sessions no denials" {
+	claude_sessions 19 150000
+	run --separate-stderr jouet setup claude
+	assert_success
+	refute_output --partial 'setup can also cut'
+	run --separate-stderr jouet setup claude --deny-unused
+	assert_success
+	assert_output --partial 'note: nothing to deny: only 19 recent sessions recorded their tools, and it takes 20'
+}
+
+@test "each context budget choice is one undo, and uninstall takes back both" {
+	claude_sessions 20
+	jq -n '{permissions: {deny: ["Bash(rm:*)"]}, skillOverrides: {loop: "off"}}' >"$HOME/.claude/settings.json"
+	run --separate-stderr jouet setup claude --compact-window 300k --deny-unused
+	assert_success
+	assert_output --partial "note: set autoCompactWindow to 300000; \`jouet setup claude --undo window\` takes it back"
+	assert_output --partial 'note: denied 2 unused tools and MCP servers and hid 1 unused skills from the model'
+	run jq -c '[.autoCompactWindow, .permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
+	assert_output '[300000,["Bash(rm:*)","Artifact","ArtifactComments","ArtifactData","Workflow","mcp__visualize"],{"loop":"off","docx":"user-invocable-only"}]'
+
+	run --separate-stderr jouet setup claude --undo window
+	assert_success
+	run jq -c '[.autoCompactWindow, (.permissions.deny | length)]' "$HOME/.claude/settings.json"
+	assert_output '[null,6]'
+
+	run --separate-stderr jouet setup claude --undo unused
+	assert_success
+	run jq -c '[.permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
+	assert_output '[["Bash(rm:*)","Artifact","ArtifactComments","ArtifactData"],{"loop":"off"}]'
+
+	run --separate-stderr jouet setup claude --compact-window 200k --deny-unused
+	run --separate-stderr jouet setup claude --uninstall
+	assert_success
+	run jq -c . "$HOME/.claude/settings.json"
+	assert_output '{"permissions":{"deny":["Bash(rm:*)"]},"skillOverrides":{"loop":"off"}}'
+}
+
+@test "the context budget flags are for Claude Code's own settings" {
+	run --separate-stderr jouet setup codex --deny-unused
+	assert_failure 2
+	run --separate-stderr jouet setup claude --shared --compact-window 200k
+	assert_failure 2
+	run --separate-stderr jouet setup claude --compact-window 50k
+	assert_failure 2
+	assert_stderr --partial 'from 100k to 1m tokens'
+	run --separate-stderr jouet setup claude --uninstall --undo window
+	assert_failure 2
+}
