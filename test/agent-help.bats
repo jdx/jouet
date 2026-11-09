@@ -75,6 +75,6 @@ setup() {
 		assert [ -n "$example" ]
 		run --separate-stderr bash -c "$example"
 		assert_success
-		assert [ "$(cat example.txt)" = 'new line' ]
+		assert_content example.txt $'new line\n'
 	done
 }
