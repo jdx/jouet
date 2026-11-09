@@ -559,6 +559,27 @@ stop_reason() {
 	assert_output '{}'
 }
 
+@test "a matching baseline comparison clears a wrapped lint failure in a codex transcript" {
+	git init -q repo
+	item() {
+		jq -cn --arg command "$1" --argjson exit_code "$2" \
+			'{type: "event_msg", payload: {type: "item_completed", item: {type: "CommandExecution",
+			  command: ["/bin/zsh", "-lc", $command], exit_code: $exit_code}}}'
+	}
+	item 'jouet test --cmd -- env MISE_ENV=bench mise x ruff@0.17.4 -- ruff check --isolated a.py b.py' 1 >rollout.jsonl
+	run --separate-stderr jouet hook codex stop <<<"{\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD/repo\",\"stop_hook_active\":false}"
+	assert_success
+	assert_output --partial '"decision":"block"'
+	item 'jouet test --baseline --cmd -- env MISE_ENV=bench mise x ruff@0.17.4 -- ruff check --isolated a.py c.py' 0 >>rollout.jsonl
+	run --separate-stderr jouet hook codex stop <<<"{\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD/repo\",\"stop_hook_active\":false}"
+	assert_success
+	assert_output --partial '"decision":"block"'
+	item 'jouet test --baseline --cmd -- env MISE_ENV=bench mise x ruff@0.17.4 -- ruff check --isolated a.py b.py' 0 >>rollout.jsonl
+	run --separate-stderr jouet hook codex stop <<<"{\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD/repo\",\"stop_hook_active\":false}"
+	assert_success
+	refute_output --partial '"decision":"block"'
+}
+
 @test "the ledger records shapes and decisions, never values, and counts overrides" {
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'git stash')"
 	assert_output --partial '"permissionDecision":"deny"'

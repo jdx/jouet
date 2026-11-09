@@ -320,6 +320,18 @@ impl Run {
             (true, false) | (false, true) => return false,
             (false, false) => {}
         }
+        // A successful baseline comparison establishes the same command's
+        // failures, even when its runner has no parsed selector. Compare the
+        // complete command so options and environment stay exact. Codex
+        // transcripts omit trees, so two unknown trees follow the existing
+        // coverage behavior; known but different trees must not match.
+        if self.selector.is_none()
+            && failed.selector.is_none()
+            && self.tree == failed.tree
+            && self.command == baseline_command(&failed.command)
+        {
+            return true;
+        }
         if ran == wanted {
             return true;
         }
@@ -2842,6 +2854,16 @@ mod tests {
             Some("old"),
         );
         assert!(!checks.failures.contains_key(&Kind::Test));
+
+        // A Codex transcript has no tree IDs, so it cannot establish that
+        // the two affected plans selected the same commands.
+        let mut unknown = Checks::default();
+        unknown.record([test("jouet test --affected", 1, "--affected")], None);
+        unknown.record(
+            [test("jouet test --baseline --affected", 0, "--affected")],
+            None,
+        );
+        assert_eq!(unknown.failures[&Kind::Test].len(), 1);
     }
 
     #[test]
@@ -3769,6 +3791,52 @@ mod tests {
             Some("t1"),
         );
         assert!(reason(&state, "t1").unwrap().contains("clippy --workspace"));
+    }
+
+    #[test]
+    fn a_baseline_comparison_clears_the_exact_wrapped_lint_command() {
+        let command = "jouet test --cmd -- env MISE_ENV=bench mise x ruff@0.17.4 -- ruff check --isolated bench/jbench/runner.py bench/jbench/report.py bench/tests/test_runner.py";
+        let baseline = "jouet test --baseline --cmd -- env MISE_ENV=bench mise x ruff@0.17.4 -- ruff check --isolated bench/jbench/runner.py bench/jbench/report.py bench/tests/test_runner.py";
+        let mut failed = record(Kind::Lint, command, 1, "unknown");
+        failed.selector = None;
+        let mut compared = record(Kind::Lint, baseline, 0, "unknown");
+        compared.selector = None;
+        let mut state = Checks::default();
+        state.record([failed], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+        state.record([compared], Some("t1"));
+        assert_eq!(reason(&state, "t1"), None);
+
+        let mut failed = record(Kind::Lint, command, 1, "unknown");
+        failed.selector = None;
+        let mut other = record(
+            Kind::Lint,
+            &baseline.replace("report.py", "other.py"),
+            0,
+            "unknown",
+        );
+        other.selector = None;
+        let mut state = Checks::default();
+        state.record([failed.clone()], Some("t1"));
+        state.record([other], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+
+        let mut other_tree = record(Kind::Lint, baseline, 0, "unknown");
+        other_tree.selector = None;
+        let mut state = Checks::default();
+        state.record([failed], Some("t1"));
+        state.record([other_tree], Some("t2"));
+        assert!(reason(&state, "t1").is_some());
+
+        // Codex reconstructs both runs from a transcript without tree IDs.
+        let mut failed = record(Kind::Lint, command, 1, "unknown");
+        failed.selector = None;
+        let mut compared = record(Kind::Lint, baseline, 0, "unknown");
+        compared.selector = None;
+        let mut state = Checks::default();
+        state.record([failed], None);
+        state.record([compared], None);
+        assert_eq!(reason(&state, "t1"), None);
     }
 
     #[test]
