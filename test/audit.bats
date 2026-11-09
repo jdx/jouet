@@ -192,3 +192,30 @@ JSONL
 	assert_success
 	[[ "$(jq -c '.totals | [.stop_blocks // 0, .denials, .usage_errors // 0, .test_runs, .log_reads // 0]' <<<"$output")" == '[0,1,0,1,0]' ]]
 }
+
+@test "carried charges each request's input to what put it in the context" {
+	run --separate-stderr jouet audit --display plain --harness claude
+	assert_success
+	assert_line --partial "  carried: each request's input, charged to what put it in the context"
+	assert_line --regexp '^  start of the session or after a compaction [0-9.]+%$'
+	refute_output --partial 'files that kept costing most'
+
+	run --separate-stderr jouet audit --json --display plain --harness claude --examples
+	assert_success
+	[[ "$(jq -r '.harnesses[0].carried.files[0].file' <<<"$output")" == src/lib.rs ]]
+}
+
+@test "--what-if replays denials exactly and a window as a range" {
+	run --separate-stderr jouet audit --json --display plain --harness claude --what-if deny=Workflow,Nope
+	assert_success
+	[[ "$(jq -c '.harnesses[0].what_if | [.denied[0].name, .denied[0].input_tokens, .not_found[0], (.scenarios | length)]' <<<"$output")" == '["Workflow",259,"Nope",1]' ]]
+
+	run --separate-stderr jouet audit --display plain --harness claude --what-if window=20k
+	assert_success
+	assert_line --partial '  what if (window 20k): replaying '
+	assert_line --regexp '^  input .* to .* \([-+][0-9.]+% to [-+][0-9.]+%\), price-weighted .* compactions added$'
+
+	run --separate-stderr jouet audit --what-if window=lots
+	assert_failure 2
+	assert_equal "$stderr" 'jouet: --what-if: window=`lots` is not a size; write it as 200k, 1m or 200000'
+}

@@ -37,6 +37,13 @@ pub(crate) struct AuditArgs {
     /// Show one redacted example command per shape and pattern
     #[usage(long)]
     pub(crate) examples: bool,
+    /// Replay the sessions with fewer definitions or a smaller compaction
+    /// window, and show the input they would have read:
+    /// `window=200k,deny=Workflow,Artifact`. A denial replays exactly (up
+    /// to its size estimate); a window is a range, from compaction at the
+    /// window to 33k below it
+    #[usage(long = "what-if", value_name = "SPEC")]
+    pub(crate) what_if: Option<String>,
     /// Report jouet's own costs instead, per session: stop blocks and
     /// whether a passing check resolved each, denials and what the agent ran
     /// next (from the hook ledger), usage errors, crashes and answers dropped

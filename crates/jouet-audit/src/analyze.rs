@@ -6,6 +6,7 @@
 //! context, so a request avoided saves its whole input, which is why savings
 //! are counted in requests that would not have been made.
 
+use crate::carry::{Carried, CarryAcc};
 use crate::category::{Category, categorize};
 use crate::event::{Tool, Transcript};
 use crate::fixed::{FixedAcc, FixedContext};
@@ -13,6 +14,7 @@ use crate::own::{OwnAcc, OwnSession};
 use crate::pattern::{Pattern, detect_call};
 use crate::redact::{example, redact};
 use crate::shape::shape;
+use crate::whatif::{WhatIf, WhatIfAcc, WhatIfReport};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
@@ -26,6 +28,7 @@ pub struct Analyzer {
     examples: bool,
     home: Option<String>,
     own: Option<OwnAcc>,
+    what_if: Option<WhatIf>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -49,6 +52,8 @@ struct Acc {
     patterns: [PatAcc; Pattern::ALL.len()],
     waits: ProcessWaits,
     fixed: FixedAcc,
+    carry: CarryAcc,
+    what_if: WhatIfAcc,
 }
 
 /// Linked observations and the narrower set that could have been combined.
@@ -159,6 +164,7 @@ impl Analyzer {
             examples,
             home,
             own: None,
+            what_if: None,
         }
     }
 
@@ -166,6 +172,7 @@ impl Analyzer {
     pub(crate) fn empty_like(&self) -> Self {
         Self {
             own: self.own.as_ref().map(|_| OwnAcc::default()),
+            what_if: self.what_if.clone(),
             ..Self::new(self.examples, self.home.clone())
         }
     }
@@ -184,6 +191,10 @@ impl Analyzer {
         }
         acc.transcripts += 1;
         acc.fixed.add(transcript);
+        acc.carry.add(transcript, home.as_deref(), keep_examples);
+        if let Some(spec) = &self.what_if {
+            acc.what_if.add(spec, transcript);
+        }
         if let Some(own) = &mut self.own {
             own.add(harness, transcript, home.as_deref());
         }
@@ -433,10 +444,20 @@ impl Analyzer {
             }
             ours.waits.cached_unknown |= theirs.waits.cached_unknown;
             ours.fixed.merge(theirs.fixed);
+            ours.carry.merge(theirs.carry);
+            ours.what_if.merge(theirs.what_if);
         }
         if let (Some(ours), Some(theirs)) = (&mut self.own, other.own) {
             ours.merge(theirs);
         }
+    }
+
+    /// Also replay every transcript with fewer definitions or a smaller
+    /// compaction window: see [`WhatIfReport`].
+    #[must_use]
+    pub fn with_what_if(mut self, spec: WhatIf) -> Self {
+        self.what_if = Some(spec);
+        self
     }
 
     /// Also look for jouet's own costs in each transcript: see
@@ -464,7 +485,12 @@ impl Analyzer {
         Report {
             harnesses: names
                 .into_iter()
-                .map(|name| harness_report(name, &self.harnesses[name], top_shapes))
+                .map(|name| {
+                    let acc = &self.harnesses[name];
+                    let mut h = harness_report(name, acc, top_shapes);
+                    h.what_if = self.what_if.as_ref().and_then(|s| acc.what_if.report(s));
+                    h
+                })
                 .collect(),
         }
     }
@@ -607,6 +633,8 @@ fn harness_report(name: &str, acc: &Acc, top_shapes: usize) -> HarnessReport {
         suggestions,
         patterns,
         fixed_context: acc.fixed.report(acc.input_tokens),
+        carried: acc.carry.report(),
+        what_if: None,
     }
 }
 
@@ -735,6 +763,13 @@ pub struct HarnessReport {
     /// transcripts record them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fixed_context: Option<FixedContext>,
+    /// Each request's input charged to what put it in the context and
+    /// how long it stayed, for a harness that records tokens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub carried: Option<Carried>,
+    /// The replay `--what-if` asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub what_if: Option<WhatIfReport>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

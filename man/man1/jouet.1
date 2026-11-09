@@ -390,6 +390,9 @@ Categories to list per harness in text (default 10; 0 lists all). \-\-json lists
 \fB\-\-examples\fR
 Show one redacted example command per shape and pattern
 .TP
+\fB\-\-what\-if\fR \fI<SPEC>\fR
+Replay the sessions with fewer definitions or a smaller compaction window, and show the input they would have read: `window=200k,deny=Workflow,Artifact`. A denial replays exactly (up to its size estimate); a window is a range, from compaction at the window to 33k below it
+.TP
 \fB\-\-jouet\fR
 Report jouet's own costs instead, per session: stop blocks and whether a passing check resolved each, denials and what the agent ran next (from the hook ledger), usage errors, crashes and answers dropped for the raw command, and test logs read right after `jouet test`
 .TP

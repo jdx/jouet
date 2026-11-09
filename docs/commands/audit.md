@@ -8,7 +8,8 @@ description: See where your coding-agent sessions spend tokens and time, and whi
 
 ```text
 jouet audit [--since TIME] [--until TIME] [--harness claude|codex|all]
-            [--project PATH] [--top N] [--examples] [--jouet] [--json]
+            [--project PATH] [--top N] [--examples] [--what-if SPEC]
+            [--jouet] [--json]
 ```
 
 The flags are listed in the [CLI reference](/cli/audit). `--since` takes a duration ago (`7d`, `12h`), a date (`2026-10-01`) or RFC 3339, and `--until` takes the same forms, so `--since 2026-11-09T06:47:00Z --until 2026-11-09T12:47:00Z` audits one past six-hour window. `--project` keeps sessions that ran in that directory or below it; a relative path is taken from the current directory, with `..` resolved by name rather than by following symlinks. `--top` sets how many categories are listed per harness (default 10; `0` lists all).
@@ -81,6 +82,41 @@ $ jouet audit --harness claude --since 14d --top 3
 ```
 
 In JSON, it is `fixed_context` under the harness: `items` (each with `kind`, `name`, `tokens_per_request`, `transcripts`, `requests`, `input_tokens`, `calls` and, when nothing called it, `remove`) and `periods` (each with `start`, `mean_tokens`, `grew` and `shrank`).
+
+## What stays in the context
+
+The categories above charge a request's input to the calls that request made: what the agent did. The "carried" section charges it to what the agent keeps re-reading. Between two requests the context grows by what the first one's calls returned; that growth, times the requests that read it before the next compaction, is charged to those calls, split by the bytes each returned, and to "replies" when the request called no tool. What a stretch between compactions starts with, the fixed context and instructions or a compaction's summary, is shown as the start. A compaction is Claude Code's `compact_boundary` record, or a drop of 20k tokens or more. A context that shrank without one leaves a remainder, `unattributed_tokens` in JSON. With `--examples`, the section also names the files whose reads and edits kept costing most, relative to the session's directory; without it, no file is named.
+
+```console
+$ jouet audit --harness claude --since 14d --top 4
+…
+  carried: each request's input, charged to what put it in the context and how many requests re-read it before a compaction (estimated from context growth):
+  start of the session or after a compaction 34.2% (78 compactions)
+  category            share  tokens
+  reads and searches  26.2%   3.30B
+  edits               15.5%   1.96B
+  other                5.3%  674.9M
+  git                  5.3%  671.7M
+```
+
+## What if
+
+`--what-if SPEC` replays the same requests with fewer definitions or a smaller compaction window. `SPEC` is `window=SIZE` (`200k`, `1m`, `200000`), `deny=NAME` with more names after it (`deny=Workflow,Artifact`), or both: `window=200k,deny=Workflow`. A name is one from the fixed-context table: a tool, an MCP server, a plugin or a skill.
+
+- **A denial** takes the definition's estimated tokens off every request of every transcript that carried it. That replays exactly, up to the size estimate, and each denied name is listed with what it saves.
+- **A window** is simulated: when the context would pass it, the replay compacts to what the transcript started with plus 19k (the median after real compactions on the machine this was measured on), and charges one read of the whole context for the summary and one cache write of what is left. Where compaction fires inside the window is not known, so the result is a range, from firing at the window to firing 33k below it. A real compaction in the transcript resets the replay. It assumes the same requests follow a compaction, while real sessions re-read some of what was dropped, so the saving is an upper bound.
+
+Each result is shown in tokens and price-weighted, counting an uncached token 1, a cache write 1.25 and a cache read 0.1, with each request keeping its own mix.
+
+```console
+$ jouet audit --harness claude --since 14d --what-if window=200k
+…
+  what if (window 200k): replaying 51,400 requests that read 12.62B tokens (1.41B price-weighted: uncached 1, cache write 1.25, cache read 0.1)
+  input 7.14B to 6.58B (-43.5% to -47.9%), price-weighted -36.6% to -37.4%; 460 to 813 compactions added
+  the range is compaction firing at the window, then 33k below it; it assumes the same requests after a compaction
+```
+
+In JSON it is `what_if` under the harness, with `denied` and one `scenarios` entry per reserve.
 
 ## jouet's own costs
 

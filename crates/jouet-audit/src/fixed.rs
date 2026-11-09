@@ -47,7 +47,7 @@ impl ItemKind {
 
 type Key = (ItemKind, String);
 
-fn item(d: &Definition) -> Key {
+pub(crate) fn item(d: &Definition) -> Key {
     match d.kind {
         DefinitionKind::Tool => match mcp_server(&d.name) {
             Some(server) => (ItemKind::McpServer, server.to_string()),
@@ -69,7 +69,7 @@ fn skill(name: &str) -> Key {
     }
 }
 
-fn tokens(d: &Definition) -> f64 {
+pub(crate) fn tokens(d: &Definition) -> f64 {
     let rate = match d.kind {
         DefinitionKind::Tool => TOOL_CHARS_PER_TOKEN,
         DefinitionKind::Skill | DefinitionKind::McpInstructions => PROSE_CHARS_PER_TOKEN,
