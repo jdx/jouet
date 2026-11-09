@@ -663,7 +663,9 @@ def execute(
         "task_dir": str(task.dir.parent),
         "harness": p.harness,
         "arm": p.arm,
-        "success": (False if agent["stopped"] or agent["exit_code"] != 0 else check["passed"]),
+        "command_activity": (command_activity := timing.codex_commands(agent["lines"], agent.get("elapsed", []),
+                                                                        agent.get("stream_complete", False))
+                             if harness.name == "codex" else None),
         "check": {k: v for k, v in check.items() if k != "output"},
         "stopped": agent["stopped"],
         "exit_code": agent["exit_code"],
@@ -671,12 +673,10 @@ def execute(
         "disk_free": agent.get("disk_free"),
         "usage": asdict(usage),
         "audit": summarize_audit(audit_report),
-        "shell": (codex_shell_metrics(agent["lines"])
+        "shell": (shell := (codex_shell_metrics(agent["lines"])
                   if harness.name == "codex" and not agent["stopped"] and agent["exit_code"] == 0
-                  else None),
-        "command_activity": (timing.codex_commands(agent["lines"], agent.get("elapsed", []),
-                                                   agent.get("stream_complete", False))
-                             if harness.name == "codex" else None),
+                  else None)),
+        **check_outcome(agent, check, command_activity, shell, harness.name),
         "ledger": ledger(env) if arm.jouet and not disk_stopped else None,
         "github": github,
         "setup": ran["setup"],
@@ -844,3 +844,14 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
             remove(work_root)
             remove(tmp_root)
     return records
+
+
+def check_outcome(agent: dict[str, Any], check: dict[str, Any], activity: dict | None,
+                  shell: dict | None, harness: str) -> dict[str, Any]:
+    """Keep the independent checker result while flagging unfinished commands."""
+    success = False if agent["stopped"] or agent["exit_code"] != 0 else check["passed"]
+    issue = timing.verification_issue(activity, shell) if harness == "codex" else None
+    if success is True and issue:
+        check["output"] += f"\n{issue}; the task outcome is unverified."
+        return {"success": None, "unverified_reason": issue}
+    return {"success": success}

@@ -53,3 +53,20 @@ def codex_commands(lines: list[str], elapsed: list[float], complete: bool) -> di
         "duplicate_starts": duplicate_starts,
         "stream_complete": complete,
     }
+
+
+def verification_issue(activity: dict | None, shell: dict | None) -> str | None:
+    """Why recorded Codex command events cannot establish completion."""
+    if activity is None:
+        return "Codex command timing unavailable"
+    if activity.get("unmatched_starts"):
+        return "agent command had no completion event"
+    if activity.get("stream_complete") is False:
+        return "Codex event stream was incomplete"
+    if activity.get("unmatched_completions") or activity.get("duplicate_starts"):
+        return "Codex command events could not be matched"
+    if shell is None:
+        return "Codex command event stream could not be verified"
+    if shell.get("failed") is None:
+        return "Codex command exit status was unavailable"
+    return None

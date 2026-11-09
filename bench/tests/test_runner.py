@@ -584,8 +584,79 @@ class PlanTest(unittest.TestCase):
                 self.assertNotIn("error", failed)
 
                 agent["exit_code"] = 0
+                agent["lines"] = [json.dumps({"type": "jouet.ephemeral"}),
+                                  json.dumps({"type": "thread.started"}),
+                                  json.dumps({"type": "turn.completed"})]
+                agent["elapsed"] = [0, 1, 2]
+                agent["stream_complete"] = True
                 passed = runner.execute(runner.Planned(2, "smoke", "codex", "plain"), opts, root, root)
                 self.assertTrue(passed["success"])
+
+    def test_unfinished_agent_command_does_not_turn_checker_pass_into_success(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            home = root / "home"
+            home.mkdir()
+            env = {"HOME": str(home), "CODEX_HOME": str(home / ".codex"), "PATH": "/usr/bin:/bin"}
+            events = [
+                {"type": "jouet.ephemeral"},
+                {"type": "thread.started"},
+                {"type": "item.started", "item": {"type": "commandExecution", "id": "1"}},
+                {"type": "turn.completed", "usage": {"input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1}},
+            ]
+            agent = {"lines": [json.dumps(event) for event in events], "elapsed": [0, 1, 2, 3],
+                     "stream_complete": True, "session": None, "stopped": None, "exit_code": 0, "wall_s": 3}
+            opts = {"jouet_bin": Path(sys.executable), "harness_bins": {"codex": "codex"},
+                    "codex_model": "test", "tmp_root": str(root), "keep_work": True}
+            with patch.object(runner.arms_mod, "build", return_value=env), \
+                    patch.object(runner.arms_mod, "codex_tools", return_value=("test", None)), \
+                    patch.object(runner.arms_mod, "verify_codex_path"), \
+                    patch.object(runner.credentials, "lend", return_value=[]), \
+                    patch.object(runner.credentials, "give_back", return_value=[]), \
+                    patch.object(runner, "run_agent", return_value=agent), \
+                    patch.object(runner, "sweep", return_value=[]), \
+                    patch.object(runner.tasks_mod, "run_check", return_value={"passed": True, "exit_code": 0, "output": "ok"}) as check:
+                record = runner.execute(runner.Planned(1, "smoke", "codex", "plain"), opts, root, root)
+                events.insert(-1, {"type": "item.completed", "item": {"type": "commandExecution", "id": "1", "exitCode": 0}})
+                agent["lines"] = [json.dumps(event) for event in events]
+                agent["elapsed"] = [0, 1, 2, 2.5, 3]
+                completed = runner.execute(runner.Planned(2, "smoke", "codex", "plain"), opts, root, root)
+                agent["stream_complete"] = False
+                truncated = runner.execute(runner.Planned(5, "smoke", "codex", "plain"), opts, root, root)
+                agent["stream_complete"] = True
+                agent["elapsed"] = []
+                missing = runner.execute(runner.Planned(6, "smoke", "codex", "plain"), opts, root, root)
+                agent["elapsed"] = [0, 1, 2, 2.5, 3]
+                agent["exit_code"] = 1
+                failed = runner.execute(runner.Planned(3, "smoke", "codex", "plain"), opts, root, root)
+                agent["exit_code"] = 0
+                agent["lines"] = [json.dumps(event) for event in events if event["type"] != "item.completed"]
+                agent["elapsed"] = [0, 1, 2, 3]
+                check.return_value = {"passed": False, "exit_code": 1, "output": "failed"}
+                checker_failed = runner.execute(runner.Planned(4, "smoke", "codex", "plain"), opts, root, root)
+            self.assertTrue(record["check"]["passed"])
+            self.assertIsNone(record["success"])
+            self.assertEqual(record["unverified_reason"], "agent command had no completion event")
+            self.assertFalse(report.scored(record))
+            self.assertTrue(completed["success"])
+            self.assertIsNone(truncated["success"])
+            self.assertEqual(truncated["unverified_reason"], "Codex event stream was incomplete")
+            self.assertIsNone(missing["success"])
+            self.assertEqual(missing["unverified_reason"], "Codex command timing unavailable")
+            self.assertFalse(failed["success"])
+            self.assertFalse(checker_failed["success"])
+            self.assertTrue(report.scored(checker_failed))
+            cell = report.summarize([record], {})["cells"][0]["arms"]["plain"]
+            self.assertEqual(cell["unverified"][0]["reason"], record["unverified_reason"])
+            self.assertEqual(cell["runs"], 0)
+            legacy = {**record, "success": True}
+            del legacy["unverified_reason"]
+            self.assertTrue(report.unverified(legacy))
+            legacy_cell = report.summarize([legacy], {})["cells"][0]["arms"]["plain"]
+            self.assertEqual(legacy_cell["unverified"][0]["reason"], "agent command had no completion event")
+            self.assertEqual(legacy_cell["runs"], 0)
 
     def test_disk_guard_skips_checker_and_is_not_scored(self):
         from unittest.mock import patch
@@ -1831,6 +1902,36 @@ class ExternalTasksTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
+    def test_older_results_with_unverifiable_codex_events_are_not_scored(self):
+        base = {"task": "smoke", "harness": "codex", "arm": "jouet", "round": 1,
+                "success": True, "check": {"passed": True}, "shell": {"completed": 1, "failed": 0}}
+        complete = {"stream_complete": True, "unmatched_starts": 0,
+                    "unmatched_completions": 0, "duplicate_starts": 0}
+        for field, value, reason in (
+            ("stream_complete", False, "Codex event stream was incomplete"),
+            ("unmatched_completions", 1, "Codex command events could not be matched"),
+            ("duplicate_starts", 1, "Codex command events could not be matched"),
+        ):
+            with self.subTest(field=field):
+                record = {**base, "command_activity": {**complete, field: value}}
+                cell = report.summarize([record], {})["cells"][0]["arms"]["jouet"]
+                self.assertEqual(cell["runs"], 0)
+                self.assertEqual(cell["unverified"][0]["reason"], reason)
+
+        unknown_exit = {**base, "command_activity": complete, "shell": {"completed": 1, "failed": None}}
+        cell = report.summarize([unknown_exit], {})["cells"][0]["arms"]["jouet"]
+        self.assertEqual(cell["runs"], 0)
+        self.assertEqual(cell["unverified"][0]["reason"], "Codex command exit status was unavailable")
+
+    def test_unverified_summary_keeps_checker_and_command_reasons(self):
+        record = {"task": "smoke", "harness": "codex", "arm": "jouet", "round": 1,
+                  "success": None, "check": {"passed": None, "reason": "container unavailable"},
+                  "command_activity": {"unmatched_starts": 1}}
+        cell = report.summarize([record], {})["cells"][0]["arms"]["jouet"]
+        self.assertEqual(cell["unverified"][0]["reason"],
+                         "container unavailable; agent command had no completion event")
+        self.assertEqual(cell["runs"], 0)
+
     def test_incomplete_token_usage_is_not_counted_as_zero_spend(self):
         """Partial observations cannot establish total spend per solved task."""
         from dataclasses import asdict
