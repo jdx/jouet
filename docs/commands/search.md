@@ -52,7 +52,7 @@ The pattern is a regular expression in ripgrep's syntax, or a literal with `-F`.
 
 ## Searching like rg
 
-jouet embeds ripgrep's own libraries (`ignore`, `grep-searcher` and `grep-regex`), so it walks a tree the same way: `.gitignore` and `.ignore` are respected, hidden and binary files are skipped, and files are searched in parallel. `-g GLOB` includes or excludes files as rg's `-g` does, and `--hidden` searches hidden files too. Paths are literal; if an unavailable path looks like a quoted glob, the error suggests `-g`.
+jouet embeds ripgrep's own libraries (`ignore`, `grep-searcher` and `grep-regex`), so it walks a tree the same way: `.gitignore` and `.ignore` are respected, hidden and binary files are skipped, and files are searched in parallel. `-g GLOB` includes or excludes files as rg's `-g` does, and `--hidden` searches hidden files too. Paths are literal; if an unavailable path looks like a quoted glob, the error suggests `-g`. Overlapping paths are searched once, including relative and absolute spellings under the current directory. This comparison does not resolve symlinks or `..`.
 
 Long lines are cut at 200 bytes, with the number of bytes left out. `-l` lists the matching files with their counts instead of the lines.
 

@@ -317,6 +317,62 @@ fn files_with_matches_lists_counts() {
 }
 
 #[test]
+fn overlapping_roots_search_each_file_once() {
+    let root = PathBuf::from(FIXTURE);
+    for files_only in [false, true] {
+        for pattern in ["Session", "no such text anywhere"] {
+            let mut single = options(pattern);
+            single.files_only = files_only;
+            let (expected, _) = run(&single);
+            let mut overlapping = options(pattern);
+            overlapping.files_only = files_only;
+            overlapping.paths = vec![
+                root.join("web"),
+                root.clone(),
+                PathBuf::from(".").join(&root),
+                PathBuf::from(".").join(root.join("web")),
+                std::path::absolute(root.join("web/index.js")).unwrap(),
+                root.join("web"),
+            ];
+            let (actual, _) = run(&overlapping);
+            assert_eq!(actual.files_searched, expected.files_searched);
+            assert_eq!(actual.files_matched, expected.files_matched);
+            assert_eq!(actual.matches, expected.matches);
+            assert!(
+                actual
+                    .files
+                    .iter()
+                    .all(|file| !Path::new(&file.path).is_absolute())
+            );
+            let paths: std::collections::HashSet<_> = actual
+                .files
+                .iter()
+                .map(|file| std::fs::canonicalize(&file.path).unwrap())
+                .collect();
+            assert_eq!(paths.len(), actual.files.len());
+        }
+    }
+}
+
+#[test]
+fn dot_root_and_nested_paths_are_searched_once() {
+    let mut single = options("Session");
+    single.paths = vec![PathBuf::from(".")];
+    let (expected, _) = run(&single);
+    let mut overlapping = options("Session");
+    overlapping.paths = vec![PathBuf::from(".")];
+    overlapping.paths.extend([
+        PathBuf::from("tests"),
+        PathBuf::from("./tests"),
+        std::path::absolute("tests/fixtures").unwrap(),
+    ]);
+    let (actual, _) = run(&overlapping);
+    assert_eq!(actual.files_searched, expected.files_searched);
+    assert_eq!(actual.files_matched, expected.files_matched);
+    assert_eq!(actual.matches, expected.matches);
+}
+
+#[test]
 fn no_match_says_how_much_was_searched() {
     let (report, text) = run(&options("no such text anywhere"));
     assert_eq!(report.matches, 0);
@@ -711,6 +767,20 @@ fn a_structural_search_groups_and_budgets_like_a_text_one() {
         text.starts_with("tests/fixtures/polyglot/src/lib.rs\n  method download (12-15)\n"),
         "{text}"
     );
+}
+
+#[test]
+fn overlapping_roots_do_not_duplicate_structural_matches() {
+    let mut single = options("$X.base");
+    single.structural = Some("rust".into());
+    let (expected, _) = run(&single);
+    let mut overlapping = options("$X.base");
+    overlapping.structural = Some("rust".into());
+    overlapping.paths.push(PathBuf::from(FIXTURE).join("src"));
+    let (actual, _) = run(&overlapping);
+    assert_eq!(actual.files_searched, expected.files_searched);
+    assert_eq!(actual.files_matched, expected.files_matched);
+    assert_eq!(actual.matches, expected.matches);
 }
 
 #[test]
