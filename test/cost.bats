@@ -71,9 +71,14 @@ setup() {
 	assert_output 'true'
 	run --separate-stderr jouet cost --sequences
 	assert_success
+	assert_line --partial 'no individual command timings yet'
 	assert_line --partial 'other work and cache changes may intervene'
 	assert_line --partial 'cargo clippy → cargo test'
 	assert_line --partial 'pairs; range'
+	run --separate-stderr jouet cost --sequences --min 1h
+	assert_success
+	assert_line --partial 'no sequences meet --min'
+	refute_output --partial 'not enough observations'
 	run grep -r 'private-session' "$XDG_STATE_HOME/jouet/cost-sequences"
 	assert_failure 1
 }

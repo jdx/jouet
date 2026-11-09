@@ -90,16 +90,16 @@ pub(crate) fn run(args: &CostArgs, out: &Output) -> Exit {
             .sequences
             .then(|| crate::settings::Settings::load().cost.sequences),
     };
-    out.result(&report, || text(&report, costs.is_empty()));
+    out.result(&report, || text(&report, costs.is_empty(), min));
     Exit::Ok
 }
 
-fn text(report: &Report, empty: bool) -> String {
+fn text(report: &Report, empty: bool, min: u64) -> String {
     let mut s = String::new();
     if empty {
         let _ = writeln!(
             s,
-            "no timings yet: `jouet test` and the hooks keep one for each build, test and lint run, and `jouet cost fetch` brings CI's (refs/notes/{NOTES})"
+            "no individual command timings yet: `jouet test` and the hooks keep one for each build, test and lint run, and `jouet cost fetch` brings CI's (refs/notes/{NOTES})"
         );
     }
     let width = report
@@ -141,7 +141,11 @@ fn text(report: &Report, empty: bool) -> String {
         }
         s.push_str("\nSuccessive recorded checks in the same session and worktree (other work and cache changes may intervene):\n");
         if sequences.is_empty() {
-            s.push_str("  not enough observations (at least 3 matching pairs are needed)\n");
+            if min > 0 {
+                s.push_str("  no sequences meet --min (at least 3 matching pairs are needed)\n");
+            } else {
+                s.push_str("  not enough observations (at least 3 matching pairs are needed)\n");
+            }
         }
         for sequence in sequences {
             let _ = writeln!(
@@ -204,8 +208,24 @@ mod tests {
             sequences_recording: Some(true),
         };
         assert!(
-            text(&report, false)
+            text(&report, false, 0)
                 .contains("median 1.500s for the second check (3 pairs; range 1.200s–1.800s)")
         );
+    }
+
+    #[test]
+    fn an_empty_filtered_sequence_report_does_not_claim_observations_are_missing() {
+        let report = Report {
+            commands: Vec::new(),
+            scale: 1.0,
+            scaled_by: 0,
+            sequences: Some(Vec::new()),
+            sequences_recording: Some(false),
+        };
+        let filtered = text(&report, true, 60_000);
+        assert!(filtered.contains("no individual command timings yet"));
+        assert!(filtered.contains("no sequences meet --min"));
+        assert!(!filtered.contains("not enough observations"));
+        assert!(text(&report, true, 0).contains("not enough observations"));
     }
 }
