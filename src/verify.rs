@@ -237,6 +237,15 @@ impl Run {
     /// must otherwise match exactly.
     fn covers(&self, failed: &Run) -> bool {
         let (ran, wanted) = (self.selection(), failed.selection());
+        // A successful baseline comparison establishes the same command's
+        // failures at this tree, even when its runner has no parsed selector.
+        // Compare the complete command so options and environment stay exact.
+        if self.tree.is_some()
+            && self.tree == failed.tree
+            && self.command == baseline_command(&failed.command)
+        {
+            return true;
+        }
         // An affected baseline only established that this tree's selected
         // jobs have pre-existing failures. Another tree may select other jobs.
         if ran.split_whitespace().next() == Some("--affected")
@@ -3524,6 +3533,42 @@ mod tests {
             Some("t1"),
         );
         assert!(reason(&state, "t1").unwrap().contains("clippy --workspace"));
+    }
+
+    #[test]
+    fn a_baseline_comparison_clears_the_exact_wrapped_lint_command() {
+        let command = "jouet test --cmd -- env MISE_ENV=bench mise x ruff@0.17.4 -- ruff check --isolated bench/jbench/runner.py bench/jbench/report.py bench/tests/test_runner.py";
+        let baseline = "jouet test --baseline --cmd -- env MISE_ENV=bench mise x ruff@0.17.4 -- ruff check --isolated bench/jbench/runner.py bench/jbench/report.py bench/tests/test_runner.py";
+        let mut failed = record(Kind::Lint, command, 1, "unknown");
+        failed.selector = None;
+        let mut compared = record(Kind::Lint, baseline, 0, "unknown");
+        compared.selector = None;
+        let mut state = Checks::default();
+        state.record([failed], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+        state.record([compared], Some("t1"));
+        assert_eq!(reason(&state, "t1"), None);
+
+        let mut failed = record(Kind::Lint, command, 1, "unknown");
+        failed.selector = None;
+        let mut other = record(
+            Kind::Lint,
+            &baseline.replace("report.py", "other.py"),
+            0,
+            "unknown",
+        );
+        other.selector = None;
+        let mut state = Checks::default();
+        state.record([failed.clone()], Some("t1"));
+        state.record([other], Some("t1"));
+        assert!(reason(&state, "t1").is_some());
+
+        let mut other_tree = record(Kind::Lint, baseline, 0, "unknown");
+        other_tree.selector = None;
+        let mut state = Checks::default();
+        state.record([failed], Some("t1"));
+        state.record([other_tree], Some("t2"));
+        assert!(reason(&state, "t1").is_some());
     }
 
     #[test]
