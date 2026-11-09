@@ -7,7 +7,7 @@ use usage_rs::Args;
 /// hooks/jouet.json, keeping every other hook. The session-start hook primes each session with
 /// the commands and rules, so the skill, which says the same, is installed
 /// only with --skill or when priming is off ([hooks] prime). Running it again
-/// changes nothing. The jouet-init project onboarding skill is always installed;
+/// changes nothing. The jouet-init project onboarding skill is installed only with --init-skill;
 /// --uninstall removes only what jouet added. The hooks do
 /// nothing where jouet is not on PATH.
 ///
@@ -43,6 +43,10 @@ pub(crate) struct SetupArgs {
     /// stands in for
     #[usage(long)]
     pub(crate) skill: bool,
+    /// Install the jouet-init skill, with which an agent fits jouet to a
+    /// project's checks
+    #[usage(long)]
+    pub(crate) init_skill: bool,
     /// Print a prompt for an agent to benchmark jouet on this project
     #[usage(long)]
     pub(crate) benchmark: bool,
