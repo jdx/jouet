@@ -47,6 +47,11 @@ setup() {
 }
 
 @test "records successive checks only when opted in and reports local observations" {
+	run --separate-stderr jouet cost --sequences --min 1h
+	assert_success
+	assert_line --partial 'not enough observations'
+	refute_output --partial 'no sequences meet --min'
+
 	run --separate-stderr env JOUET_COST_SEQUENCES=0 jouet test --cmd -- cargo test
 	assert_success
 	[[ ! -d "$XDG_STATE_HOME/jouet/cost-sequences" ]]
@@ -71,9 +76,15 @@ setup() {
 	assert_output 'true'
 	run --separate-stderr jouet cost --sequences
 	assert_success
+	assert_line --partial 'no individual command timings yet'
 	assert_line --partial 'other work and cache changes may intervene'
 	assert_line --partial 'cargo clippy → cargo test'
 	assert_line --partial 'pairs; range'
+	run --separate-stderr jouet cost --sequences --min 1h
+	assert_success
+	assert_line --partial 'no sequences meet --min'
+	refute_output --partial 'not enough observations'
+	refute_output --partial 'at least 3 matching pairs are needed'
 	run grep -r 'private-session' "$XDG_STATE_HOME/jouet/cost-sequences"
 	assert_failure 1
 }
