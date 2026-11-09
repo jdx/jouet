@@ -71,11 +71,14 @@ the working tree. Confirm the selected tests actually cover that change; do
 not treat a configuration-only commit or an empty plan as evidence. If existing
 working-tree changes prevent a representative selection, use a separate clean
 checkout if practical, or report the gap; do not discard the user's changes.
-If setup changes the test environment, verify the command in that environment
-too. If the command needs project-specific environment settings, keep the
-verified invocation for `checks.affected` below. Do not assume `mise x` applies
-settings declared only inside a task. If no representative selection is
-available, do not record a command as verified; use the established checks.
+Save the selected test command and its result before writing configuration. If
+setup changes the test environment, run those selected tests in that environment
+too; a later whole-suite fallback caused by the new configuration does not
+invalidate the earlier selection or verify it in the new environment. If the
+affected command needs project-specific environment settings, keep the verified
+invocation for `checks.affected` below. Do not assume `mise x` applies settings
+declared only inside a task. If no representative selection is available, do
+not record a command as verified; use the established checks.
 
 ## Put the environment and the checks in mise
 
