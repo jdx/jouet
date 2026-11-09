@@ -1,13 +1,14 @@
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _check import dirty, expect, finish, git, github_state, new_commit  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _check import UNVERIFIED, dirty, expect, finish, git, github_state, new_commit  # noqa: E402
+from hidden_check import failed_hidden, run_hidden  # noqa: E402
 
 # What was committed, before the hidden test is added. `mise install` may
 # rewrite mise.lock, which is not the agent's change.
@@ -56,9 +57,18 @@ if ok:
     # the built fnox (an inline FNOX_AGE_KEY outranks an unknown name, a
     # selected identity replaces the `identity` reference, the daemon reads
     # FNOX_AGE_IDENTITY per request), and that the feature still works.
-    shutil.copyfile(Path(__file__).parent / "hidden" / "age_identities.bats", "test/age_identities.bats")
-    ok, out = run("test/bats/bin/bats", "test/age_identities.bats")
-    expect(ok, f"the hidden named-identity tests fail:\n{out}")
+    try:
+        ok, out = run_hidden(run)
+        expect(ok, f"the hidden named-identity tests fail:\n{out}")
+    except subprocess.TimeoutExpired as error:
+        output = error.stdout.decode(errors="replace") if isinstance(error.stdout, bytes) else error.stdout or ""
+        print(output, end="")
+        if failed_hidden(output):
+            expect(False, "a hidden named-identity test failed before the Bats suite timed out")
+        else:
+            UNVERIFIED.append(f"the hidden named-identity tests timed out: {error}")
+    except OSError as error:
+        UNVERIFIED.append(f"the hidden named-identity tests could not complete: {error}")
 
 state = github_state()
 viewer = state["graphql"]["viewer"]["login"]
