@@ -204,10 +204,30 @@ pub(crate) struct RuleSettings {
     /// Rules to turn off, by name; "all" turns every rule off
     #[usage(env = "JOUET_RULES_DISABLE", merge = "union", parse = "list_by_comma")]
     pub disable: Option<Vec<String>>,
+    /// Built-in rules that are off by default to turn on, by name, such as python-edit
+    #[usage(env = "JOUET_RULES_ENABLE", merge = "union", parse = "list_by_comma")]
+    pub enable: Option<Vec<String>>,
     /// Let rules in hooks use the GitHub probes (`jouet.pr.*`); off so a
     /// hook never waits on the network
     #[usage(env = "JOUET_RULES_NETWORK", default = false)]
     pub network: bool,
+}
+
+impl RuleSettings {
+    /// The rules to load turned off: those `disable` names, and the
+    /// built-in ones off by default ([`crate::rules::OFF_BY_DEFAULT`]) that
+    /// `enable` does not name.
+    pub(crate) fn disabled(&self) -> Vec<String> {
+        let enabled = self.enable.as_deref().unwrap_or_default();
+        let mut disabled = self.disable.clone().unwrap_or_default();
+        disabled.extend(
+            crate::rules::OFF_BY_DEFAULT
+                .iter()
+                .filter(|name| !enabled.iter().any(|e| e == *name))
+                .map(|name| (*name).to_string()),
+        );
+        disabled
+    }
 }
 
 impl HookSettings {
@@ -288,6 +308,16 @@ mod tests {
         std::fs::write(&path, "[hooks]\nverify = false\n").unwrap();
         let s = Settings::load_from(&env(&[("JOUET_HOOKS_PRIME", "false")]), Some(path));
         assert!(!s.hooks.verify && !s.hooks.prime && s.hooks.steer);
+    }
+
+    #[test]
+    fn python_edit_is_off_until_enabled() {
+        let s = Settings::load_from(&env(&[]), None);
+        assert_eq!(s.rules.disabled(), ["python-edit"]);
+        let s = Settings::load_from(&env(&[("JOUET_RULES_ENABLE", "python-edit")]), None);
+        assert!(s.rules.disabled().is_empty());
+        let s = Settings::load_from(&env(&[("JOUET_RULES_DISABLE", "git-stash")]), None);
+        assert_eq!(s.rules.disabled(), ["git-stash", "python-edit"]);
     }
 
     #[test]
