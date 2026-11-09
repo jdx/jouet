@@ -24,6 +24,39 @@ pub struct Transcript {
     pub messages: Vec<Message>,
     /// Lines in the file, counting those skipped.
     pub lines: u64,
+    /// What the harness sent with every request besides the conversation,
+    /// as the transcript first recorded it. Only Claude Code records it.
+    pub definitions: Option<Definitions>,
+}
+
+/// The definitions a harness sends with every request: tools, the skill
+/// listing and MCP servers' instructions. Claude Code records a snapshot of
+/// them when a session starts.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Definitions {
+    /// When the snapshot was taken, in milliseconds since the Unix epoch.
+    pub at: Option<i64>,
+    pub items: Vec<Definition>,
+}
+
+/// One definition, and its size as sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Definition {
+    pub kind: DefinitionKind,
+    /// A tool's name (`Bash`, `mcp__server__tool`), a skill's
+    /// (`plugin:skill`), or an MCP server's.
+    pub name: String,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DefinitionKind {
+    /// A tool's JSON definition.
+    Tool,
+    /// A skill's line in the skill listing.
+    Skill,
+    /// An MCP server's instructions.
+    McpInstructions,
 }
 
 /// Something the user did, as the transcript records it.
@@ -97,8 +130,11 @@ pub struct Call {
     /// The transcript line that issued it, from 1. Read only with
     /// [`Filter::detail`](crate::Filter::detail), like the fields below.
     pub line: u64,
-    /// The tool's own name, such as `TodoWrite` or `apply_patch`.
+    /// The tool's own name, such as `TodoWrite` or `apply_patch`. Claude
+    /// Code's reader records it always.
     pub name: Option<String>,
+    /// The skill a Claude Code `Skill` call loaded.
+    pub skill: Option<String>,
     /// The file or pattern a read, search or edit names, raw.
     pub target: Option<String>,
     /// The start of a failed call's output, raw.
@@ -138,6 +174,7 @@ impl Call {
             rate_limited: false,
             line: 0,
             name: None,
+            skill: None,
             target: None,
             error: None,
             output: None,

@@ -35,7 +35,9 @@ mod analyze;
 mod category;
 pub mod digest;
 mod event;
+mod fixed;
 mod gitleaks;
+mod own;
 mod pattern;
 mod read;
 mod record;
@@ -51,8 +53,12 @@ pub use analyze::{
     Totals,
 };
 pub use category::{Category, categorize};
-pub use event::{Call, Message, MessageKind, Request, Tool, Transcript};
+pub use event::{
+    Call, Definition, DefinitionKind, Definitions, Message, MessageKind, Request, Tool, Transcript,
+};
+pub use fixed::{FixedContext, FixedItem, FixedPeriod, Growth, ItemKind};
 pub use gitleaks::Gitleaks;
+pub use own::{LogRead, OwnFinding, OwnSession};
 pub use pattern::{Pattern, Patterns, detect};
 pub use read::{
     ClaudeCode, Codex, Filter, Reader, Scan, ScanStats, Source, Unreadable, home, open, scan,

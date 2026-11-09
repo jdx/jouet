@@ -8,15 +8,22 @@ use usage_rs::Args;
 /// threads, PR status, edits, builds and tests, reads and searches, git and
 /// more. For each costly category it names the jouet command or rule that
 /// addresses it, with an estimate of the saving, and it counts recurring
-/// patterns such as sleep loops. Nothing leaves the machine. Commands are
-/// shown only as shapes, with every value replaced, unless --examples asks
-/// for redacted examples.
+/// patterns such as sleep loops. For Claude Code it also lists the fixed
+/// context: each tool, skill and MCP server definition sent with every
+/// request, its tokens times those requests next to its calls, the setting
+/// that removes one nothing called, and how the total changed by week.
+/// Nothing leaves the machine. Commands are shown only as shapes, with every
+/// value replaced, unless --examples asks for redacted examples.
 #[derive(Args)]
 pub(crate) struct AuditArgs {
     /// Only requests made since TIME: a duration ago such as 7d or 12h, a
     /// date such as 2026-10-01, or RFC 3339
     #[usage(long, value_name = "TIME")]
     pub(crate) since: Option<String>,
+    /// Only requests made before TIME, in the same forms as --since: with
+    /// it, a past window such as the six hours an earlier audit covered
+    #[usage(long, value_name = "TIME")]
+    pub(crate) until: Option<String>,
     /// Which transcripts to read: claude, codex or all (default all)
     #[usage(long, value_name = "HARNESS")]
     pub(crate) harness: Option<String>,
@@ -30,4 +37,10 @@ pub(crate) struct AuditArgs {
     /// Show one redacted example command per shape and pattern
     #[usage(long)]
     pub(crate) examples: bool,
+    /// Report jouet's own costs instead, per session: stop blocks and
+    /// whether a passing check resolved each, denials and what the agent ran
+    /// next (from the hook ledger), usage errors, crashes and answers dropped
+    /// for the raw command, and test logs read right after `jouet test`
+    #[usage(long)]
+    pub(crate) jouet: bool,
 }
