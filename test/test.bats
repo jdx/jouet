@@ -406,14 +406,20 @@ vitest (vitest's module graph): 2 test files
 	assert_line --regexp '^full log: .+\.log$'
 	assert_line "This was a partial run; the full suite was not verified."
 	assert_output --partial '1 failed'
-	assert_output --partial 'the isolated checkout may need dependencies: review [baseline].setup'
+	assert_output --partial 'the isolated checkout may need dependencies: create .jouet/test.toml with [baseline].setup'
+
+	# An existing file may not have baseline setup yet.
+	mkdir -p .jouet
+	printf '# no baseline setup yet\n' >.jouet/test.toml
+	run --separate-stderr jouet test --affected
+	assert_failure 1
+	assert_output --partial 'add or review [baseline].setup in .jouet/test.toml, then trust it'
 
 	# A configured but untrusted setup cannot run at the merge base yet.
-	mkdir -p .jouet
 	printf '[baseline]\nsetup = ["npm", "ci"]\n' >.jouet/test.toml
 	run --separate-stderr jouet test --affected
 	assert_failure 1
-	assert_output --partial 'the isolated checkout may need dependencies: review [baseline].setup'
+	assert_output --partial 'the isolated checkout may need dependencies: add or review [baseline].setup'
 	run --separate-stderr jouet trust --yes
 	assert_success
 	run --separate-stderr jouet test --affected
@@ -1267,8 +1273,41 @@ SH
 	run --separate-stderr jouet test --baseline --cmd -- ./fail-command
 	assert_failure 1
 	assert_output --partial 'baseline checkout reports missing node_modules'
-	assert_output --partial '[baseline].setup in .jouet/test.toml'
+	assert_output --partial 'create .jouet/test.toml with [baseline].setup'
 	assert_output --partial 'trust it before retrying'
+}
+
+@test "a baseline missing Yarn's node_modules state suggests the opt-in setup" {
+	cat >fail-command <<'SH'
+#!/bin/sh
+if [ ! -e .deps-ready ]; then
+    echo "$YARN_BASELINE_MESSAGE"
+else
+    echo 'the current check failed'
+fi
+exit 1
+SH
+	chmod +x fail-command
+	printf '.deps-ready\n' >.gitignore
+	git add fail-command .gitignore
+	git commit -qm base
+	git checkout -qb work
+	touch .deps-ready
+	printf 'change\n' >change
+
+	export YARN_BASELINE_MESSAGE="Usage Error: Couldn't find the node_modules state file - running an install might help (findPackageLocation)"
+	run --separate-stderr jouet test --baseline --cmd -- ./fail-command
+	assert_failure 1
+	assert_output --partial 'without naming a failing test, so the failures could not be compared'
+	assert_output --partial 'baseline checkout reports missing node_modules'
+	assert_output --partial 'create .jouet/test.toml with [baseline].setup'
+	assert_output --partial 'trust it before retrying'
+
+	# An unrelated Yarn usage error is not evidence of missing dependencies.
+	export YARN_BASELINE_MESSAGE='Usage Error: unrelated command failure'
+	run --separate-stderr jouet test --baseline --cmd -- ./fail-command
+	assert_failure 1
+	refute_output --partial 'baseline checkout reports missing node_modules'
 }
 
 @test "a baseline missing a project-local runner suggests the opt-in setup" {
@@ -1285,7 +1324,7 @@ SH
 	run --separate-stderr jouet test --baseline --cmd -- ./node_modules/.bin/vitest
 	assert_failure 1
 	assert_output --partial 'baseline checkout has no project-local node_modules executable'
-	assert_output --partial '[baseline].setup in .jouet/test.toml'
+	assert_output --partial 'create .jouet/test.toml with [baseline].setup'
 	assert_output --partial 'trust it before retrying'
 
 	run --separate-stderr jouet test --baseline --cmd -- "$PWD/node_modules/.bin/vitest"

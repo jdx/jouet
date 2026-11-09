@@ -60,6 +60,15 @@ static ZERO_FAILURES: LazyLock<regex::Regex> = LazyLock::new(|| {
 });
 const DETAILS_VERSION: u32 = 5;
 
+/// Tell the agent whether there is a file to review or one to create.
+pub(super) fn setup_hint(root: &Path) -> &'static str {
+    if root.join(".jouet/test.toml").is_file() {
+        "add or review [baseline].setup in .jouet/test.toml, then trust it before retrying"
+    } else {
+        "create .jouet/test.toml with [baseline].setup and trust it before retrying"
+    }
+}
+
 /// What a failing run's failures were at the merge base.
 #[derive(Debug, Serialize)]
 pub(super) struct Baseline {
@@ -1039,7 +1048,7 @@ pub(super) fn compare(
                         && program.components().any(|part| part.as_os_str() == "node_modules")
                         && !program.exists()
                     {
-                        format!("{error}; the baseline checkout has no project-local node_modules executable: review [baseline].setup in .jouet/test.toml and trust it before retrying")
+                        format!("{error}; the baseline checkout has no project-local node_modules executable: {}", setup_hint(root))
                     } else {
                         error
                     }
@@ -1135,14 +1144,17 @@ pub(super) fn compare(
                     let missing_dependencies = setup.is_empty()
                         && log.as_ref().is_some_and(|path| {
                             std::fs::read_to_string(path).is_ok_and(|output| {
-                                output
-                                    .contains("Local package.json exists, but node_modules missing")
+                                output.contains("Local package.json exists, but node_modules missing")
+                                    || output.contains("Usage Error: Couldn't find the node_modules state file - running an install might help")
                             })
                         });
                     let hint = if missing_dependencies {
-                        "; the baseline checkout reports missing node_modules: review [baseline].setup in .jouet/test.toml and trust it before retrying"
+                        format!(
+                            "; the baseline checkout reports missing node_modules: {}",
+                            setup_hint(root)
+                        )
                     } else {
-                        ""
+                        String::new()
                     };
                     let log = log.map_or(String::new(), |l| format!(" (full log: {l})"));
                     return Err(NotCompared {
