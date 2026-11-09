@@ -71,6 +71,33 @@ class CommanderCheckerTest(unittest.TestCase):
                 self.checker.run_tests(root, ["tests/example.test.js"], "committed tests")
             self.assertIn("missing test suites", self.checker.UNVERIFIED[0])
 
+    def test_original_tests_include_the_old_path_of_a_rename(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+                   "GIT_AUTHOR_NAME": "Bench", "GIT_AUTHOR_EMAIL": "bench@example.invalid",
+                   "GIT_COMMITTER_NAME": "Bench", "GIT_COMMITTER_EMAIL": "bench@example.invalid"}
+
+            def git(*args):
+                return subprocess.run(["git", *args], cwd=work, env=env, capture_output=True,
+                                      text=True, check=True).stdout.strip()
+
+            git("init", "-q")
+            (work / "tests").mkdir()
+            (work / "tests/old.test.js").write_text("original test\n")
+            git("add", "tests")
+            git("commit", "-qm", "base")
+            base = git("rev-parse", "HEAD")
+            git("mv", "tests/old.test.js", "tests/new.test.js")
+            git("commit", "-qm", "rename")
+            previous = Path.cwd()
+            try:
+                os.chdir(work)
+                with mock.patch.dict(os.environ, {"BENCH_HEAD_SHA": base}):
+                    self.assertEqual(self.checker.original_tests(), {"tests/old.test.js": b"original test\n"})
+            finally:
+                os.chdir(previous)
+
     def test_committed_and_hidden_tests_use_isolated_checkouts(self):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory) / "work"

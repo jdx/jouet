@@ -63,9 +63,13 @@ def run_tests(checkout: Path, paths: list[str], label: str) -> None:
         UNVERIFIED.append(f"{label} did not pass any tests")
 
 
-def original_tests(changed: set[str]) -> dict[str, bytes] | None:
+def original_tests() -> dict[str, bytes] | None:
     """Read changed test files as they were when the agent started."""
     try:
+        changed = set(subprocess.run(
+            ["git", "diff", "--no-renames", "--name-only", "-z", head_sha(), "HEAD", "--", "tests"],
+            capture_output=True, timeout=30, check=True,
+        ).stdout.split(b"\0"))
         tree = subprocess.run(["git", "ls-tree", "-rz", "--full-tree", head_sha(), "--", "tests"],
                               capture_output=True, timeout=30, check=True).stdout
         originals = {}
@@ -75,7 +79,7 @@ def original_tests(changed: set[str]) -> dict[str, bytes] | None:
             meta, raw_path = entry.split(b"\t", 1)
             mode, kind, oid = meta.split(b" ")
             path = raw_path.decode("utf-8")
-            if path not in changed or not path.endswith((".test.js", ".spec.js")):
+            if raw_path not in changed or not path.endswith((".test.js", ".spec.js")):
                 continue
             if kind != b"blob" or mode not in (b"100644", b"100755"):
                 raise ValueError(f"original test {path} is not a regular file")
@@ -150,7 +154,7 @@ def main() -> None:
     expect(bool(tests), "no committed Commander test file was changed")
     if tests:
         check_phase(tests, hidden=False)
-    originals = original_tests(changed)
+    originals = original_tests()
     if originals:
         check_phase([], hidden=False, originals=originals)
     check_phase([], hidden=True)
