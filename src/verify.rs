@@ -238,12 +238,11 @@ impl Run {
     fn covers(&self, failed: &Run) -> bool {
         let (ran, wanted) = (self.selection(), failed.selection());
         // A successful baseline comparison establishes the same command's
-        // failures at this tree, even when its runner has no parsed selector.
-        // Compare the complete command so options and environment stay exact.
-        if self.tree.is_some()
-            && self.tree == failed.tree
-            && self.command == baseline_command(&failed.command)
-        {
+        // failures, even when its runner has no parsed selector. Compare the
+        // complete command so options and environment stay exact. Codex
+        // transcripts omit trees, so two unknown trees follow the existing
+        // coverage behavior; known but different trees must not match.
+        if self.tree == failed.tree && self.command == baseline_command(&failed.command) {
             return true;
         }
         // An affected baseline only established that this tree's selected
@@ -3569,6 +3568,16 @@ mod tests {
         state.record([failed], Some("t1"));
         state.record([other_tree], Some("t2"));
         assert!(reason(&state, "t1").is_some());
+
+        // Codex reconstructs both runs from a transcript without tree IDs.
+        let mut failed = record(Kind::Lint, command, 1, "unknown");
+        failed.selector = None;
+        let mut compared = record(Kind::Lint, baseline, 0, "unknown");
+        compared.selector = None;
+        let mut state = Checks::default();
+        state.record([failed], None);
+        state.record([compared], None);
+        assert_eq!(reason(&state, "t1"), None);
     }
 
     #[test]
