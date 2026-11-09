@@ -45,7 +45,9 @@ impl SessionMetrics {
             ..Self::default()
         };
         let mut seen = HashSet::new();
-        // Each request's time and the end of its calls.
+        // Each request's span: from it, or its first call where a harness
+        // dates the request after its calls (Codex), to the end of the
+        // last one.
         let mut spans: Vec<(i64, i64)> = Vec::new();
         for t in transcripts {
             m.ci_failures = m.ci_failures.max(t.ci_failures);
@@ -56,7 +58,8 @@ impl SessionMetrics {
                         let ms = i64::try_from(c.duration_ms.unwrap_or(0)).unwrap_or(0);
                         Some(c.at? + ms)
                     });
-                    spans.push((at, ends.fold(at, i64::max)));
+                    let starts = calls.iter().filter_map(|c| c.at);
+                    spans.push((starts.fold(at, i64::min), ends.fold(at, i64::max)));
                 }
                 // A resumed or forked copy repeats its parent's requests:
                 // their tokens count once.
@@ -363,6 +366,35 @@ mod tests {
         let b = SessionMetrics::of("s", &[partial, full]);
         assert_eq!(a, b);
         assert_eq!((a.requests, a.active_ms), (3, 90_000));
+    }
+
+    #[test]
+    fn calls_dated_before_their_request_count_as_tool_time() {
+        // Codex dates a request by the token count after its calls: a
+        // 20-minute run before it is tool time, not a capped wait.
+        let call = Call {
+            at: Some(60_000),
+            duration_ms: Some(20 * 60 * 1000),
+            ..Call::new(Tool::Shell)
+        };
+        let t = Transcript {
+            session: "s".into(),
+            requests: vec![
+                Request {
+                    at: Some(0),
+                    calls: 0..0,
+                    ..Request::default()
+                },
+                Request {
+                    at: Some(60_000 + 20 * 60 * 1000),
+                    calls: 0..1,
+                    ..Request::default()
+                },
+            ],
+            calls: vec![call],
+            ..Transcript::default()
+        };
+        assert_eq!(SessionMetrics::of("s", &[t]).active_ms, 21 * 60 * 1000);
     }
 
     #[test]
