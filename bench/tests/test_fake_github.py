@@ -10,6 +10,7 @@ from jbench.fake_github import FakeGitHub, materialize
 FIXTURE = {
     "repo": "jdx/demo",
     "rest": {
+        "/repos/jdx/demo": {"full_name": "jdx/demo"},
         "/repos/jdx/demo/pulls/7": {"number": 7, "head": {"sha": "abc"}},
         "/repos/jdx/demo/actions/jobs/1/logs": {"$text": "the log", "$until": 30, "$before": {"$status": 404}},
         "/repos/jdx/demo/actions/runs/1/logs": {"$zip": {"0_test.txt": "the log"}},
@@ -99,13 +100,16 @@ class ServerTest(unittest.TestCase):
 
     def test_opt_in_repo_alias_shares_rest_state(self):
         with FakeGitHub({**FIXTURE, "repo_aliases": ["jdx/fnox"]}) as fake:
+            for path in ("/repos/jdx/fnox", "/repos/jdx/fnox?x=1"):
+                status, _, body = get(fake.url + path)
+                self.assertEqual((status, json.loads(body)["full_name"]), (200, "jdx/demo"))
             status, _, body = get(fake.url + "/repos/jdx/fnox/actions/runs/1/attempts/1/jobs?per_page=100")
             self.assertEqual((status, json.loads(body)["total_count"]), (200, 1))
             status, reply = post(fake.url + "/repos/jdx/fnox/pulls/7/comments/11/replies", {"body": "done"})
             self.assertEqual((status, reply["in_reply_to_id"]), (201, 11))
             comments = json.loads(get(fake.url + "/repos/jdx/demo/pulls/7/comments")[2])
             self.assertEqual([c["body"] for c in comments], ["rename this", "done"])
-            self.assertEqual(fake.world.log[0]["path"], "/repos/jdx/fnox/actions/runs/1/attempts/1/jobs?per_page=100")
+            self.assertEqual(fake.world.log[2]["path"], "/repos/jdx/fnox/actions/runs/1/attempts/1/jobs?per_page=100")
             self.assertEqual(get(fake.url + "/repos/jdx/fnox-extra/pulls/7")[0], 404)
             self.assertEqual(get(fake.url + "/repos/other/fnox/pulls/7")[0], 404)
         with FakeGitHub(FIXTURE) as fake:

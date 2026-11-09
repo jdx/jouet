@@ -173,9 +173,9 @@ class World:
         """A REST response, or 404 when the fixture has none."""
         repo = self.fixture.get("repo", "")
         for alias in self.fixture.get("repo_aliases", []):
-            prefix = f"/repos/{alias}/"
-            if path.startswith(prefix):
-                path = f"/repos/{repo}/" + path[len(prefix):]
+            prefix = f"/repos/{alias}"
+            if path == prefix or path.startswith((prefix + "/", prefix + "?")):
+                path = f"/repos/{repo}" + path[len(prefix):]
                 break
         bare = urlsplit(path).path.rstrip("/")
         elapsed = self.elapsed()
