@@ -4,7 +4,10 @@
 //! directly or through others, dev-dependencies included, as `cargo
 //! metadata` lists them. They run as `cargo test -p A -p B`. A file outside
 //! every member, such as a shared fixture directory, belongs to the members
-//! whose Rust sources name it or a directory holding it.
+//! whose Rust sources name it or a directory holding it. A file a member
+//! compiles in with `include_str!`, `include_bytes!` or `include!` belongs
+//! to that member too, even a Markdown file that would otherwise be
+//! documentation.
 
 use super::{Adapter, Base, Change, Ecosystem, Error, Project, Selection, Test};
 use jouet_output::exit::Exit;
@@ -86,12 +89,31 @@ impl Cargo {
     }
 
     /// The members a changed file reaches: the one holding it or, for a file
-    /// outside every member, those that read it ([`Cargo::readers`]).
+    /// outside every member, those that read it ([`Cargo::readers`]), and
+    /// every member that compiles it in ([`Cargo::includers`]), as a crate
+    /// can embed a file from another's directory.
     fn reached(&self, path: &str) -> Vec<usize> {
-        match self.owner(path) {
-            Some(i) => vec![i],
-            None => self.readers(path),
-        }
+        let mut found: BTreeSet<usize> = match self.owner(path) {
+            Some(i) => BTreeSet::from([i]),
+            None => self.readers(path).into_iter().collect(),
+        };
+        found.extend(self.includers(path));
+        found.into_iter().collect()
+    }
+
+    /// The members whose Rust sources compile `path` in with
+    /// `include_str!`, `include_bytes!` or `include!`, read from the
+    /// including file's directory. Unlike any other string naming it, such
+    /// a macro makes the file part of the crate, so a change to it can
+    /// change a test even when it looks like documentation.
+    fn includers(&self, path: &str) -> Vec<usize> {
+        self.sources()
+            .iter()
+            .filter(|(_, names)| names.iter().any(|n| n.included && n.reaches(path)))
+            .map(|(i, _)| *i)
+            .collect::<BTreeSet<usize>>()
+            .into_iter()
+            .collect()
     }
 
     /// The members whose Rust sources name `path`, or a directory holding it,
@@ -167,6 +189,9 @@ impl Cargo {
 struct Name {
     path: String,
     placeholder: bool,
+    /// Named in `include_str!`, `include_bytes!` or `include!`, which
+    /// compile the file into the crate.
+    included: bool,
 }
 
 impl Name {
@@ -184,7 +209,7 @@ impl Name {
 }
 
 /// The paths the strings in `text`, a Rust file at `file` in a member at
-/// `dir`, name: each string with a `/`, read from the member's directory
+/// `dir`, name: each string with a `/` or in an include macro, read from the member's directory
 /// (`Path::new(env!("CARGO_MANIFEST_DIR")).join("../corpus")`, or after it
 /// in a `concat!` or a leading `{}` in `format!`), from the root, or, in `include_str!`, `include_bytes!`
 /// or `include!`, from the file's own directory. A string that leads out of
@@ -196,7 +221,10 @@ fn named(text: &str, dir: &str, file: &str) -> Vec<Name> {
     let here = file.rsplit_once('/').map_or("", |(d, _)| d);
     let mut names = Vec::new();
     for (start, literal) in strings(text) {
-        if !literal.contains('/') {
+        // An include macro's path is a file even without a `/`, as in
+        // `include_str!("init.md")` beside the including file.
+        let included = INCLUDE.is_match(&text[..start]);
+        if !included && !literal.contains('/') {
             continue;
         }
         // A leading placeholder is the directory the rest is read from, as
@@ -210,16 +238,16 @@ fn named(text: &str, dir: &str, file: &str) -> Vec<Name> {
             Some((fixed, _)) => (fixed, true),
             None => (literal, false),
         };
-        let bases: &[&str] = if INCLUDE.is_match(&text[..start]) {
-            &[here]
-        } else {
-            &[dir, ""]
-        };
+        let bases: &[&str] = if included { &[here] } else { &[dir, ""] };
         for base in bases {
             if let Some(path) = resolve(base, fixed, placeholder)
                 && !path.is_empty()
             {
-                let name = Name { path, placeholder };
+                let name = Name {
+                    path,
+                    placeholder,
+                    included,
+                };
                 if !names.contains(&name) {
                     names.push(name);
                 }
@@ -509,6 +537,10 @@ impl Adapter for Cargo {
         !self.reached(path).is_empty()
     }
 
+    fn embeds(&self, path: &str) -> bool {
+        !self.includers(path).is_empty()
+    }
+
     fn traces_deletions(&self) -> bool {
         true
     }
@@ -747,6 +779,55 @@ mod tests {
     }
 
     #[test]
+    fn an_embedded_file_reaches_the_crates_that_include_it() {
+        let root = tempfile::tempdir().unwrap();
+        let init = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root.path())
+            .status()
+            .unwrap();
+        assert!(init.success());
+        let write = |path: &str, text: &str| {
+            let path = root.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(
+            "src/skill.rs",
+            r#"fn init() -> &'static str { include_str!("skill/init.md") }"#,
+        );
+        // Beside the including file: no `/` in the path.
+        write(
+            "src/help.rs",
+            r#"const HELP: &str = include_str!("help.md"); const W: &str = "help.txt";"#,
+        );
+        // Another crate embeds a file from the root crate's directory, and
+        // a path in any other string does not make a file part of a crate.
+        write(
+            "crates/docs/src/lib.rs",
+            r#"const G: &[u8] = include_bytes!("../../../guide/intro.md"); const N: &str = "../../notes/todo.md";"#,
+        );
+        let cargo = Cargo {
+            members: Ok(vec![
+                member("app", "", &[]),
+                member("docs", "crates/docs", &[]),
+            ]),
+            workspace: true,
+            root: root.path().to_path_buf(),
+            readers: Mutex::default(),
+            sources: OnceLock::new(),
+        };
+        assert!(cargo.embeds("src/skill/init.md"));
+        assert_eq!(cargo.reached("src/skill/init.md"), vec![0]);
+        assert!(cargo.embeds("guide/intro.md"));
+        assert_eq!(cargo.reached("guide/intro.md"), vec![0, 1]);
+        assert!(cargo.embeds("src/help.md"));
+        assert!(!cargo.embeds("src/help.txt"));
+        assert!(!cargo.embeds("notes/todo.md"));
+        assert!(!cargo.embeds("README.md"));
+    }
+
+    #[test]
     fn strings_keep_track_of_their_quotes() {
         let text = r####"let label = "\n"; let p = "../corpus/x.json";
 let q = '"'; // a "quote" in a comment
@@ -764,12 +845,16 @@ let r = include_str!(r#"../../../corpus/y.json"#); let b = b"a/b"; let c = br"c/
             ]
         );
         let names = named(text, "crates/a", "crates/a/src/lib.rs");
-        let name = |path: &str| Name {
+        let name = |path: &str, included: bool| Name {
             path: path.into(),
             placeholder: false,
+            included,
         };
-        assert!(names.contains(&name("crates/corpus/x.json")), "{names:?}");
-        assert!(names.contains(&name("corpus/y.json")), "{names:?}");
+        assert!(
+            names.contains(&name("crates/corpus/x.json", false)),
+            "{names:?}"
+        );
+        assert!(names.contains(&name("corpus/y.json", true)), "{names:?}");
     }
 
     #[test]
@@ -795,7 +880,8 @@ let r = include_str!(r#"../../../corpus/y.json"#); let b = b"a/b"; let c = br"c/
             ),
             [Name {
                 path: "corpus".into(),
-                placeholder: false
+                placeholder: false,
+                included: false
             }]
         );
         // A leading placeholder is the directory; a later one ends the name.
@@ -808,11 +894,13 @@ let r = include_str!(r#"../../../corpus/y.json"#); let b = b"a/b"; let c = br"c/
             [
                 Name {
                     path: "corpus/complete".into(),
-                    placeholder: false
+                    placeholder: false,
+                    included: false
                 },
                 Name {
                     path: "corpus/".into(),
-                    placeholder: true
+                    placeholder: true,
+                    included: false
                 }
             ]
         );
