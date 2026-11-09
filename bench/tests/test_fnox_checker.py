@@ -126,7 +126,10 @@ class FnoxBatsTest(unittest.TestCase):
                 check=True,
             )
             base = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
-            (root / "cargo").write_text("#!/bin/sh\nexit 1\n")
+            (root / "cargo").write_text(
+                "#!/bin/sh\nprintf 'first build error\\n' >&2\nprintf '%4096s\\n' x >&2\n"
+                "printf 'last build error\\n' >&2\nexit 1\n"
+            )
             (root / "cargo").chmod(0o755)
             env = {**os.environ, "PATH": f"{root}{os.pathsep}{os.environ['PATH']}", "BENCH_HEAD_SHA": base}
             result = subprocess.run(
@@ -136,6 +139,8 @@ class FnoxBatsTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn("ModuleNotFoundError", result.stderr)
             self.assertIn("build fails", result.stdout)
+            self.assertIn("first build error", result.stdout)
+            self.assertIn("last build error", result.stdout)
 
     def test_realistic_tap_requires_complete_success(self):
         self.assertIsNone(checker.inspect_tap("1..2\nok 1 first\nok 2 second\n", 0))
