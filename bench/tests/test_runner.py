@@ -295,6 +295,43 @@ class PlanTest(unittest.TestCase):
                 self.assertEqual(execute.call_count, 1)
                 self.assertTrue(any("hooks could not be verified" in message for message in messages))
 
+    def test_interrupted_suite_stops_detached_work_before_removing_it(self):
+        import os
+        import subprocess
+        import threading
+        from unittest.mock import patch
+
+        planned = [runner.Planned(1, "first", "codex", "plain")]
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            work_root, tmp_root = root / "work-root", root / "tmp-root"
+            work_root.mkdir()
+            tmp_root.mkdir()
+            detached = []
+
+            def interrupt(*_args):
+                proc = subprocess.Popen([sys.executable, "-c", "import threading; threading.Event().wait()"],
+                                        cwd=work_root, start_new_session=True)
+                detached.append(proc)
+                threading.Thread(target=proc.wait, daemon=True).start()
+                raise KeyboardInterrupt
+
+            try:
+                with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root)}), \
+                        patch.object(runner.tempfile, "mkdtemp", side_effect=[str(work_root), str(tmp_root)]), \
+                        patch.object(runner, "snapshot", return_value=Path(sys.executable)), \
+                        patch.object(runner.costs_mod, "seeds", return_value={}), \
+                        patch.object(runner, "execute", side_effect=interrupt), \
+                        self.assertRaises(KeyboardInterrupt):
+                    runner.run_suite(planned, {"jouet_bin": Path(sys.executable)}, root, lambda _: None)
+                self.assertIsNotNone(detached[0].poll())
+                self.assertFalse(work_root.exists())
+            finally:
+                for proc in detached:
+                    if proc.poll() is None:
+                        proc.kill()
+                        proc.wait()
+
     def test_result_write_failure_preserves_previous_records_and_stops(self):
         import errno
         import os

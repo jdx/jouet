@@ -853,6 +853,12 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                 # and record a failure that says nothing about jouet.
                 log(f"stopping: {p.harness} could not authenticate ({u.get('result')}); log in again and rerun")
                 break
+    except BaseException:
+        # An interrupted agent or checker can leave processes in their own
+        # sessions. Stop them before removing the directories used to find them.
+        sweep(work_root, None)
+        sweep(tmp_root, None)
+        raise
     finally:
         if not opts.get("keep_work") and not preserve_work:
             remove(work_root)
