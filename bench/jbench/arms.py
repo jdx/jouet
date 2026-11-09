@@ -210,10 +210,11 @@ def credential_files(harness: Harness) -> list[Path]:
     return [user_config_dir(harness) / name for name in harness.auth_files]
 
 
-def setup_jouet(harness: Harness, env: dict[str, str], workdir: Path) -> dict[str, Any]:
+def setup_jouet(harness: Harness, env: dict[str, str], workdir: Path,
+                extra: tuple[str, ...] = ()) -> dict[str, Any]:
     """Runs `jouet setup` in the isolated home, as a user would."""
     proc = subprocess.run(
-        ["jouet", "setup", harness.name, "--json"],
+        ["jouet", "setup", harness.name, "--json", *extra],
         cwd=workdir,
         env=env,
         capture_output=True,

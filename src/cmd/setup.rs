@@ -384,9 +384,16 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
             return out.error(Exit::Precondition, &message);
         }
     }
-    let init_text = (!args.uninstall).then(|| stamp(&skill::init(format)));
-    if let Err(message) = plan(&init_skill, init_text) {
-        return out.error(Exit::Precondition, &message);
+    // jouet-init likewise, only when asked for: it ran in no real session
+    // over 14 days and gained nothing over jouet's defaults on the bench. An
+    // earlier setup's unedited copy goes.
+    let want_init = !args.uninstall && args.init_skill;
+    let init_ours = matches!(read(&init_skill), Ok(Some(text)) if stamped_by_jouet(&text));
+    if want_init || args.uninstall || init_ours {
+        let init_text = want_init.then(|| stamp(&skill::init(format)));
+        if let Err(message) = plan(&init_skill, init_text) {
+            return out.error(Exit::Precondition, &message);
+        }
     }
     if args.uninstall {
         for other in other_skills {
@@ -429,12 +436,12 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
     if !args.uninstall {
         let written: Vec<&Path> = std::iter::once(config.as_path())
             .chain(want_skill.then_some(skill.as_path()))
-            .chain(std::iter::once(init_skill.as_path()))
+            .chain(want_init.then_some(init_skill.as_path()))
             .collect();
         notes.extend(install_notes(
             harness, scope, &home, &project, &written, changed,
         ));
-        if !args.dry_run {
+        if want_init && !args.dry_run {
             let invocation = match harness {
                 Harness::Claude => "/jouet-init",
                 Harness::Codex => "$jouet-init",

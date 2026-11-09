@@ -139,7 +139,8 @@ def prepared(
         if arms_mod.codex_tools(run_dir / "bin", True) != codex_tools:
             raise codex_hooks.HookPreflightError("Setup replaced a Codex benchmark tool")
         arms_mod.verify_codex_path(run_dir / "bin", env, True)
-    arms_mod.setup_jouet(harness, env, workdir)
+    # setup installs the skill only when asked for.
+    arms_mod.setup_jouet(harness, env, workdir, ("--init-skill",))
     arms_mod.reviewed_codex(harness, env, workdir, opts)
     # The skill sets the project up in mise, and checks what it wrote by
     # running it: as in the person's own repository, mise may run it.
