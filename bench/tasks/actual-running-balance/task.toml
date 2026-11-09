@@ -25,6 +25,7 @@ history = true
 
 [tools]
 node = "node"
+npx = "npx"
 yarn = "{workdir}/.yarn/releases/yarn-4.13.0.cjs"
 
 [env]
