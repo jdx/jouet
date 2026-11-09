@@ -52,6 +52,13 @@ const HK_TIMEOUT: u64 = 600;
 const GEMINI_TOOLS: &str =
     "^(run_shell_command|read_file|grep_search|search_file_content|replace|write_file)$";
 
+/// Claude Code tools whose definitions cost every request without being used:
+/// the Artifact tools alone are about 12,800 tokens of each request, and none
+/// of 524 sessions over 14 days called them. `jouet setup claude` denies them,
+/// which drops the definitions, unless the same settings name one in
+/// `permissions.allow` or `permissions.ask`.
+pub(crate) const UNUSED_CLAUDE_TOOLS: &[&str] = &["Artifact", "ArtifactComments", "ArtifactData"];
+
 /// The harnesses `jouet setup` and `jouet hook` take, for messages.
 pub(crate) const NAMES: &str = "claude, codex, cursor, gemini or copilot";
 
@@ -556,6 +563,67 @@ pub(crate) fn install(doc: &mut Value, harness: Harness, scope: Scope) {
     if only_jouet(&before) && jouet_groups(&before) == jouet_groups(doc) {
         *doc = before;
     }
+    if harness == Harness::Claude {
+        deny_unused_tools(doc);
+    }
+}
+
+/// Adds [`UNUSED_CLAUDE_TOOLS`] to `permissions.deny`, leaving out a tool the
+/// settings already deny, allow or ask about.
+fn deny_unused_tools(doc: &mut Value) {
+    let object = doc.as_object_mut().expect("validated as an object");
+    let had_permissions = object.contains_key("permissions");
+    let Some(permissions) = object
+        .entry("permissions")
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+    else {
+        return;
+    };
+    let named = |key: &str, tool: &str| {
+        permissions
+            .get(key)
+            .and_then(Value::as_array)
+            .is_some_and(|list| list.iter().any(|v| v.as_str() == Some(tool)))
+    };
+    let missing: Vec<_> = UNUSED_CLAUDE_TOOLS
+        .iter()
+        .filter(|tool| !["deny", "allow", "ask"].iter().any(|key| named(key, tool)))
+        .collect();
+    if missing.is_empty() {
+        if !had_permissions {
+            object.remove("permissions");
+        }
+        return;
+    }
+    let Some(deny) = permissions
+        .entry("deny")
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+    else {
+        return;
+    };
+    deny.extend(missing.into_iter().map(|tool| json!(tool)));
+}
+
+/// Removes [`UNUSED_CLAUDE_TOOLS`] from `permissions.deny`, and the keys that
+/// leaves empty.
+fn undeny_unused_tools(object: &mut Map<String, Value>) {
+    let Some(permissions) = object.get_mut("permissions").and_then(Value::as_object_mut) else {
+        return;
+    };
+    let Some(deny) = permissions.get_mut("deny").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let had = deny.len();
+    deny.retain(|v| !v.as_str().is_some_and(|t| UNUSED_CLAUDE_TOOLS.contains(&t)));
+    if deny.len() == had || !deny.is_empty() {
+        return;
+    }
+    permissions.remove("deny");
+    if permissions.is_empty() {
+        object.remove("permissions");
+    }
 }
 
 /// Whether a document holds nothing but a flat file's `version`, as
@@ -571,6 +639,7 @@ pub(crate) fn uninstall(doc: &mut Value) {
     let Some(object) = doc.as_object_mut() else {
         return;
     };
+    undeny_unused_tools(object);
     let Some(hooks) = object.get_mut("hooks").and_then(Value::as_object_mut) else {
         return;
     };
@@ -624,6 +693,51 @@ mod tests {
 
     fn pretty(doc: &Value) -> String {
         serde_json::to_string_pretty(doc).unwrap()
+    }
+
+    #[test]
+    fn claude_setup_denies_the_unused_tools_and_uninstall_takes_them_back() {
+        let doc = installed(
+            json!({"permissions": {"deny": ["Bash(rm:*)"]}}),
+            Harness::Claude,
+        );
+        assert_eq!(
+            doc["permissions"]["deny"],
+            json!(["Bash(rm:*)", "Artifact", "ArtifactComments", "ArtifactData"])
+        );
+        // Re-running changes nothing.
+        assert_eq!(installed(doc.clone(), Harness::Claude), doc);
+        let mut doc = doc;
+        uninstall(&mut doc);
+        assert_eq!(doc, json!({"permissions": {"deny": ["Bash(rm:*)"]}}));
+
+        let mut doc = installed(json!({}), Harness::Claude);
+        uninstall(&mut doc);
+        assert_eq!(doc, json!({}));
+        // Other harnesses have no such tools.
+        assert!(
+            installed(json!({}), Harness::Gemini)
+                .get("permissions")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_tool_the_settings_allow_or_ask_about_stays() {
+        let doc = installed(
+            json!({"permissions": {"allow": ["Artifact"], "ask": ["ArtifactData"]}}),
+            Harness::Claude,
+        );
+        assert_eq!(doc["permissions"]["deny"], json!(["ArtifactComments"]));
+        let doc = installed(
+            json!({"permissions": {"allow": ["Artifact", "ArtifactComments", "ArtifactData"]}}),
+            Harness::Claude,
+        );
+        assert!(doc["permissions"].get("deny").is_none());
+        // An empty table the user wrote is theirs.
+        let mut doc = json!({"permissions": {}});
+        uninstall(&mut doc);
+        assert_eq!(doc, json!({"permissions": {}}));
     }
 
     #[test]
@@ -819,6 +933,11 @@ mod tests {
   "permissions": {
     "allow": [
       "Bash(ls)"
+    ],
+    "deny": [
+      "Artifact",
+      "ArtifactComments",
+      "ArtifactData"
     ]
   }
 }"#
@@ -1040,6 +1159,13 @@ mod tests {
           }
         ]
       }
+    ]
+  },
+  "permissions": {
+    "deny": [
+      "Artifact",
+      "ArtifactComments",
+      "ArtifactData"
     ]
   }
 }"#
