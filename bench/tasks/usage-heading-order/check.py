@@ -41,6 +41,9 @@ def run(target: str, label: str, deadline: float, checkout: Path) -> None:
         UNVERIFIED.append(f"{label} could not complete: {error}")
         return
     output = proc.stdout
+    reported_failure = bool(re.search(r"^test [^\r\n]+ \.\.\. FAILED\r?$", output, re.MULTILINE))
+    if reported_failure:
+        expect(False, f"{label} reported a failing test:\n{tail(output)}")
     running = re.findall(r"^running (\d+) tests?$", output, re.MULTILINE)
     summaries = re.findall(
         r"^test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored; "
@@ -54,12 +57,12 @@ def run(target: str, label: str, deadline: float, checkout: Path) -> None:
     if passed + failed + ignored != int(running[0]):
         UNVERIFIED.append(f"{label} reported inconsistent test counts:\n{tail(output)}")
         return
-    if failed:
+    if failed and not reported_failure:
         expect(False, f"{label} failed:\n{tail(output)}")
     if ignored or measured or filtered or not passed + failed:
         UNVERIFIED.append(f"{label} did not run a complete nonempty test target:\n{tail(output)}")
         return
-    if not failed and (proc.returncode != 0 or status != "ok"):
+    if not failed and (proc.returncode != 0 or status != "ok" or reported_failure):
         UNVERIFIED.append(f"{label} exited without a consistent passing result:\n{tail(output)}")
     elif not failed:
         print(f"{label}: {passed} passed")
