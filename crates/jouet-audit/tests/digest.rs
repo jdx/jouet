@@ -80,6 +80,22 @@ fn a_codex_session_digests_to_its_snapshot() {
 }
 
 #[test]
+fn a_small_budget_can_omit_corrected_phases_with_a_count() {
+    let mut d = codex();
+    let phase = d.phases[0].clone();
+    d.corrections[0].span = phase.span;
+    d.phases = vec![phase; 40];
+
+    let text = digest::render(&d, 200);
+    assert!(text.contains("40 phases left out"), "{text}");
+    assert!(text.len() <= 1000, "{} bytes: {text}", text.len());
+    assert!(
+        text.contains("more"),
+        "omitted items should be named: {text}"
+    );
+}
+
+#[test]
 fn corrections_carry_their_kind_span_and_context() {
     let d = claude();
     let kinds: Vec<Kind> = d.corrections.iter().map(|c| c.kind).collect();

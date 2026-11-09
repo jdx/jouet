@@ -21,7 +21,7 @@ struct Limits {
     phases: usize,
 }
 
-const STEPS: [Limits; 6] = [
+const STEPS: [Limits; 8] = [
     Limits {
         items: 12,
         groups: 6,
@@ -57,6 +57,18 @@ const STEPS: [Limits; 6] = [
         groups: 0,
         details: 0,
         phases: 4,
+    },
+    Limits {
+        items: 1,
+        groups: 0,
+        details: 0,
+        phases: 2,
+    },
+    Limits {
+        items: 0,
+        groups: 0,
+        details: 0,
+        phases: 0,
     },
 ];
 
@@ -298,7 +310,7 @@ fn timeline(out: &mut String, d: &Digest, l: Limits) {
     let mut skipped = (0u64, 0u64);
     for (i, p) in d.phases.iter().enumerate() {
         let full = n <= l.phases || i < head || i >= n.saturating_sub(tail);
-        if !full && !corrected(p) {
+        if !full && (l.phases == 0 || !corrected(p)) {
             skipped.0 += 1;
             skipped.1 += p.calls.iter().map(|g| g.count).sum::<u64>();
             continue;
@@ -346,7 +358,7 @@ fn phase(out: &mut String, n: usize, p: &Phase, l: Limits) {
     for g in p.calls.iter().take(l.groups) {
         group(out, g, l.details);
     }
-    if p.calls.len() > l.groups && l.groups > 0 {
+    if p.calls.len() > l.groups {
         let rest: u64 = p.calls[l.groups..].iter().map(|g| g.count).sum();
         let _ = writeln!(
             out,
@@ -366,8 +378,12 @@ fn group(out: &mut String, g: &Group, details: usize) {
         let _ = write!(out, ": {}", shown.join(", "));
     }
     let more = g.more + (g.details.len() - shown.len()) as u64;
-    if more > 0 && !shown.is_empty() {
-        let _ = write!(out, " (+{more})");
+    if more > 0 {
+        if shown.is_empty() {
+            let _ = write!(out, " ({more} details omitted)");
+        } else {
+            let _ = write!(out, " (+{more})");
+        }
     }
     out.push('\n');
 }
@@ -417,6 +433,53 @@ fn date(ms: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_phase_says_when_all_call_groups_are_omitted() {
+        let phase_with_calls = Phase {
+            span: Span { from: 1, to: 2 },
+            offset_ms: None,
+            duration_ms: None,
+            prompt: None,
+            requests: 1,
+            input_tokens: 100,
+            calls: vec![Group {
+                what: "test".into(),
+                count: 2,
+                failed: 0,
+                details: Vec::new(),
+                more: 0,
+            }],
+        };
+        let mut text = String::new();
+        phase(
+            &mut text,
+            1,
+            &phase_with_calls,
+            Limits {
+                items: 0,
+                groups: 0,
+                details: 0,
+                phases: 1,
+            },
+        );
+        assert!(text.contains("1 more kinds of call (2 calls)"), "{text}");
+    }
+
+    #[test]
+    fn a_group_counts_details_omitted_by_the_budget() {
+        let calls = Group {
+            what: "test".into(),
+            count: 2,
+            failed: 0,
+            details: vec!["first".into(), "second".into()],
+            more: 3,
+        };
+        let mut text = String::new();
+        group(&mut text, &calls, 0);
+        assert!(text.contains("(5 details omitted)"), "{text}");
+        assert!(!text.contains("first"), "{text}");
+    }
 
     #[test]
     fn times_and_sizes_read_at_a_glance() {
