@@ -89,7 +89,7 @@ impl Filter {
 /// its ID (Claude Code's `<id>.jsonl` and `<id>/subagents/`), or a file
 /// whose name ends in it (Codex's `rollout-<time>-<id>.jsonl`). A part of an
 /// ID is not a match.
-pub fn names_session(path: &Path, id: &str) -> bool {
+fn names_session(path: &Path, id: &str) -> bool {
     path.components().any(|c| {
         let name = c.as_os_str().to_string_lossy();
         let file = name.strip_suffix(".zst").unwrap_or(&name);

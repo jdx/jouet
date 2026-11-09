@@ -116,7 +116,7 @@ pub struct ArmComparison {
     pub control: ArmSpread,
     /// The new default.
     pub new: ArmSpread,
-    /// Control less new, by metric.
+    /// Control less new, by metric; none while an arm has no sessions.
     pub differences: Vec<Difference>,
 }
 
@@ -125,7 +125,8 @@ pub struct ArmComparison {
 pub struct ArmSpread {
     /// Sessions in the arm whose transcripts were read.
     pub sessions: u64,
-    /// By metric: the median and the interquartile range.
+    /// By metric: the median and the interquartile range; none without
+    /// sessions.
     pub metrics: Vec<Spread>,
 }
 
@@ -184,8 +185,11 @@ pub fn compare_arms(
                     .collect()
             };
             let (control, new) = (group("control"), group("new"));
+            // An arm with no sessions has no median to compare.
+            let both = !control.is_empty() && !new.is_empty();
             let differences = Metric::ALL
                 .iter()
+                .filter(|_| both)
                 .map(|&metric| {
                     let values = |group: &[&SessionMetrics]| -> Vec<f64> {
                         group.iter().map(|m| m.value(metric)).collect()
@@ -215,6 +219,7 @@ fn spread(group: &[&SessionMetrics]) -> ArmSpread {
         sessions: group.len() as u64,
         metrics: Metric::ALL
             .iter()
+            .filter(|_| !group.is_empty())
             .map(|&metric| {
                 let values: Vec<f64> = group.iter().map(|m| m.value(metric)).collect();
                 Spread {
@@ -354,5 +359,10 @@ mod tests {
         let one = compare_arms(&arms, &metrics[3..]);
         assert_eq!(one[0].control.sessions, 1);
         assert_eq!(one[0].differences[0].ci_low, None);
+        // None gives no median at all, rather than a made-up zero.
+        let none = compare_arms(&arms, &metrics[4..]);
+        assert_eq!(none[0].control, ArmSpread::default());
+        assert!(none[0].differences.is_empty());
+        assert_eq!(none[0].new.sessions, 8);
     }
 }

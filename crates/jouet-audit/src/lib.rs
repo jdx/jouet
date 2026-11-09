@@ -55,8 +55,7 @@ pub use event::{Call, Message, MessageKind, Request, Tool, Transcript};
 pub use gitleaks::Gitleaks;
 pub use pattern::{Pattern, Patterns, detect};
 pub use read::{
-    ClaudeCode, Codex, Filter, Reader, Scan, ScanStats, Source, Unreadable, home, names_session,
-    open, scan,
+    ClaudeCode, Codex, Filter, Reader, Scan, ScanStats, Source, Unreadable, home, open, scan,
 };
 pub use record::{CommandRecord, findings, transcripts};
 pub use redact::{example, redact};

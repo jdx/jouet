@@ -185,7 +185,7 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
         .map(|l| stats::session_arms(&l.entries, &filter))
         .filter(|arms| !arms.is_empty())
         .map(|arms| {
-            let metrics = arm_metrics(&readers, ledger_first(ledger.as_ref(), &arms), &arms);
+            let metrics = arm_metrics(&readers, &arms);
             stats::compare_arms(&arms, &metrics)
         })
         .unwrap_or_default();
@@ -214,38 +214,17 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
     Exit::Ok
 }
 
-/// When the first session with an arm started, in seconds since the epoch.
-fn ledger_first(ledger: Option<&Ledger>, arms: &BTreeMap<String, BTreeMap<String, String>>) -> u64 {
-    ledger
-        .into_iter()
-        .flat_map(|l| &l.entries)
-        .filter(|e| e.event == "session-start")
-        .filter(|e| e.session.as_ref().is_some_and(|s| arms.contains_key(s)))
-        .map(|e| e.ts)
-        .min()
-        .unwrap_or(0)
-}
-
-/// What each session with an arm cost, from its transcripts: the files
-/// whose path names the session by its whole id, as `--session` matches
-/// them, read one by one.
+/// What each session with an arm cost, from its transcripts, read one by
+/// one: every file whose path names an arm's session ([`arm_session`]),
+/// however old, since a resumed session can add to an older one.
 fn arm_metrics(
     readers: &[&dyn Reader],
-    since: u64,
     arms: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> Vec<stats::SessionMetrics> {
-    let filter = Filter {
-        // A session can start before its session-start hook writes.
-        since_ms: Some(i64::try_from(since).unwrap_or(i64::MAX).saturating_sub(60) * 1000),
-        ..Filter::default()
-    };
     let mut transcripts: BTreeMap<&str, Vec<jouet_audit::Transcript>> = BTreeMap::new();
     for &reader in readers {
-        for source in reader.discover(&filter).unwrap_or_default() {
-            let Some(session) = arms
-                .keys()
-                .find(|s| jouet_audit::names_session(&source.path, s))
-            else {
+        for source in reader.discover(&Filter::default()).unwrap_or_default() {
+            let Some(session) = arm_session(&source.path, arms) else {
                 continue;
             };
             let read = jouet_audit::open(&source.path)
@@ -259,6 +238,26 @@ fn arm_metrics(
         .into_iter()
         .map(|(session, ts)| stats::SessionMetrics::of(session, &ts))
         .collect()
+}
+
+/// The arm session a transcript's path names by its whole id, as
+/// `--session` matches it: a directory or file named by it (Claude Code's
+/// `<id>.jsonl` and `<id>/subagents/`), or a file whose name ends in `-<id>`
+/// (Codex's `rollout-<time>-<id>.jsonl`). Each name is looked up, not
+/// compared with every session.
+fn arm_session<'a>(
+    path: &Path,
+    arms: &'a BTreeMap<String, BTreeMap<String, String>>,
+) -> Option<&'a str> {
+    path.components().find_map(|c| {
+        let name = c.as_os_str().to_str()?;
+        let file = name.strip_suffix(".zst").unwrap_or(name);
+        let stem = file.strip_suffix(".jsonl").unwrap_or(file);
+        let suffixes = stem.match_indices('-').map(|(i, _)| &stem[i + 1..]);
+        std::iter::once(stem)
+            .chain(suffixes)
+            .find_map(|id| arms.get_key_value(id).map(|(k, _)| k.as_str()))
+    })
 }
 
 /// Each harness's requests after its first ledger entry (or `since`, when
@@ -692,6 +691,9 @@ fn arms_text(s: &mut String, arms: &[stats::ArmComparison]) {
             "  {}: control n={}, new n={}",
             a.toggle, a.control.sessions, a.new.sessions
         );
+        if a.differences.is_empty() {
+            let _ = writeln!(s, "    nothing to compare until each arm has a session");
+        }
         for ((c, n), d) in a
             .control
             .metrics
@@ -829,5 +831,30 @@ fn duration(ms: u64) -> String {
         0..60 => format!("{secs}s"),
         60..3600 => format!("{}m", secs / 60),
         _ => format!("{:.1}h", secs as f64 / 3600.0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_arm_session_is_found_by_its_whole_id() {
+        let id = "019a1b2c-3d4e-7f00-8a9b-0c1d2e3f4a5b";
+        let arms = BTreeMap::from([(id.to_string(), BTreeMap::new())]);
+        for path in [
+            format!("/h/.claude/projects/-w/{id}.jsonl"),
+            format!("/h/.claude/projects/-w/{id}/subagents/agent-a1.jsonl"),
+            format!("/h/.codex/sessions/2026/11/09/rollout-2026-11-09T10-00-00-{id}.jsonl.zst"),
+        ] {
+            assert_eq!(arm_session(Path::new(&path), &arms), Some(id), "{path}");
+        }
+        for path in [
+            "/h/.claude/projects/-w/019a1b2c-3d4e.jsonl".to_string(),
+            format!("/h/.claude/projects/-w/{id}0.jsonl"),
+            format!("/h/.codex/sessions/rollout-x{id}.jsonl"),
+        ] {
+            assert_eq!(arm_session(Path::new(&path), &arms), None, "{path}");
+        }
     }
 }
