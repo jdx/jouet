@@ -2,6 +2,7 @@
 
 use super::Output;
 use super::skill::{self, Format};
+use crate::budget;
 use crate::cli::SetupArgs;
 use crate::git;
 use crate::setup::{self, Harness, Scope, has_jouet};
@@ -51,6 +52,10 @@ struct Report {
     notes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     benchmark_prompt: Option<&'static str>,
+    /// Claude Code: what `--compact-window` and `--deny-unused` would
+    /// change, when neither was given and nobody could be asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_budget: Option<offer::Offer>,
 }
 
 pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
@@ -82,6 +87,25 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
         Scope::Local
     } else {
         Scope::Global
+    };
+    let budget_flags = args.compact_window.is_some() || args.deny_unused || args.undo.is_some();
+    if budget_flags && (harness != Harness::Claude || scope == Scope::Shared) {
+        return out.error(
+            Exit::Usage,
+            "--compact-window, --deny-unused and --undo change Claude Code's settings for you alone: \
+             use them with `jouet setup claude`, without --shared",
+        );
+    }
+    if budget_flags && args.uninstall {
+        return out.error(
+            Exit::Usage,
+            "--uninstall already takes back what --compact-window and --deny-unused added",
+        );
+    }
+    let window = match args.compact_window.as_deref().map(budget::parse_window) {
+        Some(Err(message)) => return out.error(Exit::Usage, &message),
+        Some(Ok(window)) => Some(window),
+        None => None,
     };
     if !harness.has_local_file() && scope == Scope::Local && !args.uninstall {
         let file = harness.config_path(Scope::Shared, Path::new(""), Path::new(""));
@@ -144,14 +168,83 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
         }
         None => (None, Vec::new()),
     };
-    match plan_config(&config, harness, scope, args.uninstall) {
-        Ok(change) => files.push(change),
+    // The context budget, for Claude Code's settings of your own: an
+    // explicit flag, a yes at the terminal, or only a note.
+    let setup_command = match scope {
+        Scope::Local => "jouet setup claude --project",
+        _ => "jouet setup claude",
+    };
+    let mut choice = budget::Change::default();
+    let mut context_budget = None;
+    if harness == Harness::Claude && scope != Scope::Shared {
+        if args.uninstall {
+            choice.undo_window = true;
+            choice.undo_unused = true;
+        } else {
+            choice.window = window;
+            choice.undo_window = args.undo.as_deref() == Some("window");
+            choice.undo_unused = args.undo.as_deref() == Some("unused");
+            if args.deny_unused || !budget_flags {
+                let doc = read_hooks(&config).map_or(serde_json::Value::Null, |(_, doc)| doc);
+                let root = jouet_output::paths::env_dir("CLAUDE_CONFIG_DIR")
+                    .unwrap_or_else(|| home.join(".claude"));
+                let history = budget::scan(&root);
+                let unused = budget::offered(&history, &doc);
+                if args.deny_unused {
+                    if unused.is_empty() {
+                        notes.push(format!(
+                            "nothing to deny: {}",
+                            if history.sessions < budget::MIN_SESSIONS {
+                                format!(
+                                    "only {} recent sessions recorded their tools, and it takes {}",
+                                    history.sessions,
+                                    budget::MIN_SESSIONS
+                                )
+                            } else {
+                                format!(
+                                    "every definition in your last {} sessions was used or is already named in the settings",
+                                    history.sessions
+                                )
+                            }
+                        ));
+                    }
+                    choice.deny = unused;
+                } else {
+                    let window = (history.past_window > 0 && !budget::window_chosen(&doc))
+                        .then_some(budget::WINDOW);
+                    let found = offer::Offer::new(&history, window, unused);
+                    let can_ask =
+                        !out.json && !args.dry_run && jouet_output::display::person_at_terminal();
+                    if found.is_empty() {
+                        // Nothing to offer.
+                    } else if can_ask {
+                        choice = found.ask(setup_command);
+                    } else {
+                        notes.push(found.note(setup_command));
+                        context_budget = Some(found);
+                    }
+                }
+            }
+        }
+    }
+    choice.dry_run = args.dry_run;
+    let budget_before = budget::load(&config);
+    let mut records = Vec::new();
+    match plan_config(&config, harness, scope, args.uninstall, &choice) {
+        Ok((change, record, budget_notes)) => {
+            files.push(change);
+            records.extend(record.map(|r| (config.clone(), r)));
+            notes.extend(budget_notes);
+        }
         Err(message) => return out.error(Exit::Precondition, &message),
     }
     if let Some(other) = other_config {
         if args.uninstall {
-            match plan_config(&other, harness, scope, true) {
-                Ok(change) => files.push(change),
+            match plan_config(&other, harness, scope, true, &choice) {
+                Ok((change, record, _)) => {
+                    files.push(change);
+                    records.extend(record.map(|r| (other.clone(), r)));
+                }
                 Err(message) => return out.error(Exit::Precondition, &message),
             }
         } else if read_hooks(&other).is_ok_and(|(_, doc)| outdated(&doc, harness, scope)) {
@@ -310,6 +403,23 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
                 return out.error(Exit::Failed, &format!("writing {}: {e}", file.path));
             }
         }
+        for (path, record) in &records {
+            if let Err(e) = budget::save(path, record) {
+                notes.push(format!(
+                    "could not record what setup added to {} ({e}), so --undo will not find it",
+                    path.display()
+                ));
+            }
+        }
+    }
+    if let Some((_, after)) = records.iter().find(|(path, _)| *path == config) {
+        notes.extend(budget_notes(
+            &budget_before,
+            after,
+            &choice,
+            args.dry_run,
+            setup_command,
+        ));
     }
     let changed = files.iter().any(|f| {
         matches!(
@@ -348,6 +458,7 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
         files,
         notes,
         benchmark_prompt: args.benchmark.then_some(benchmark::PROMPT),
+        context_budget,
     };
     out.result(&report, || text(&report));
     if !out.json
@@ -363,6 +474,53 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
 }
 
 mod benchmark;
+mod offer;
+
+/// What the budget changed in the settings, and how to take each back.
+fn budget_notes(
+    before: &budget::Added,
+    after: &budget::Added,
+    change: &budget::Change,
+    dry_run: bool,
+    setup: &str,
+) -> Vec<String> {
+    let mut notes = Vec::new();
+    let verb = |done: &'static str, would: &'static str| if dry_run { would } else { done };
+    if let Some(window) = after.auto_compact_window
+        && before.auto_compact_window != Some(window)
+    {
+        notes.push(format!(
+            "{} autoCompactWindow to {window}; `{setup} --undo window` takes it back",
+            verb("set", "would set")
+        ));
+    }
+    let new_denials = after.deny.len().saturating_sub(before.deny.len());
+    let new_skills = after.skills.len().saturating_sub(before.skills.len());
+    if new_denials + new_skills > 0 {
+        let tokens: u64 = change
+            .deny
+            .iter()
+            .filter(|u| u.recorded_in(after) && !u.recorded_in(before))
+            .map(|u| u.tokens)
+            .sum();
+        notes.push(format!(
+            "{} {new_denials} unused tools and MCP servers and {} {new_skills} unused skills from the model, \
+             ~{} tokens a request; `{setup} --undo unused` takes them back",
+            verb("denied", "would deny"),
+            verb("hid", "would hide"),
+            budget::tokens(tokens)
+        ));
+    }
+    if change.undo_unused && !(before.deny.is_empty() && before.skills.is_empty()) {
+        notes.push(format!(
+            "{} the {} denials and {} skill overrides setup added",
+            verb("removed", "would remove"),
+            before.deny.len(),
+            before.skills.len()
+        ));
+    }
+    notes
+}
 
 /// Where hk's stop hook is: merged into jouet's in `config`, or in another
 /// of the harness's hook files, where it still blocks on its own.
@@ -558,12 +716,15 @@ fn project_root(cwd: &Path, harness: Harness, scope: Scope) -> PathBuf {
         .to_path_buf()
 }
 
+/// The hooks file's change, and for Claude Code what the budget has added to
+/// it afterwards, with notes on what the budget left alone.
 fn plan_config(
     path: &Path,
     harness: Harness,
     scope: Scope,
     uninstall: bool,
-) -> Result<FileChange, String> {
+    budget: &budget::Change,
+) -> Result<(FileChange, Option<budget::Added>, Vec<String>), String> {
     let (before, mut doc) = read_hooks(path)?;
     let original = doc.clone();
     if uninstall {
@@ -571,19 +732,26 @@ fn plan_config(
     } else {
         setup::install(&mut doc, harness, scope);
     }
+    let mut record = None;
+    let mut notes = Vec::new();
+    if harness == Harness::Claude && !budget.is_empty() {
+        let mut added = budget::load(path);
+        notes = budget::apply(&mut doc, budget, &mut added);
+        record = Some(added);
+    }
     if doc == original {
         // Same JSON: leave the file, and its formatting, alone.
-        return plan_file(path, before);
+        return Ok((plan_file(path, before)?, record, notes));
     }
     // jouet's own file goes once nothing else is in it.
     if harness.owns_file() && setup::is_empty(&doc) {
-        return plan_file(path, None);
+        return Ok((plan_file(path, None)?, record, notes));
     }
     // A file uninstalling empties is kept as `{}`: it may have been there
     // before jouet was.
     let mut text = serde_json::to_string_pretty(&doc).expect("JSON values serialize");
     text.push('\n');
-    plan_file(path, Some(text))
+    Ok((plan_file(path, Some(text))?, record, notes))
 }
 
 /// A hook file's text, if it exists, and its document, refused unless it has

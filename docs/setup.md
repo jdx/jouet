@@ -43,7 +43,7 @@ Codex, Cursor, Gemini CLI and Copilot each have a step of their own before the h
 
 The hooks find `jouet` on `PATH` and do nothing where it is missing; setup says so when it is not on `PATH` where you run it (see [when jouet is not on PATH](#when-jouet-is-not-on-path)). Besides jouet-init, setup does not install the usage [skill](#the-skill-and-agent-help) unless you pass `--skill`, or the hooks or the primer are turned off in the [settings](#settings): the primer already tells the agent what that skill would, in every session. In a [fnox](#fnox) project, setup also recommends starting the agent under fnox's credential proxy.
 
-`--dry-run` prints each file's diff and writes nothing. With `--json`, the report is one document: `harness`, `scope` (`global` or `project`), `shared`, `dry_run` and `uninstall` when set, `files` (each with its `path`, an `action` of `create`, `update`, `remove`, `link`, `unchanged` or `keep`, and a `diff` when it changes), `notes`, and `benchmark_prompt` with [`--benchmark`](#compare-a-project).
+`--dry-run` prints each file's diff and writes nothing. With `--json`, the report is one document: `harness`, `scope` (`global` or `project`), `shared`, `dry_run` and `uninstall` when set, `files` (each with its `path`, an `action` of `create`, `update`, `remove`, `link`, `unchanged` or `keep`, and a `diff` when it changes), `notes`, `benchmark_prompt` with [`--benchmark`](#compare-a-project), and `context_budget` when setup has a [context budget](#context-budget) to offer.
 
 ### What setup changes
 
@@ -71,8 +71,24 @@ The table shows the optional usage skill. The onboarding skill is installed besi
 - **hk's stop hook is merged in.** When the file already has hk's stop hook (`hk agent stop-hook`, as `hk agent hooks` installs it), setup folds it into jouet's stop handler, which runs it, so a stop gets one verdict. setup notes when another of the harness's hook files has hk's stop hook, which would still block on its own; see [one stop gate](/commands/diag#one-stop-gate).
 - **Claude Code: the Artifact tools are denied.** setup adds `Artifact`, `ArtifactComments` and `ArtifactData` to `permissions.deny` in the same file, which removes their definitions from every request: about 12,800 input tokens per request, measured with Claude Code 2.1.309, which none of 524 sessions over 14 days on the machine that measured it called. A tool the file already names in `permissions.allow` or `permissions.ask` is left out, so to keep one, add it to `permissions.allow`; removing the entry alone makes the next setup add it back. Other tools, such as Agent, Skill and Monitor, are left as they are.
 - **Each handler has a 10-second timeout,** the bound on a hung hook, after which the harness carries on without it; jouet's hooks take milliseconds. A stop handler with hk's merged in gets hk's timeout instead, or 600 seconds when hk's had none.
-- **`--uninstall` removes only jouet's entries**, and in Claude Code's file the three Artifact denials, then any group, event or `permissions` table that removing them left empty, and puts a merged hk stop hook back as it was. At project scope it removes them from both `settings.local.json` and `settings.json`, whichever setup wrote. A settings file left empty stays, as `{}`; Copilot's `jouet.json`, which is jouet's alone, is removed.
+- **`--uninstall` removes only jouet's entries**, and in Claude Code's file the three Artifact denials and whatever the [context budget](#context-budget) added, then any group, event or `permissions` table that removing them left empty, and puts a merged hk stop hook back as it was. At project scope it removes them from both `settings.local.json` and `settings.json`, whichever setup wrote. A settings file left empty stays, as `{}`; Copilot's `jouet.json`, which is jouet's alone, is removed.
 - **A skill is jouet's only while it is unedited.** setup ends each `SKILL.md` it writes with a line holding a hash of the rest. It replaces or removes that file only while the hash still matches, and keeps skills you wrote or edited. Running setup without `--skill` removes the usage skill an earlier version installed, while it is unedited; jouet-init stays installed. `--uninstall` removes both while unedited.
+
+### Context budget
+
+For Claude Code at `--global` or `--project` scope, setup reads your own recent sessions (the newest 50 transcripts under `~/.claude/projects` that record their tool definitions) and offers two changes to the same settings file. It writes neither unless you accept:
+
+- **A compaction window.** When one of those sessions went past 200k tokens of context, which only a 1M-token model can, setup offers `autoCompactWindow: 200000`, so Claude Code compacts the conversation at 200k instead of near 1M. Replaying one machine's 14 days of sessions with compaction at 200k cut input by 45–49% in tokens, or 38–40% weighted by price. That is an upper bound: it assumes the same requests after a compaction, and agents re-read some of what a compaction dropped. Sessions on a 200k model already compact there, so they are offered nothing. Nothing is offered when the settings or `CLAUDE_CODE_AUTO_COMPACT_WINDOW` already choose a window, top-level or under `modelSettings`.
+- **Denying what you never use.** A tool, MCP server or skill that was in at least 20 of those sessions and called in none is offered, with its estimated tokens per request (from the size of its definition, so ±30%). Tools and MCP servers go into `permissions.deny` (`Workflow`, `mcp__visualize`); skills get `skillOverrides: {"NAME": "user-invocable-only"}`, which takes them out of the model's skill list but keeps `/NAME` for you. The tools every session works with (Bash, Read, Edit, Write, Grep, Glob), and Skill, ToolSearch, Agent, AskUserQuestion and ExitPlanMode are never offered. With fewer than 20 sessions, nothing is.
+
+At a terminal, setup asks about each with `[y/N]`. Anywhere else, including an agent running setup, it only adds a note naming what the flags would do, and `--json` has the same as `context_budget`. To write them without asking:
+
+```sh
+jouet setup claude --compact-window 200k   # 100k to 1m, which is what Claude Code accepts
+jouet setup claude --deny-unused
+```
+
+A window already in the settings that setup did not set is left alone. Each choice is one undo, which removes only what setup added, recorded in `setup-budget.json` in jouet's state directory: `jouet setup claude --undo window` or `--undo unused` (with `--project` for that scope). `--uninstall` takes back both. A denied tool fails silently: the agent never learns it exists, so undo a denial when you want the tool back.
 
 ## What the hooks do {#the-hooks}
 
