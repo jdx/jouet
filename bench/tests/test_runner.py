@@ -332,6 +332,44 @@ class PlanTest(unittest.TestCase):
                         proc.kill()
                         proc.wait()
 
+    def test_interrupt_retains_roots_when_both_sweeps_fail(self):
+        import contextlib
+        import io
+        import os
+        from unittest.mock import patch
+
+        planned = [runner.Planned(1, "first", "codex", "plain")]
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            work_root, tmp_root = root / "work-root", root / "tmp-root"
+            work_root.mkdir()
+            tmp_root.mkdir()
+            attempted = []
+
+            def fail_sweep(path, _session, *, errors):
+                attempted.append(path)
+                if path == work_root:
+                    raise OSError("cannot enumerate")
+                errors.append("lsof unavailable")
+                return []
+
+            stderr = io.StringIO()
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root)}), \
+                    patch.object(runner.tempfile, "mkdtemp", side_effect=[str(work_root), str(tmp_root)]), \
+                    patch.object(runner, "snapshot", return_value=Path(sys.executable)), \
+                    patch.object(runner.costs_mod, "seeds", return_value={}), \
+                    patch.object(runner, "execute", side_effect=KeyboardInterrupt), \
+                    patch.object(runner, "sweep", side_effect=fail_sweep), \
+                    contextlib.redirect_stderr(stderr), self.assertRaises(KeyboardInterrupt):
+                runner.run_suite(planned, {"jouet_bin": Path(sys.executable)}, root, lambda _: None)
+            self.assertEqual(attempted, [work_root, tmp_root])
+            self.assertTrue(work_root.is_dir())
+            self.assertTrue(tmp_root.is_dir())
+            self.assertIn("cannot enumerate", stderr.getvalue())
+            self.assertIn("lsof unavailable", stderr.getvalue())
+            self.assertIn(str(work_root), stderr.getvalue())
+            self.assertIn(str(tmp_root), stderr.getvalue())
+
     def test_result_write_failure_preserves_previous_records_and_stops(self):
         import errno
         import os
@@ -1110,6 +1148,16 @@ class SweepTest(unittest.TestCase):
             found, error = runner.cwd_processes(Path("/tmp/run"))
         self.assertEqual(found, {})
         self.assertIn("process discovery failed", error)
+
+    def test_sweep_reports_discovery_failure_separately(self):
+        from unittest.mock import patch
+
+        errors = []
+        with patch.object(Path, "is_dir", return_value=False), \
+                patch.object(runner, "cwd_processes", return_value=({}, "lsof unavailable")):
+            result = runner.sweep(Path("/tmp/run"), None, errors=errors)
+        self.assertEqual(result, ["lsof unavailable"])
+        self.assertEqual(errors, ["lsof unavailable"])
 
     @unittest.skipUnless(sys.platform == "darwin", "needs macOS lsof")
     def test_macos_stops_detached_process_in_run_but_not_neighbor(self):
