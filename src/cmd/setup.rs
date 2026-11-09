@@ -227,6 +227,7 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
             }
         }
     }
+    choice.dry_run = args.dry_run;
     let budget_before = budget::load(&config);
     let mut records = Vec::new();
     match plan_config(&config, harness, scope, args.uninstall, &choice) {
