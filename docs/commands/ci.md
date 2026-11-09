@@ -106,11 +106,11 @@ The first word of the text result is `PASS`, `FAIL`, or `ERROR` when jactionlint
 
 # jouet ci explain
 
-`jouet ci explain` says whether each failed GitHub Actions job is **flaky**, **infrastructure** or **real**, gives the evidence for that verdict, and reruns only what a rerun can fix. An agent that reruns CI on every red check spends runs on real failures. Worse, it can "fix" a flake by changing code that was never broken. `ci explain` gives it a reason either way.
+`jouet ci explain` says whether each failed GitHub Actions job is **flaky**, **infrastructure** or **real**, gives the evidence for that verdict, and, with `--rerun`, reruns the failed jobs. An agent that reruns CI on every red check without looking can "fix" a flake by changing code that was never broken, or rerun a failure that repeats. `ci explain` gives it the reason either way.
 
 ```text
-jouet ci explain [PR | RUN_URL | JOB_URL] [--repo OWNER/NAME] [--rerun [--force]] [--log-lines N]
-jouet ci explain (--run ID | --job ID) [--repo OWNER/NAME] [--rerun [--force]] [--log-lines N]
+jouet ci explain [PR | RUN_URL | JOB_URL] [--repo OWNER/NAME] [--rerun] [--log-lines N]
+jouet ci explain (--run ID | --job ID) [--repo OWNER/NAME] [--rerun] [--log-lines N]
 ```
 
 It takes the same targets as `jouet wait ci`. A PR is a number, URL, `OWNER/REPO#N` or branch, and defaults to the current branch's PR; for a PR it explains the latest run of each workflow on its head. `--run ID` and `--job ID` name a run or one job, and so does an Actions URL; give only one of these targets. The flags are listed in the [CLI reference](/cli/ci/explain).
@@ -191,9 +191,9 @@ Download-server failures include `Could not download ... (HTTP 502)`, `(HTTP 503
 
 A job that failed only because another one did, such as a `needs:` job that reports the result and has no failure of its own, *follows* that job and gets no verdict. A job whose cancellation completed in or after the second when a failed step ended is also listed as following it, but timing alone does not establish the cause. If no failed step has a timestamp, the job completion time is used. Earlier cancellations, or those without usable timestamps, are examined independently within the log limit, including while a run is in progress.
 
-A test that fails on one OS and passes on another is not taken for a flake: a command, path or tool that behaves differently there fails the same way on every run on that OS. So it is `real`, and `--rerun` refuses it. It is `flaky` only once the same job, or another job on the same OS, has passed on the same commit.
+A test that fails on one OS and passes on another is not taken for a flake: a command, path or tool that behaves differently there fails the same way on every run on that OS. So it is `real`, and a rerun may repeat it. It is `flaky` only once the same job, or another job on the same OS, has passed on the same commit.
 
-`--rerun` also reruns a run that was cancelled before anything failed, such as one GitHub cancelled while it was queued behind another run of the same concurrency group: there is nothing to judge, and a rerun runs it. When a failure's cause was fixed outside the repository, such as a missing secret, an access a registry refused, or an outage, its log still reads as `real` or `unknown`. `--rerun --force` reruns its failed jobs whatever the verdict. A refusal of an `unknown` failure names that command; a refusal of a `real` one does not, since a rerun repeats it.
+`--rerun` also reruns a run that was cancelled before anything failed, such as one GitHub cancelled while it was queued behind another run of the same concurrency group: there is nothing to judge, and a rerun runs it. `--rerun` reruns every failed job whatever its verdict, since a log cannot show that a cause was fixed outside the repository, such as a missing secret, an access a registry refused, or an outage. The report names the jobs that were not a flake or an infrastructure failure, so a rerun of one that repeats is not a surprise. The only refusal is a run still in progress, which GitHub reruns only once it has finished.
 
 ## Entire Gates
 

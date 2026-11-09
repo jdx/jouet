@@ -12,12 +12,12 @@ pub(crate) enum CiCmd {
     /// Run a workflow's jobs here with jactionlint, and show why any failed
     Run(CiRunArgs),
     /// Say whether each failed job is flaky, infrastructure or real, and
-    /// rerun only a flake
+    /// rerun the failed jobs
     Explain(CiExplainArgs),
 }
 
 /// Say whether each failed job is flaky, infrastructure or real, and rerun
-/// only a flake
+/// the failed jobs
 ///
 /// For each failed GitHub Actions job of a PR's latest runs, a run or one
 /// job: the verdict, the evidence for it, the failed step and an excerpt of
@@ -33,8 +33,9 @@ pub(crate) enum CiCmd {
 /// likely an OS difference), or one that fails the same way on the default
 /// branch, which the evidence says is not the change's fault. Anything else is
 /// unknown. A job that failed or was cancelled only because another did is
-/// listed as following it. --rerun reruns the failed jobs when every one is
-/// flaky or infrastructure, and refuses (exit 4) otherwise. A second failure
+/// listed as following it. --rerun reruns every failed job, and says which were not
+/// a flake or infrastructure; it refuses (exit 4) only while the run is
+/// still going. A second failure
 /// on the same commit turns a flake real. Exits 0 when nothing failed or
 /// every failure is flaky or infrastructure, 1 when one is real or unknown,
 /// 3 when the PR, run or job does not exist, 4 when nothing has failed yet
@@ -55,14 +56,9 @@ pub(crate) struct CiExplainArgs {
     /// Explain this one Actions job
     #[usage(long, value_name = "ID")]
     pub(crate) job: Option<u64>,
-    /// Rerun the failed jobs if every one is flaky or infrastructure
+    /// Rerun the failed jobs
     #[usage(long)]
     pub(crate) rerun: bool,
-    /// With --rerun, rerun the failed jobs whatever their verdict, for a
-    /// cause fixed outside the repository: a secret, an access, a registry
-    /// or service outage
-    #[usage(long)]
-    pub(crate) force: bool,
     /// Lines of each failure log to show (default 40; 0 shows the whole
     /// failed step)
     #[usage(long, value_name = "N")]

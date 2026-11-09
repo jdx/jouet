@@ -48,7 +48,7 @@ jouet's own rules are written in the same format as yours. `jouet rule list` sho
 ```output
 $ jouet rule list
 sleep-poll          enabled  deny    builtin  builtin  2026-10-30  A sleep loop around a CI query spends a model turn on every check; `jouet wait ci` blocks until the checks settle.
-ci-rerun            enabled  deny    builtin  builtin  2026-10-31  Rerunning CI blind wastes a run on a real failure; `jouet ci explain` says whether the failure is flaky, infrastructure or real, and reruns only the first two.
+ci-rerun            enabled  deny    builtin  builtin  2026-10-31  Rerunning CI blind hides why it failed; `jouet ci explain` says whether each failure is flaky, infrastructure or real, then reruns the failed jobs.
 scoped-lint         enabled  warn    builtin  builtin  2026-10-30  While iterating, linting the whole project re-reports every file and costs minutes and pages of output; checking only the changed files through hk gives their findings as file:line:rule.
 …
 ```
@@ -108,7 +108,7 @@ disable = ["git-stash", "no-verify"] # "all" turns every rule off
 2. Fill in the examples first: the calls the rule must fire on, and the near misses it must leave alone.
 3. Fill in the matcher and the message.
 4. Run `jouet rule test NAME` until every example passes, and `jouet rule test NAME --replay` to see what the rule would have done to the calls jouet's hooks have already seen.
-5. Make sure a denied call has a way through. The `message` should name something that does what the agent was trying to do, and works in every case the rule fires on. Where a case is left that it cannot handle, such as a run whose cause was fixed outside the repository, the command it names needs an explicit way past the check (`jouet ci explain --rerun --force`), or the rule should only warn. A deny that leaves a correct agent no path is a bug in the rule.
+5. Make sure a denied call has a way through. The `message` should name something that does what the agent was trying to do, and works in every case the rule fires on. Where a case is left that it cannot handle, such as a run whose cause was fixed outside the repository, the command it names needs to handle it, or the rule should only warn. A deny that leaves a correct agent no path is a bug in the rule.
 6. `jouet rule promote NAME` switches it from warn to deny once it passes its examples. `--reason` records why, and `jouet rule log` shows every change made to your rules. Only rules in `~/.config/jouet/rules` can be promoted: built-in rules are part of jouet, and a repository's change through a reviewed PR.
 7. Once it denies, it is yours: the built-in `rule-files` rule stops an agent from changing, moving or deleting it, unless the agent is the session its `author` names. A rule in warn mode stays open to edit.
 
