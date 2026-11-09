@@ -495,17 +495,25 @@ end
 -- third for the caller to classify.
 -- The words of `args` from `from` on, without a `--budget N` or
 -- `--budget=N`: `jouet test` takes one written after `--` as its own.
-local function without_budget(args: { string }, from: number): { string }
+-- Nil when a value is not a plain number: one from a variable
+-- (`--budget $OPTS`) may expand to more words, which go to the command.
+local function without_budget(args: { string }, from: number): { string }?
 	local words: { string } = {}
 	local i = from
 	while i <= #args do
 		local word = args[i]
 		if word == "--budget" then
-			i += 2
-		else
-			if string.sub(word, 1, 9) ~= "--budget=" then
-				table.insert(words, word)
+			if not string.match(args[i + 1] or "", "^%d+$") then
+				return nil
 			end
+			i += 2
+		elseif string.sub(word, 1, 9) == "--budget=" then
+			if not string.match(string.sub(word, 10), "^%d+$") then
+				return nil
+			end
+			i += 1
+		else
+			table.insert(words, word)
 			i += 1
 		end
 	end
@@ -528,6 +536,9 @@ local function jouet_test(args: { string }): (Kind?, Scope, { string }?)
 				return nil, unknown, without_budget(args, i)
 			end
 			local rest = without_budget(args, i)
+			if not rest then
+				return nil, unknown
+			end
 			if sub and #rest > 0 then
 				table.insert(picks, "-- " .. table.concat(rest, " "))
 			end

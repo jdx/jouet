@@ -232,6 +232,10 @@ quiet = [
   # A command the rule does not know is recorded as nothing, as when run
   # directly.
   { command = "jouet test --budget 2000 --cmd -- ./run-tests.sh", exit_code = 0 },
+  # A budget from a variable may expand to more words for the command, so
+  # the run is not known to be the full suite.
+  { command = "jouet test --cmd -- cargo test --workspace --budget $OPTS", exit_code = 0 },
+  { command = "jouet test -- --budget=\"$N\"", exit_code = 0 },
   { command = "./run-tests.sh", exit_code = 0 },
   # A script that failed says nothing of which of its commands did, and
   # one that changes directory ran its checks in a work tree the rule
