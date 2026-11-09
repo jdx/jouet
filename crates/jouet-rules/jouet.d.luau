@@ -47,6 +47,9 @@ export type JouetCommand = {
 	-- The file its standard output is redirected to (`> out.log`, `&> all`),
 	-- as written; nil when there is none.
 	stdout_to: string?,
+	-- Its standard input comes from a redirection: `< file`, a here-document
+	-- or `<<< word`.
+	stdin_redirected: boolean,
 	-- The variable assignments before the program (`RUST_LOG=1 cargo test`),
 	-- which `words` leaves out.
 	env: { string },

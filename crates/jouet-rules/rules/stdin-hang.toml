@@ -1,0 +1,55 @@
+#:schema https://jouet.jdx.dev/schema/rules.json
+[[rule]]
+name = "stdin-hang"
+why = "Claude Code leaves a command's standard input open with nothing on it, so a `cat > FILE` or `python3 -` with no here-document or pipe waits until the call times out, 10 minutes later."
+mode = "deny"
+scope = "builtin"
+author = "builtin"
+created = "2026-11-08"
+# The name alone tells an agent nothing; the denial says what to do.
+primer = false
+# The matchers find `cat` and Python with no file, or with `-`, so a `cat
+# FILE` or a script never starts the VM; the script fires when nothing
+# feeds the standard input they read.
+script = "stdin-hang.luau"
+
+[[rule.match]]
+command = ["cat", "python", "python2", "python3", "python2.*", "python3.*"]
+max_args = 0
+unless_flags = ["-c", "-m"]
+
+[[rule.match]]
+command = ["cat", "python", "python2", "python3", "python2.*", "python3.*"]
+args = "-"
+
+[rule.examples]
+fires = [
+  "cat > /tmp/edit.py 2>/dev/null; jouet edit replace a.rs --old x --new y",
+  "cd work && cat > /tmp/x 2>/dev/null; python3 - <<'E'\nE\ntrue",
+  "cat >> /dev/null; python - <<'E'\nprint(1)\nE",
+  "cat -",
+  "python3 - 2>/dev/null; cat >> a.rs <<'EOF'\nfn a() {}\nEOF",
+  "python3",
+  "python3 -I -",
+]
+quiet = [
+  "cat > a.rs <<'EOF'\nfn a() {}\nEOF",
+  "cat >> notes.md <<< 'one more line'",
+  "cat < in.txt > out.txt",
+  "cat a.rs b.rs > both.rs",
+  "git diff | cat > /tmp/d.patch",
+  "printf 'x' | python3 -",
+  "python3 - <<'EOF'\nprint(1)\nEOF",
+  "python3 -c 'print(1)'",
+  "python3 -m pytest",
+  "python3 script.py",
+  "python3 --version",
+  "python3 -V",
+  "python3 -h",
+  "cat --help",
+  "cat --version",
+  "command -v python3 >/dev/null && echo yes",
+  "command -pv python3",
+  "command -p -v python3",
+  { command = "cat > /tmp/x", harness = "codex" },
+]

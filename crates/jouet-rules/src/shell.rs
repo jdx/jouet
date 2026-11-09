@@ -36,6 +36,9 @@ pub struct Command {
     /// The file its standard output goes to (`> out`, `>> log`, `&> all`)
     /// instead of where it would otherwise go, as written.
     pub stdout_to: Option<String>,
+    /// Its standard input comes from a redirection: `< file`, a
+    /// here-document or `<<< word`.
+    pub stdin_redirected: bool,
     /// It runs inside `$(...)`, whose output becomes part of a word.
     pub captured: bool,
     /// It starts a pipeline negated with `!`, whose status is the opposite
@@ -221,6 +224,16 @@ impl Command {
                 "timeout" => {
                     let rest = skip_options(rest, &["-s", "-k", "--signal", "--kill-after"], false);
                     rest.get(1..).unwrap_or_default()
+                }
+                // `command -v git`, `-pv` or `-p -V` looks the program up
+                // and runs nothing.
+                "command"
+                    if rest
+                        .iter()
+                        .take_while(|a| a.starts_with('-') && *a != "--")
+                        .any(|a| a.contains(['v', 'V'])) =>
+                {
+                    return (via, w);
                 }
                 "command" | "exec" | "nohup" | "time" | "rtk" => skip_options(rest, &[], false),
                 "mise" if matches!(rest.first().map(String::as_str), Some("x" | "exec")) => {
@@ -556,6 +569,10 @@ impl Parser {
                     let stdout = fd.as_deref().is_none_or(|fd| fd == "1");
                     if stdout && op.starts_with('>') && !op.ends_with('&') {
                         b.stdout_target = true;
+                    }
+                    let stdin = fd.as_deref().is_none_or(|fd| fd == "0");
+                    if stdin && op.starts_with('<') {
+                        b.current.stdin_redirected = true;
                     }
                 }
                 '$' => {
@@ -1117,6 +1134,26 @@ mod tests {
         assert_eq!(argv[2], ["cargo", "test"]);
     }
 
+    #[test]
+    fn command_v_runs_nothing() {
+        let script = parse("command -v python3; command -V git; command git status");
+        let argv: Vec<&[String]> = script.commands.iter().map(Command::argv).collect();
+        assert_eq!(argv[0], ["command", "-v", "python3"]);
+        assert_eq!(argv[1], ["command", "-V", "git"]);
+        assert_eq!(argv[2], ["git", "status"]);
+    }
+
+    #[test]
+    fn redirected_input_is_noted() {
+        let script =
+            parse("cat < a; cat <<E\nx\nE\ncat <<< w; cat 0<a; cat 2<a; cat > out; cat a | wc -l");
+        let redirected: Vec<bool> = script.commands.iter().map(|c| c.stdin_redirected).collect();
+        assert_eq!(
+            redirected,
+            [true, true, true, true, false, false, false, false]
+        );
+    }
+
     fn ops(script: &str) -> Vec<Option<Op>> {
         parse(script).commands.iter().map(|c| c.op).collect()
     }
@@ -1169,6 +1206,7 @@ mod tests {
             ["diff", "<(git show HEAD:a)", "<(ls -a)"]
         );
         assert_eq!(script.commands[0].stdout_to.as_deref(), Some("out"));
+        assert!(!script.commands[0].stdin_redirected);
         let nested: Vec<&[String]> = script.nested.iter().map(|c| &c.words[..]).collect();
         assert_eq!(nested, [&["git", "show", "HEAD:a"][..], &["ls", "-a"][..]]);
         assert!(script.nested.iter().all(|c| c.captured));

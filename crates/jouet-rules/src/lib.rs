@@ -66,6 +66,7 @@ const BUILTIN: &[(&str, &str)] = &[
     ),
     ("python-edit", include_str!("../rules/python-edit.toml")),
     ("sed-line-edit", include_str!("../rules/sed-line-edit.toml")),
+    ("stdin-hang", include_str!("../rules/stdin-hang.toml")),
     ("git-add-all", include_str!("../rules/git-add-all.toml")),
     ("git-stash", include_str!("../rules/git-stash.toml")),
     ("no-verify", include_str!("../rules/no-verify.toml")),
@@ -129,6 +130,7 @@ const BUILTIN: &[(&str, &str)] = &[
 
 /// The scripts built-in rules name.
 const BUILTIN_SCRIPTS: &[(&str, &str)] = &[
+    ("stdin-hang.luau", include_str!("../rules/stdin-hang.luau")),
     (
         "sed-line-edit.luau",
         include_str!("../rules/sed-line-edit.luau"),
@@ -1970,6 +1972,7 @@ fn command_table(
         }),
     )?;
     t.set("stdout_to", command.stdout_to.as_deref())?;
+    t.set("stdin_redirected", command.stdin_redirected)?;
     t.set("env", command.env.clone())?;
     t.set("nested", nested)?;
     t.set("status", status)?;
