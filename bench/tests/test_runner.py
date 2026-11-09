@@ -2118,6 +2118,7 @@ class ReportTest(unittest.TestCase):
             summary = report.summarize([record("codex", "plain"), record("codex", arm)], {})
             self.assertIn("codex_stop_gate_unverified", summary["cells"][0]["limitations"])
             self.assertIn("Codex stop-gate coverage is not independently verified", report.markdown(summary))
+            self.assertIn("the stop hook received no transcript", report.markdown(summary))
 
         for records in ([record("codex", "plain")], [record("claude", "jouet")]):
             summary = report.summarize(records, {})
