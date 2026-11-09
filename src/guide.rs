@@ -824,6 +824,19 @@ fn usage_block(out: &mut String, usage: &Usage) {
     for (line, what) in usage.lines {
         let _ = writeln!(out, "  {line}  # {what}");
     }
+    if usage.command == "edit" {
+        out.push_str(
+            "patch on stdin (quoted to preserve text):\n\
+             jouet edit <<'PATCH'\n\
+             *** Begin Patch\n\
+             *** Update File: example.txt\n\
+             @@\n\
+             -old line\n\
+             +new line\n\
+             *** End Patch\n\
+             PATCH\n",
+        );
+    }
 }
 
 fn subcommands(out: &mut String, name: &str, meta: &CommandMeta<'_>) {

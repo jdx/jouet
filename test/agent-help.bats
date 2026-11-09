@@ -59,3 +59,22 @@ setup() {
 	assert_success
 	assert [ "$(jq -r 'has("usage")' <<<"$output")" = false ]
 }
+
+@test "the edit-help patch example can be run in both guides" {
+	cd "$BATS_TEST_TMPDIR"
+	local example variant
+	for variant in short full; do
+		printf 'old line\n' >example.txt
+		if [[ $variant == full ]]; then
+			run --separate-stderr jouet agent-help edit --full
+		else
+			run --separate-stderr jouet agent-help edit
+		fi
+		assert_success
+		example=$(awk '/^jouet edit <<.PATCH./ { printing = 1 } printing { print } printing && /^PATCH$/ { exit }' <<<"$output")
+		assert [ -n "$example" ]
+		run --separate-stderr bash -c "$example"
+		assert_success
+		assert_content example.txt $'new line\n'
+	done
+}
