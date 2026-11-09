@@ -129,11 +129,15 @@ impl Fake {
 }
 
 fn run_json(id: u64, name: &str, status: &str, conclusion: Option<&str>) -> Value {
-    json!({
+    let mut run = json!({
         "id": id, "node_id": format!("check-{id}"), "name": name, "status": status, "conclusion": conclusion,
         "html_url": format!("https://github.com/jdx/demo/actions/runs/900/job/{id}"),
         "app": { "slug": "github-actions" },
-    })
+    });
+    if name == "Entire Gates" {
+        run["output"] = json!({"summary": "- ❌ **Checks**: failed — CI checks have not passed"});
+    }
+    run
 }
 
 fn job_json(id: u64, name: &str, status: &str, conclusion: Option<&str>) -> Value {
@@ -492,6 +496,63 @@ fn handle(fake: &Fake) -> Arc<Mutex<World>> {
 }
 
 const CI: [&str; 6] = ["wait", "ci", "7", "--repo", "jdx/demo", "--interval"];
+
+#[test]
+fn ci_does_not_pass_while_only_the_checks_gate_reports_a_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut world = World::default();
+    world.checks.insert(
+        SHA_A,
+        vec![
+            check(1, "lint", "completed", Some("success")),
+            check(2, "Entire Gates", "completed", Some("failure")),
+        ],
+    );
+    let fake = serve(world);
+    let out = jouet(
+        &fake,
+        dir.path(),
+        &[&CI[..], &["100ms", "--timeout", "0s", "--all", "--json"]].concat(),
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(124),
+        "{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
+    assert_eq!(json_doc(&out)["result"], "timeout");
+    assert!(
+        json_doc(&out)["message"]
+            .as_str()
+            .unwrap()
+            .contains("no failing or pending check is visible")
+    );
+
+    fake.set(|world| {
+        world.checks.insert(
+            SHA_A,
+            vec![
+                check(1, "lint", "completed", Some("success")),
+                check(2, "Entire Gates", "completed", Some("success")),
+            ],
+        );
+    });
+    let fresh = tempfile::tempdir().unwrap();
+    let out = jouet(
+        &fake,
+        fresh.path(),
+        &[&CI[..], &["100ms", "--timeout", "0s", "--all", "--json"]].concat(),
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
+    assert_eq!(json_doc(&out)["result"], "success");
+}
 
 #[test]
 fn ci_ignores_a_superseded_cancelled_workflow_check() {

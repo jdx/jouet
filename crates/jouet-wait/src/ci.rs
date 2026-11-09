@@ -17,6 +17,9 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+const UNCONFIRMED_CHECKS: &str =
+    "Entire Gates says CI has not passed, but no failing or pending check is visible";
+
 pub struct Options {
     pub selection: Selection,
     pub all: bool,
@@ -235,6 +238,29 @@ fn event_name(name: &str) -> Option<&'static str> {
     .find(|n| *n == name)
 }
 
+/// A failed checks gate with no visible failing or pending check can be stale
+/// while a rerun registers its jobs. For an unfiltered wait it is not evidence
+/// that CI passed; filtered waits may intentionally exclude its cause.
+fn verdict(selection: &Selection, selected: &[Check], all: bool) -> Verdict {
+    let result = checks::verdict(selected, all);
+    if result == Verdict::Success
+        && !selection.required
+        && (selection.include.is_empty() || selection.include.iter().any(|glob| glob == "*"))
+        && selection.exclude.is_empty()
+        && selected.iter().any(|check| {
+            check.derived()
+                && check
+                    .entire
+                    .as_ref()
+                    .is_some_and(|gates| gates.fails("checks"))
+        })
+    {
+        Verdict::Pending
+    } else {
+        result
+    }
+}
+
 impl Watch for CiWait {
     type Doc = Doc;
 
@@ -296,25 +322,37 @@ impl Watch for CiWait {
                 short(&sha)
             )));
         }
-        Ok(match checks::verdict(&selected, self.options.all) {
-            Verdict::Success => Poll::Done(self.doc("success", selected, None)),
-            Verdict::Failure => {
-                let mut selected = selected;
-                if let Some(lines) = self.options.log_lines {
-                    remote.ci().attach_logs(&self.repo, &mut selected, lines);
+        Ok(
+            match verdict(&self.options.selection, &selected, self.options.all) {
+                Verdict::Success => Poll::Done(self.doc("success", selected, None)),
+                Verdict::Failure => {
+                    let mut selected = selected;
+                    if let Some(lines) = self.options.log_lines {
+                        remote.ci().attach_logs(&self.repo, &mut selected, lines);
+                    }
+                    // jactionlint runs GitHub Actions workflows only.
+                    if self.options.local_runner && self.repo.host.is_none() {
+                        checks::suggest_local(&mut selected, None);
+                    }
+                    Poll::Done(self.doc("failure", selected, None))
                 }
-                // jactionlint runs GitHub Actions workflows only.
-                if self.options.local_runner && self.repo.host.is_none() {
-                    checks::suggest_local(&mut selected, None);
+                Verdict::Pending
+                    if checks::verdict(&selected, self.options.all) == Verdict::Success =>
+                {
+                    Poll::Pending("waiting for Entire Gates to confirm CI checks".into())
                 }
-                Poll::Done(self.doc("failure", selected, None))
-            }
-            Verdict::Pending => Poll::Pending(Counts::of(&selected).summary()),
-        })
+                Verdict::Pending => Poll::Pending(Counts::of(&selected).summary()),
+            },
+        )
     }
 
     fn timed_out(&mut self, _remote: &mut Remote) -> Doc {
-        self.doc("timeout", self.selected(&self.last), None)
+        let selected = self.selected(&self.last);
+        let message = (verdict(&self.options.selection, &selected, self.options.all)
+            == Verdict::Pending
+            && checks::verdict(&selected, self.options.all) == Verdict::Success)
+            .then(|| UNCONFIRMED_CHECKS.into());
+        self.doc("timeout", selected, message)
     }
 
     fn text(&self, doc: &Doc, reporter: &Reporter) -> String {
@@ -379,6 +417,8 @@ fn entire_lines(doc: &Doc) -> String {
                 let others = doc.checks.iter().any(|o| o.state.failed() && !o.derived());
                 out.push_str(if others {
                     "  the failed checks above are the cause\n"
+                } else if doc.message.as_deref() == Some(UNCONFIRMED_CHECKS) {
+                    "  the gate may be stale, or a check may not have appeared yet\n"
                 } else {
                     "  the failing checks are not among those waited for here\n"
                 });
@@ -475,4 +515,67 @@ fn attach_log(
     check.log_truncated = excerpt.truncated;
     check.log_path = Some(path.display().to_string());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::checks::State;
+
+    fn gates(summary: &str) -> Check {
+        Check::from_check_run(&json!({
+            "name": "Entire Gates",
+            "status": "completed",
+            "conclusion": "failure",
+            "output": {"summary": summary}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn an_unfiltered_wait_does_not_pass_when_checks_gate_disagrees() {
+        let checks_gate = gates("- ❌ **Checks**: failed — CI checks have not passed");
+        let passed = Check::new("lint".into(), State::Pass);
+        let unfiltered = Selection::default();
+        assert_eq!(
+            verdict(&unfiltered, &[checks_gate.clone(), passed.clone()], true),
+            Verdict::Pending
+        );
+
+        // An explicit selection can exclude the failure the gate describes.
+        let filtered = Selection {
+            include: vec!["Entire*".into()],
+            ..Selection::default()
+        };
+        assert_eq!(
+            verdict(&filtered, &[checks_gate.clone(), passed.clone()], true),
+            Verdict::Success
+        );
+        let all_names = Selection {
+            include: vec!["*".into()],
+            ..Selection::default()
+        };
+        assert_eq!(
+            verdict(&all_names, &[checks_gate.clone(), passed.clone()], true),
+            Verdict::Pending
+        );
+
+        let failed = Check::new("test".into(), State::Fail);
+        assert_eq!(
+            verdict(&unfiltered, &[checks_gate.clone(), failed], true),
+            Verdict::Failure
+        );
+        let pending = Check::new("test".into(), State::Pending);
+        assert_eq!(
+            verdict(&unfiltered, &[checks_gate, pending], true),
+            Verdict::Pending
+        );
+
+        // An out-of-date branch alone is not a CI check failure.
+        let behind = gates("- ❌ **Up to date**: failed — branch is behind");
+        assert_eq!(
+            verdict(&unfiltered, &[behind, passed], true),
+            Verdict::Success
+        );
+    }
 }

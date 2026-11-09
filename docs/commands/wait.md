@@ -88,6 +88,8 @@ The first word of the text result is `PASS`, `FAIL`, `PENDING` (on timeout), `CO
 
 An [Entire Gates](/entire-gates) check is derived, rather than a failure of CI, when it fails only because other checks failed, because the branch is behind or conflicting with its base, or because the trail still waits for an approval. A derived failure does not end the wait, so a rerun of the real failures is waited for rather than cut short by the old gate result. It is counted as `derived`, gets no `FAIL` block, and a closing line points at the real cause:
 
+For an unfiltered wait, if the checks gate says CI has not passed but no failed or running check is visible, jouet keeps waiting for the gate to update instead of reporting a pass. This can occur while a rerun's jobs are registering; a stale gate can therefore make the wait time out. A filtered wait can intentionally exclude the check the gate refers to and does not wait on it.
+
 ```text
 FAIL jdx/mise#15220 @ e96d4ee  52 pass, 1 fail, 31 skipped, 0 pending, 1 derived  (3s)
 
