@@ -456,6 +456,13 @@ Diff in /w/src/a.rs at line 4:",
             &lines("curl: (22) The requested URL returned error: 404"),
         );
         assert_eq!(missing_curl.infrastructure(), None);
+
+        // curl's exit 22 alone does not say which HTTP status it received.
+        let unspecified = Signature::of(
+            None,
+            &lines("Download failed: The process '/usr/bin/curl' failed with exit code 22."),
+        );
+        assert_eq!(unspecified.infrastructure(), None);
     }
 
     #[test]
