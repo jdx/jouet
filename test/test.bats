@@ -245,7 +245,20 @@ npm_install() {
 	[[ -x "$dir/node_modules/.bin/$1" ]] && return 0
 	mkdir -p "$dir"
 	cp "$FIXTURES/$1/package.json" "$dir/"
-	(cd "$dir" && npm install --no-audit --no-fund --silent >/dev/null 2>&1)
+	(cd "$dir" && npm install --no-audit --no-fund --loglevel=error)
+}
+
+@test "a failed npm fixture install reports its error" {
+	DEPS="$BATS_TEST_TMPDIR/npm-deps"
+	cat >"$BATS_TEST_TMPDIR/bin/npm" <<'SH'
+#!/bin/sh
+echo 'fixture registry unavailable' >&2
+exit 1
+SH
+	chmod +x "$BATS_TEST_TMPDIR/bin/npm"
+	run --separate-stderr npm_install jest
+	assert_failure
+	assert_equal "$stderr" 'fixture registry unavailable'
 }
 
 # A virtualenv NAME with pytest, plus the packages given.
