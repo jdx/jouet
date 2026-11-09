@@ -90,6 +90,53 @@ fn jouet_test_saves_the_output_it_cut_counted_once() {
             .input_tokens,
         Some(0)
     );
+    let after = [AfterSetup {
+        harness: "claude".into(),
+        requests: 0,
+        primer_tokens: 0,
+    }];
+    let measured_costs = costs(&m, &[baseline(100_000)], &after);
+    let extra = measured_costs
+        .iter()
+        .find(|cost| cost.kind.label() == "extra jouet test output" && cost.input_tokens.is_some())
+        .expect("larger output must be priced as a cost");
+    assert_eq!((extra.count, extra.input_tokens), (2, Some(500)));
+    assert_eq!(
+        net(&e, &measured_costs),
+        None,
+        "unrecorded output remains unknown"
+    );
+    let complete = measure(&entries[..2], &StatsFilter::default());
+    let complete_estimates = estimate(&complete, &[baseline(100_000)]);
+    let complete_costs = costs(&complete, &[baseline(100_000)], &after);
+    assert_eq!(net(&complete_estimates, &complete_costs), Some(-500));
+    assert!(
+        costs(&complete, &[baseline(2_000_000)], &after)
+            .iter()
+            .all(|cost| cost.kind.label() != "extra jouet test output")
+    );
+    let missing = costs(&complete, &[baseline(0)], &after);
+    assert!(
+        missing
+            .iter()
+            .any(|cost| cost.kind.label() == "extra jouet test output" && cost.refused.is_some())
+    );
+    assert_eq!(net(&estimate(&complete, &[baseline(0)]), &missing), None);
+    let no_output = measure(&[post("jouet test --affected", 0)], &StatsFilter::default());
+    let no_output_costs = costs(&no_output, &[baseline(100_000)], &after);
+    assert_eq!(
+        net(
+            &estimate(&no_output, &[baseline(100_000)]),
+            &no_output_costs
+        ),
+        None
+    );
+    let mut sparse = baseline(100_000);
+    sparse.kinds[0].runs = MIN_BASELINE_RUNS - 1;
+    let sparse_costs = costs(&complete, &[sparse.clone()], &after);
+    assert_eq!(net(&estimate(&complete, &[sparse]), &sparse_costs), None);
+    let no_baseline = costs(&complete, &[], &after);
+    assert!(no_baseline.iter().all(|cost| cost.outside_net));
 }
 
 #[test]

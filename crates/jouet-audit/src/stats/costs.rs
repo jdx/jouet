@@ -3,7 +3,8 @@
 //! setup, and the primer's tokens on every request after it.
 
 use super::{
-    Baseline, Estimate, Kind, MIN_BASELINE_RUNS, Measured, count_text, ratio, tokens_text,
+    BYTES_PER_TOKEN, Baseline, Estimate, Kind, MIN_BASELINE_RUNS, Measured, count_text, ratio,
+    tokens_text,
 };
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -24,6 +25,8 @@ pub enum CostKind {
     FailedRuns,
     /// `jouet edit` failures beyond the rate edits failed at before setup.
     EditFailures,
+    /// Extra output from `jouet test`, against the baseline average.
+    TestOutput,
     /// The session-start primer, read again by every request.
     Primer,
     /// Rule warnings, counted but not priced.
@@ -39,6 +42,7 @@ impl CostKind {
             Self::Denials => "calls a rule denied",
             Self::FailedRuns => "failed jouet runs",
             Self::EditFailures => "jouet edit failures beyond the rate before setup",
+            Self::TestOutput => "extra jouet test output",
             Self::Primer => "requests carrying the session-start primer",
             Self::Warnings => "rule warnings",
         }
@@ -97,7 +101,7 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
             measured
                 .commands
                 .iter()
-                .filter(|c| Kind::of(&c.command) == Some(Kind::Edit))
+                .filter(|c| matches!(Kind::of(&c.command), Some(Kind::Edit | Kind::Test)))
                 .map(|c| c.harness.as_str()),
         )
         .collect();
@@ -196,6 +200,7 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
         if let Some(edit) = edit_cost(measured, baseline, harness, &priced) {
             out.push(edit);
         }
+        out.extend(test_output_cost(measured, baseline, harness));
         match after.iter().find(|a| a.harness == harness) {
             Some(a) if a.primer_tokens == 0 => {}
             Some(a) => out.push(Cost {
@@ -230,6 +235,70 @@ pub fn costs(measured: &Measured, baselines: &[Baseline], after: &[AfterSetup]) 
         }
     }
     out
+}
+
+/// Extra test output compared with the pre-setup average, counted once.
+fn test_output_cost(measured: &Measured, baseline: Option<&Baseline>, harness: &str) -> Vec<Cost> {
+    let (runs, calls, bytes) = measured
+        .commands
+        .iter()
+        .filter(|command| {
+            command.harness == harness && Kind::of(&command.command) == Some(Kind::Test)
+        })
+        .fold((0, 0, 0), |(runs, calls, bytes), command| {
+            (
+                runs + command.runs,
+                calls + command.output_calls,
+                bytes + command.output_bytes,
+            )
+        });
+    if runs == 0 {
+        return Vec::new();
+    }
+    let refuse = |count, reason: String| Cost {
+        harness: harness.to_string(),
+        kind: CostKind::TestOutput,
+        count,
+        input_tokens: None,
+        basis: String::new(),
+        refused: Some(reason),
+        outside_net: false,
+    };
+    let Some(before) = baseline.and_then(|b| b.kinds.iter().find(|kind| kind.kind == Kind::Test))
+    else {
+        return vec![refuse(runs, "no test output baseline before setup".into())];
+    };
+    if before.runs < MIN_BASELINE_RUNS || before.calls == 0 || before.output_bytes == 0 {
+        return vec![refuse(
+            runs,
+            "too little pre-setup test output evidence; rescan or collect a baseline".into(),
+        )];
+    }
+    let mut result = Vec::new();
+    if calls < runs {
+        result.push(refuse(
+            runs - calls,
+            "test output size was not recorded for these runs".into(),
+        ));
+    }
+    if calls == 0 {
+        return result;
+    }
+    let old = ratio(before.output_bytes, before.calls);
+    let new = ratio(bytes, calls);
+    let extra = (new - old).max(0.0);
+    if extra > 0.0 {
+        result.push(Cost {
+        harness: harness.to_string(),
+        kind: CostKind::TestOutput,
+        count: calls,
+        input_tokens: Some((calls as f64 * extra / BYTES_PER_TOKEN).round() as u64),
+        basis: format!("{} calls before setup gave the agent {} bytes of output on average; jouet test gave {} over the {} calls that recorded it, at {BYTES_PER_TOKEN} bytes a token, counted once", count_text(before.calls), count_text(old.round() as u64), count_text(new.round() as u64), count_text(calls)),
+        refused: None,
+        outside_net: false,
+        });
+    }
+    result
 }
 
 /// `jouet edit` failures beyond the rate edits failed at before setup, or
