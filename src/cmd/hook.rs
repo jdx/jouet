@@ -977,7 +977,8 @@ fn record(payload: &Value, call: &Call, records: &[Record]) -> Option<Ran> {
         .cloned()
         .map(|mut record| {
             if let Some(at) = run_dir(cwd.as_deref(), record.dir.as_deref()) {
-                verify::widen_hk_files(&mut record, &at, TREE_TIMEOUT);
+                let script = call.command.as_deref().unwrap_or_default();
+                verify::widen_hk_files(&mut record, &at, script, TREE_TIMEOUT);
             }
             record
         })

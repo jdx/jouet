@@ -52,6 +52,11 @@ pub struct Command {
 pub struct Script {
     pub commands: Vec<Command>,
     pub nested: Vec<Command>,
+    /// The top-level assignments that set a variable for the rest of the
+    /// script, in order, as written after quote removal: those that stand
+    /// alone (`S=/tmp/x;`), which run nothing, so `commands` leaves them out,
+    /// and those an `export` makes, whose command `commands` keeps.
+    pub assigned: Vec<String>,
 }
 
 impl Script {
@@ -182,11 +187,13 @@ pub fn parse(script: &str) -> Script {
         chars: script.chars().collect(),
         pos: 0,
         nested: Vec::new(),
+        assigned: Vec::new(),
     };
     let commands = parser.list(false);
     Script {
         commands,
         nested: parser.nested,
+        assigned: parser.assigned,
     }
 }
 
@@ -330,6 +337,7 @@ struct Parser {
     chars: Vec<char>,
     pos: usize,
     nested: Vec<Command>,
+    assigned: Vec<String>,
 }
 
 /// A here-document waiting for the next newline: its delimiter, whether `<<-`
@@ -354,6 +362,8 @@ struct Builder {
     /// The last command is followed by `&&` or `||`, and nothing but variable
     /// assignments has come since.
     chained: bool,
+    /// The assignments that stood alone, in order.
+    assigned: Vec<String>,
 }
 
 impl Builder {
@@ -404,6 +414,7 @@ impl Builder {
             return;
         }
         if command.words.is_empty() && !command.env.is_empty() {
+            self.assigned.append(&mut command.env);
             // `a && X=1; b`: the assignment ends `a`'s chain, so the operator
             // after it, not `&&`, is what comes between `a` and `b`.
             if self.chained
@@ -424,6 +435,10 @@ impl Builder {
                 last.op = Some(op);
             }
             return;
+        }
+        if command.words.first().is_some_and(|w| w == "export") {
+            let set = command.words[1..].iter().filter(|w| is_assignment(w));
+            self.assigned.extend(set.cloned());
         }
         self.chained = matches!(op, Some(Op::And | Op::Or));
         self.commands.push(command);
@@ -464,6 +479,7 @@ impl Parser {
             heredoc: None,
             pending: Vec::new(),
             chained: false,
+            assigned: Vec::new(),
         };
         while let Some(c) = self.peek() {
             self.pos += 1;
@@ -585,6 +601,9 @@ impl Parser {
         b.end_word();
         self.read_heredocs(&mut b);
         b.end_command(None);
+        if !in_subst {
+            self.assigned = b.assigned;
+        }
         b.commands
     }
 
@@ -874,6 +893,16 @@ mod tests {
             words("cargo test >out.txt 2>&1 < /dev/null &>> all.log"),
             [vec!["cargo", "test"]]
         );
+    }
+
+    #[test]
+    fn assignments_that_stand_alone_are_kept_apart() {
+        let script = parse("S=/tmp/x && A='a b'; RUST_LOG=1 cargo test $(T=1; echo)");
+        assert_eq!(script.assigned, ["S=/tmp/x", "A=a b"]);
+        assert_eq!(script.commands.len(), 1);
+        let script = parse("export S=/a; S=/b; export -n T U=/c");
+        assert_eq!(script.assigned, ["S=/a", "S=/b", "U=/c"]);
+        assert_eq!(script.commands.len(), 2);
     }
 
     #[test]

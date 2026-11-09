@@ -1308,9 +1308,11 @@ const MAX_FILE_LIST: u64 = 1 << 20;
 /// Records an hk check of an explicit file list (`files a b`, or
 /// `files0-from LIST`) that ran in `dir` as a check of the changed files
 /// when the list names every file changed in the work tree, which is what
-/// hk without files would have checked. A list it cannot read, or a work
-/// tree it cannot read, leaves the run partial.
-pub(crate) fn widen_hk_files(record: &mut Record, dir: &Path, timeout: Duration) {
+/// hk without files would have checked. `script` is the whole shell command
+/// the check ran in, whose assignments name the list (`S=/tmp/x; hk check
+/// --files0-from $S/files`). A list it cannot read, or a work tree it cannot
+/// read, leaves the run partial.
+pub(crate) fn widen_hk_files(record: &mut Record, dir: &Path, script: &str, timeout: Duration) {
     // With `--cd`, hk reads the list from another directory.
     let moved = record
         .command
@@ -1322,20 +1324,25 @@ pub(crate) fn widen_hk_files(record: &mut Record, dir: &Path, timeout: Duration)
     let Some(selector) = record.selector.as_deref() else {
         return;
     };
-    if listed_cover_changes(selector, dir, timeout) == Some(true) {
+    if listed_cover_changes(selector, dir, &assigned_vars(script), timeout) == Some(true) {
         record.selector = Some("changed files".into());
     }
 }
 
 /// Whether the files `selector` lists from `dir` include every file changed
 /// in the work tree there; None when it lists nothing readable.
-fn listed_cover_changes(selector: &str, dir: &Path, timeout: Duration) -> Option<bool> {
+fn listed_cover_changes(
+    selector: &str,
+    dir: &Path,
+    vars: &[(String, String)],
+    timeout: Duration,
+) -> Option<bool> {
     let dir = dir.canonicalize().ok()?;
     let root = PathBuf::from(root_of(&dir));
     if root.as_os_str().is_empty() {
         return None;
     }
-    let listed: BTreeSet<String> = listed_files(selector, &dir)?
+    let listed: BTreeSet<String> = listed_files(selector, &dir, vars)?
         .iter()
         .filter_map(|file| relative_to(&root, &dir.join(file)))
         .collect();
@@ -1346,8 +1353,8 @@ fn listed_cover_changes(selector: &str, dir: &Path, timeout: Duration) -> Option
 /// The files an hk selector names, as given: `files a b` with nothing that
 /// narrows it, or the NUL-separated list in `files0-from LIST`, which
 /// counts itself so that a list kept in the work tree is not a file left
-/// unchecked.
-fn listed_files(selector: &str, dir: &Path) -> Option<Vec<String>> {
+/// unchecked. A `$NAME` in the list's path takes its value from `vars`.
+fn listed_files(selector: &str, dir: &Path, vars: &[(String, String)]) -> Option<Vec<String>> {
     if let Some(files) = selector.strip_prefix("files ") {
         let files: Vec<String> = files.split_whitespace().map(str::to_string).collect();
         let narrowed = files
@@ -1359,6 +1366,7 @@ fn listed_files(selector: &str, dir: &Path) -> Option<Vec<String>> {
     if list.contains(" -") {
         return None;
     }
+    let list = &expand_vars(list, vars)?;
     let path = dir.join(list);
     if std::fs::metadata(&path).ok()?.len() > MAX_FILE_LIST {
         return None;
@@ -1371,6 +1379,57 @@ fn listed_files(selector: &str, dir: &Path) -> Option<Vec<String>> {
         .collect();
     files.push(list.to_string());
     Some(files)
+}
+
+/// The values a script gives shell variables for its later commands: its
+/// assignments that stand alone (`S=/tmp/x;`) and its `export`s, the later
+/// one winning, then those of the scripts it gives `sh -c` and the like,
+/// which is where an hk check run that way reads them. An assignment before
+/// a program (`S=x cmd`) lasts for that program only, so it is not one.
+fn assigned_vars(script: &str) -> Vec<(String, String)> {
+    fn collect(script: &jouet_rules::shell::Script, vars: &mut Vec<(String, String)>) {
+        for word in &script.assigned {
+            if let Some((name, value)) = word.split_once('=') {
+                vars.retain(|(n, _)| n != name);
+                vars.push((name.to_string(), value.to_string()));
+            }
+        }
+        for inner in script.inner_scripts() {
+            collect(&inner, vars);
+        }
+    }
+    let mut vars = Vec::new();
+    collect(&jouet_rules::shell::parse(script), &mut vars);
+    vars
+}
+
+/// `word` with each `$NAME` and `${NAME}` replaced by its value in `vars`;
+/// None when it reads one `vars` does not have, or a value that itself
+/// reads another.
+fn expand_vars(word: &str, vars: &[(String, String)]) -> Option<String> {
+    let mut out = String::new();
+    let mut rest = word;
+    while let Some(at) = rest.find('$') {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 1..];
+        let (name, tail) = match after.strip_prefix('{') {
+            Some(braced) => braced.split_once('}')?,
+            None => {
+                let end = after
+                    .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                    .unwrap_or(after.len());
+                (&after[..end], &after[end..])
+            }
+        };
+        let value = vars.iter().find(|(n, _)| n == name).map(|(_, v)| v)?;
+        if value.contains('$') {
+            return None;
+        }
+        out.push_str(value);
+        rest = tail;
+    }
+    out.push_str(rest);
+    Some(out)
 }
 
 /// `path` relative to `root`, `/`-separated, with `.` and `..` resolved by
@@ -4703,7 +4762,7 @@ mod hk_file_list_tests {
             dir: None,
             selector: Some(selector.into()),
         };
-        widen_hk_files(&mut record, dir, Duration::from_secs(10));
+        widen_hk_files(&mut record, dir, command, Duration::from_secs(10));
         record.selector
     }
 
@@ -4788,6 +4847,73 @@ mod hk_file_list_tests {
             widened("hk check --cd src src/a.rs new.rs", &selector, repo.path()),
             Some(selector)
         );
+    }
+
+    #[test]
+    fn a_file_list_named_through_a_shell_variable_is_read() {
+        let repo = repo();
+        let scratch = tempfile::tempdir().unwrap();
+        std::fs::write(scratch.path().join("files0"), "src/a.rs\0new.rs\0").unwrap();
+        let dir = scratch.path().display();
+        // The hook sees the variable as written, before the shell expands it.
+        let selector = "files0-from $S/files0";
+        let script = |set: &str| {
+            format!(
+                "{set} && git diff > x; jouet test --cmd -- hk run check --files0-from $S/files0"
+            )
+        };
+        let changed = Some("changed files".to_string());
+        for set in [
+            format!("S={dir}"),
+            format!("export S={dir}"),
+            format!("S='{dir}'"),
+        ] {
+            assert_eq!(
+                widened(&script(&set), selector, repo.path()),
+                changed,
+                "{set}"
+            );
+        }
+        assert_eq!(
+            widened(
+                &script(&format!("S={dir}")),
+                "files0-from ${S}/files0",
+                repo.path()
+            ),
+            changed
+        );
+        // The later of an export and an assignment wins, and a script given
+        // to `bash -c` sets the variables its hk check reads.
+        for (command, set) in [
+            (
+                format!("export S={dir}; S=/nowhere; hk run check --files0-from $S/files0"),
+                false,
+            ),
+            (
+                format!("S=/nowhere; export S={dir}; hk run check --files0-from $S/files0"),
+                true,
+            ),
+            (
+                format!("bash -c 'S={dir} && hk run check --files0-from $S/files0'"),
+                true,
+            ),
+        ] {
+            let want = if set {
+                &changed
+            } else {
+                &Some(selector.to_string())
+            };
+            assert_eq!(&widened(&command, selector, repo.path()), want, "{command}");
+        }
+        // An assignment before a program lasts for that program only, and
+        // one the script does not make leaves the list unread.
+        for set in [format!("S={dir} true"), "T=1".to_string()] {
+            assert_eq!(
+                widened(&script(&set), selector, repo.path()),
+                Some(selector.to_string()),
+                "{set}"
+            );
+        }
     }
 
     #[test]
