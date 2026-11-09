@@ -2336,10 +2336,11 @@ class CostSeedTest(unittest.TestCase):
                 'mkdir -p "$HOME/.local/state/jouet/logs"\n'
                 'echo seed-log > "$HOME/.local/state/jouet/logs/check.log"\n'
                 'if [ ! -d locked ]; then mkdir locked && touch locked/file && chmod 200 locked; fi\n'
-                "shift 3\n"
+                "shift 4\n"
                 "line=$(printf '{\"cmd\":\"%s\"}' \"$*\")\n"
                 "old=$(git notes --ref jouet-cost show HEAD 2>/dev/null)\n"
                 'git notes --ref jouet-cost add -f -m "$(printf "%s\\n%s" "$old" "$line" | sed /^$/d)" HEAD\n'
+                "printf '{\"ok\":true,\"suites\":[{}]}\\n'\n"
             )
             stand_in.chmod(0o755)
             os.environ["XDG_CACHE_HOME"] = str(root / "cache")
@@ -2358,13 +2359,22 @@ class CostSeedTest(unittest.TestCase):
             )
             # Timed once: the second call read the cache.
             self.assertEqual(
-                calls.read_text().splitlines(), ["test --cmd -- cargo build", "test --cmd -- cargo test -p a"]
+                calls.read_text().splitlines(), ["test --json --cmd -- cargo build", "test --json --cmd -- cargo test -p a"]
             )
 
             run = root / "run"
             shas = tasks.prepare(task, run)
             costs.apply(run, note, shas["head_sha"])
             self.assertEqual(tasks.git(run, "notes", "--ref", "jouet-cost", "show", "HEAD") + "\n", note)
+
+    def test_cost_result_rejects_unreadable_and_skipped_reports(self):
+        from jbench import costs
+
+        self.assertTrue(costs.complete_result('{"ok":true,"suites":[{"passed":2}]}'))
+        self.assertFalse(costs.complete_result('{"ok":true,"suites":[{"passed":2,"skipped":9}]}'))
+        self.assertFalse(costs.complete_result('{"ok":true,"suites":[]}'))
+        self.assertFalse(costs.complete_result('{"ok":false,"suites":[{}]}'))
+        self.assertFalse(costs.complete_result('not json'))
 
     def test_incomplete_cost_seed_is_reported_and_not_cached(self):
         import dataclasses
@@ -2383,8 +2393,9 @@ class CostSeedTest(unittest.TestCase):
             stand_in = root / "jouet"
             stand_in.write_text(
                 '#!/bin/sh\n'
-                'case "$*" in *"pnpm vitest"*) exit 0;; esac\n'
+                'case "$*" in *"pnpm vitest"*) printf \'{"ok":true,"suites":[{}]}\\n\'; exit 0;; esac\n'
                 'git notes --ref jouet-cost add -f -m \'{"cmd":"cargo build"}\' HEAD\n'
+                'printf \'{"ok":true,"suites":[{"skipped":%s}]}\\n\' "${SKIP_COUNT:-0}"\n'
                 'exit "${FAIL_RECORDED:-0}"\n'
             )
             stand_in.chmod(0o755)
@@ -2402,6 +2413,13 @@ class CostSeedTest(unittest.TestCase):
                 self.assertIsNone(costs.seed(failed, stand_in, root / "second-work", messages.append))
                 self.assertFalse(costs.cache_path(failed, stand_in).exists())
             self.assertTrue(any("cargo build failed" in m for m in messages))
+
+            skipped = dataclasses.replace(task, cost_seed=["cargo build"], env={"SKIP_COUNT": "9"})
+            messages.clear()
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root / "cache")}):
+                self.assertIsNone(costs.seed(skipped, stand_in, root / "skipped-work", messages.append))
+                self.assertFalse(costs.cache_path(skipped, stand_in).exists())
+            self.assertTrue(any("skipped tests" in m for m in messages))
 
     def test_timed_out_cost_seed_does_not_block_trials_or_leave_temp_files(self):
         import os

@@ -106,6 +106,20 @@ def cache_path(task: tasks_mod.Task, jouet_bin: Path) -> Path:
     return root / "jouet-bench" / "cost-seeds" / f"{task.name}-{digest}.txt"
 
 
+def complete_result(output: str) -> bool:
+    """A cost sample must not stand in for a check that skipped tests."""
+    try:
+        report = json.loads(output)
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(report, dict) or report.get("ok") is not True:
+        return False
+    suites = report.get("suites")
+    if not isinstance(suites, list) or not suites:
+        return False
+    return all(isinstance(suite, dict) and suite.get("skipped", 0) == 0 for suite in suites)
+
+
 def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[str], None],
          log_dir: Path | None = None) -> str | None:
     """The task's cost note: from the cache, else timed now. None when the
@@ -136,7 +150,7 @@ def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[
         for command in task.cost_seed:
             try:
                 proc = timed_check(
-                    ["jouet", "test", "--cmd", "--", *shlex.split(command)],
+                    ["jouet", "test", "--json", "--cmd", "--", *shlex.split(command)],
                     workdir, env, task.check_timeout_s,
                 )
             except (OSError, subprocess.TimeoutExpired) as error:
@@ -146,6 +160,10 @@ def seed(task: tasks_mod.Task, jouet_bin: Path, work_root: Path, log: Callable[[
             log(f"    {command}: exit {proc.returncode}, {(proc.stdout.strip().splitlines() or [''])[-1]}")
             if proc.returncode != 0:
                 log(f"    {command} failed; the cost seed is incomplete and will not be cached")
+                incomplete = True
+            elif not complete_result(proc.stdout):
+                log(f"    {command} skipped tests or produced an unreadable report; "
+                    "the cost seed is incomplete and will not be cached")
                 incomplete = True
             updated = note_at_head(workdir, env)
             if not (Counter(updated.splitlines()) - Counter(note.splitlines())):
