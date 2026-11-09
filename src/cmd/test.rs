@@ -624,9 +624,12 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         let setup_hint = if local_runner
             && !affected::project_config::baseline_setup(&root).is_ok_and(|setup| !setup.is_empty())
         {
-            "; the isolated checkout may need dependencies: review [baseline].setup in .jouet/test.toml before retrying"
+            format!(
+                "; the isolated checkout may need dependencies: {}",
+                baseline::setup_hint(&root)
+            )
         } else {
-            ""
+            String::new()
         };
         emit(&format!(
             "baseline: if these failures may predate the change, `{}` retries the selected tests and compares failures at the merge base{setup_hint}\n",

@@ -378,7 +378,7 @@ vitest (vitest's module graph): 2 test files
 	assert_line --regexp '^full log: .+\.log$'
 	assert_line "This was a partial run; the full suite was not verified."
 	assert_output --partial '1 failed'
-	assert_output --partial 'the isolated checkout may need dependencies: review [baseline].setup'
+	assert_output --partial 'the isolated checkout may need dependencies: create .jouet/test.toml with [baseline].setup'
 
 	# A configured but untrusted setup cannot run at the merge base yet.
 	mkdir -p .jouet
@@ -1239,7 +1239,7 @@ SH
 	run --separate-stderr jouet test --baseline --cmd -- ./fail-command
 	assert_failure 1
 	assert_output --partial 'baseline checkout reports missing node_modules'
-	assert_output --partial '[baseline].setup in .jouet/test.toml'
+	assert_output --partial 'create .jouet/test.toml with [baseline].setup'
 	assert_output --partial 'trust it before retrying'
 }
 
@@ -1257,7 +1257,7 @@ SH
 	run --separate-stderr jouet test --baseline --cmd -- ./node_modules/.bin/vitest
 	assert_failure 1
 	assert_output --partial 'baseline checkout has no project-local node_modules executable'
-	assert_output --partial '[baseline].setup in .jouet/test.toml'
+	assert_output --partial 'create .jouet/test.toml with [baseline].setup'
 	assert_output --partial 'trust it before retrying'
 
 	run --separate-stderr jouet test --baseline --cmd -- "$PWD/node_modules/.bin/vitest"
