@@ -6,7 +6,7 @@ use super::Output;
 use crate::cli::AuditArgs;
 use jouet_audit::{
     Analyzer, CategoryReport, ClaudeCode, Codex, Filter, FixedContext, FixedItem, HarnessReport,
-    Reader, Report, ScanStats,
+    Reader, Report, ScanStats, WhatIf, WhatIfReport,
 };
 use jouet_output::exit::Exit;
 use jouet_output::time;
@@ -84,7 +84,15 @@ pub(crate) fn run(args: &AuditArgs, out: &Output) -> Exit {
     };
     let home = jouet_audit::home().map(|h| h.to_string_lossy().into_owned());
     let threads = std::thread::available_parallelism().map_or(4, usize::from);
+    let what_if = match args.what_if.as_deref().map(WhatIf::parse) {
+        None => None,
+        Some(Ok(spec)) => Some(spec),
+        Some(Err(e)) => return out.error(Exit::Usage, &format!("--what-if: {e}")),
+    };
     let mut analyzer = Analyzer::new(args.examples, home);
+    if let Some(spec) = what_if {
+        analyzer = analyzer.with_what_if(spec);
+    }
     if args.jouet {
         analyzer = analyzer.with_own();
     }
@@ -459,6 +467,117 @@ fn harness_text(s: &mut String, h: &HarnessReport, top: usize) {
     }
     if let Some(f) = &h.fixed_context {
         fixed_text(s, f, top);
+    }
+    if let Some(c) = &h.carried {
+        carried_text(s, c, top);
+    }
+    if let Some(w) = &h.what_if {
+        what_if_text(s, w);
+    }
+}
+
+/// What each request re-read, by what put it in the context.
+fn carried_text(s: &mut String, c: &jouet_audit::Carried, top: usize) {
+    let _ = writeln!(
+        s,
+        "\n  carried: each request's input, charged to what put it in the context and how many requests re-read it before a compaction (estimated from context growth):"
+    );
+    let _ = write!(
+        s,
+        "  start of the session or after a compaction {:.1}%",
+        c.start_share * 100.0
+    );
+    if c.compactions > 0 {
+        let _ = write!(s, " ({})", plural(c.compactions, "compaction"));
+    }
+    s.push('\n');
+    let mut table = vec![["category".to_string(), "share".into(), "tokens".into()]];
+    for row in c.categories.iter().take(top) {
+        table.push([
+            row.category.label().to_string(),
+            format!("{:.1}%", row.share * 100.0),
+            tokens(row.input_tokens),
+        ]);
+    }
+    columns(s, &table);
+    if !c.files.is_empty() {
+        let _ = writeln!(s, "  files that kept costing most:");
+        for f in c.files.iter().take(top) {
+            let _ = writeln!(
+                s,
+                "    {} ({:.1}%, {} tokens)",
+                f.file,
+                f.share * 100.0,
+                tokens(f.input_tokens)
+            );
+        }
+    }
+}
+
+/// The replay: what the same requests would have read.
+fn what_if_text(s: &mut String, w: &WhatIfReport) {
+    let mut spec = Vec::new();
+    if let Some(window) = w.window {
+        spec.push(format!("window {}", tokens(window)));
+    }
+    if !w.deny.is_empty() {
+        spec.push(format!("deny {}", w.deny.join(", ")));
+    }
+    let _ = writeln!(
+        s,
+        "\n  what if ({}): replaying {} that read {} tokens ({} price-weighted: uncached 1, cache write 1.25, cache read 0.1)",
+        spec.join("; "),
+        plural(w.requests, "request"),
+        tokens(w.input_tokens),
+        tokens(w.weighted_input_tokens)
+    );
+    for d in &w.denied {
+        let _ = writeln!(
+            s,
+            "  - deny {}: {} tokens fewer ({} price-weighted), on every request that carried it",
+            d.name,
+            tokens(d.input_tokens),
+            tokens(d.weighted_input_tokens)
+        );
+    }
+    if !w.not_found.is_empty() {
+        let _ = writeln!(
+            s,
+            "  - not in any transcript's definitions: {}",
+            w.not_found.join(", ")
+        );
+    }
+    let pct = |x: f64| format!("{:+.1}%", -x * 100.0);
+    match w.scenarios.as_slice() {
+        [late, early] => {
+            let _ = writeln!(
+                s,
+                "  input {} to {} ({} to {}), price-weighted {} to {}; {} to {} compactions added",
+                tokens(late.input_tokens),
+                tokens(early.input_tokens),
+                pct(late.saved),
+                pct(early.saved),
+                pct(late.weighted_saved),
+                pct(early.weighted_saved),
+                count(late.compactions),
+                count(early.compactions)
+            );
+            let _ = writeln!(
+                s,
+                "  the range is compaction firing at the window, then {} below it; it assumes the same requests after a compaction",
+                tokens(early.reserve)
+            );
+        }
+        [only] => {
+            let _ = writeln!(
+                s,
+                "  input {} ({}), price-weighted {}",
+                tokens(only.input_tokens),
+                pct(only.saved),
+                pct(only.weighted_saved)
+            );
+        }
+        _ => {}
     }
 }
 

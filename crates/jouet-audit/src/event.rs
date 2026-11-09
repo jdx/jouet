@@ -24,6 +24,9 @@ pub struct Transcript {
     pub messages: Vec<Message>,
     /// Lines in the file, counting those skipped.
     pub lines: u64,
+    /// The context of the transcript's first request with a token count,
+    /// before `--since` dropped any: what it started from.
+    pub start_tokens: Option<u64>,
     /// What the harness sent with every request besides the conversation,
     /// as the transcript first recorded it. Only Claude Code records it.
     pub definitions: Option<Definitions>,
@@ -98,6 +101,11 @@ pub struct Request {
     pub input_tokens_complete: bool,
     /// Input tokens served from the prompt cache, when reported.
     pub cached_input_tokens: Option<u64>,
+    /// Input tokens written to the prompt cache, when reported.
+    pub cache_write_tokens: Option<u64>,
+    /// The harness compacted the conversation just before this request:
+    /// what came before it is no longer carried.
+    pub compacted: bool,
     pub output_tokens: Option<u64>,
     /// The calls this request issued, as indexes into [`Transcript::calls`].
     pub calls: Range<usize>,
@@ -135,7 +143,8 @@ pub struct Call {
     pub name: Option<String>,
     /// The skill a Claude Code `Skill` call loaded.
     pub skill: Option<String>,
-    /// The file or pattern a read, search or edit names, raw.
+    /// The file or pattern a read, search or edit names, raw. Claude Code's
+    /// reader records it always.
     pub target: Option<String>,
     /// The start of a failed call's output, raw.
     pub error: Option<String>,

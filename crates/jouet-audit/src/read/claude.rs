@@ -106,6 +106,12 @@ impl Reader for ClaudeCode {
             if state.definitions(&mut t, line) {
                 return true;
             }
+            if memchr::memmem::find(line, COMPACT_BOUNDARY).is_some()
+                && memchr::memmem::find(line, b"\"type\":\"system\"").is_some()
+            {
+                state.compacted = true;
+                return true;
+            }
             let assistant = memchr::memmem::find(line, b"\"type\":\"assistant\"").is_some();
             if !assistant && memchr::memmem::find(line, b"\"type\":\"user\"").is_none() {
                 return true;
@@ -186,7 +192,12 @@ struct State {
     tools_read: bool,
     skills_read: bool,
     mcp_read: bool,
+    /// A compaction was recorded since the last request.
+    compacted: bool,
 }
+
+/// How Claude Code records a compaction.
+const COMPACT_BOUNDARY: &[u8] = b"\"subtype\":\"compact_boundary\"";
 
 /// How an attachment line names its type, and the types a definitions
 /// snapshot is made of.
@@ -339,6 +350,7 @@ impl State {
             t.requests.push(Request {
                 at,
                 calls: start..start,
+                compacted: std::mem::take(&mut self.compacted),
                 id: id.as_deref().map(request_id),
                 ..Default::default()
             });
@@ -358,6 +370,7 @@ impl State {
             if input > 0 && request.input_tokens.is_none() {
                 request.input_tokens = Some(input);
                 request.cached_input_tokens = usage.cache_read_input_tokens.u64();
+                request.cache_write_tokens = usage.cache_creation_input_tokens.u64();
                 request.input_tokens_complete = usage.input_tokens.u64().is_some()
                     && usage.cache_creation_input_tokens.u64().is_some()
                     && usage.cache_read_input_tokens.u64().is_some();
@@ -400,9 +413,9 @@ impl State {
             if name == "Skill" {
                 call.skill = input.as_ref().and_then(|i| i.skill.0.clone());
             }
+            call.target = input.as_ref().and_then(Input::target);
             if self.detail {
                 call.line = self.line_no;
-                call.target = input.as_ref().and_then(Input::target);
             }
             if call.tool == Tool::Shell {
                 call.command = input.and_then(|i| i.command.0);

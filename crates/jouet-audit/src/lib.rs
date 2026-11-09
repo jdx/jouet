@@ -32,6 +32,7 @@
 //! look inside a script's body.
 
 mod analyze;
+mod carry;
 mod category;
 pub mod digest;
 mod event;
@@ -47,11 +48,13 @@ mod shape;
 pub mod stats;
 mod structure;
 mod time;
+mod whatif;
 
 pub use analyze::{
     Analyzer, CategoryReport, HarnessReport, PatternReport, Report, Saving, ShapeCount, Suggestion,
     Totals,
 };
+pub use carry::{Carried, CarriedCategory, CarriedFile};
 pub use category::{Category, categorize};
 pub use event::{
     Call, Definition, DefinitionKind, Definitions, Message, MessageKind, Request, Tool, Transcript,
@@ -68,3 +71,4 @@ pub use redact::{example, redact};
 pub use shape::shape;
 pub use structure::{Part, structure};
 pub use time::parse_timestamp;
+pub use whatif::{Denied, Scenario, WhatIf, WhatIfReport};
