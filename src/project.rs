@@ -151,6 +151,19 @@ fn map_note(text: &str) -> String {
 
 fn line(checks: &Checks) -> Option<String> {
     let mut parts = Vec::new();
+    // Show known failures before any recommendations. Otherwise truncation
+    // can show a broken command while hiding the warning about that command.
+    if !checks.broken.is_empty() {
+        let each: Vec<String> = checks
+            .broken
+            .iter()
+            .map(|(command, why)| format!("`{command}` ({why})"))
+            .collect();
+        parts.push(format!(
+            "failing here before any change, so not yours to fix unless asked: {}",
+            each.join(", ")
+        ));
+    }
     for (kind, command) in &checks.focused {
         parts.push(format!("{kind} `{command}`"));
     }
@@ -176,17 +189,6 @@ fn line(checks: &Checks) -> Option<String> {
             .collect();
         parts.push(format!(
             "left to CI, so push and `jouet wait ci` rather than run them here: {}",
-            each.join(", ")
-        ));
-    }
-    if !checks.broken.is_empty() {
-        let each: Vec<String> = checks
-            .broken
-            .iter()
-            .map(|(command, why)| format!("`{command}` ({why})"))
-            .collect();
-        parts.push(format!(
-            "failing here before any change, so not yours to fix unless asked: {}",
             each.join(", ")
         ));
     }
@@ -292,7 +294,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             line(&project.checks).unwrap(),
-            "jouet: prefer these project-specific checks over generic examples when applicable (.jouet/project.toml): unit `jouet test --affected`; lint `mise run lint`; left to CI, so push and `jouet wait ci` rather than run them here: e2e `mise run test:e2e`; failing here before any change, so not yours to fix unless asked: `mise run lint` (golangci-lint is built with Go 1.26)."
+            "jouet: prefer these project-specific checks over generic examples when applicable (.jouet/project.toml): failing here before any change, so not yours to fix unless asked: `mise run lint` (golangci-lint is built with Go 1.26); unit `jouet test --affected`; lint `mise run lint`; left to CI, so push and `jouet wait ci` rather than run them here: e2e `mise run test:e2e`."
         );
         let checks = &project.checks;
         let why = Some("golangci-lint is built with Go 1.26");
@@ -304,6 +306,31 @@ mod tests {
         );
         assert_eq!(checks.broken("mise run lint:go"), None);
         assert_eq!(checks.broken("mise run test"), None);
+    }
+
+    #[test]
+    fn truncated_primer_never_recommends_a_check_without_its_broken_warning() {
+        let mut checks = Checks {
+            lint: Some("mise run lint".into()),
+            ..Checks::default()
+        };
+        checks.focused.insert("unit".into(), "x".repeat(400));
+        checks
+            .broken
+            .insert("mise run lint".into(), "known broken".into());
+        let note = line(&checks).unwrap();
+        assert!(note.chars().count() <= LINE_MAX);
+        assert!(note.contains("`mise run lint` (known broken)"));
+        assert!(note.contains("more check entries"));
+
+        // If the warning itself cannot fit, show no later recommendation.
+        checks
+            .broken
+            .insert("mise run lint".into(), "x".repeat(700));
+        let note = line(&checks).unwrap();
+        assert!(note.chars().count() <= LINE_MAX);
+        assert!(!note.contains("lint `mise run lint`"));
+        assert!(note.contains("more check entries"));
     }
 
     #[test]
