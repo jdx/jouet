@@ -2018,7 +2018,24 @@ impl Checks {
                 failed.exit_code
             );
         }
-        let since = last.map_or(String::new(), |l| format!(" (`{}`)", shown(&l.command)));
+        // When cutting long commands makes them read the same, name the
+        // failed selection's words the last run left out.
+        let since = last.map_or(String::new(), |l| {
+            let left_out: Vec<&str> = failed
+                .selection()
+                .split_whitespace()
+                .filter(|word| !l.selection().split_whitespace().any(|ran| ran == *word))
+                .collect();
+            if left_out.is_empty() || shown(&l.command) != shown(&failed.command) {
+                format!(" (`{}`)", shown(&l.command))
+            } else {
+                format!(
+                    " (`{}`, which leaves out `{}`)",
+                    shown(&l.command),
+                    left_out.join(" ")
+                )
+            }
+        });
         let clear = if failed.npx_jest_scoped()
             && failed.selection().contains("@jouet:cwd=unknown:")
         {
@@ -2300,6 +2317,34 @@ mod tests {
         assert!(why.contains("`cargo test` exited 101"), "{why}");
         state.record([test("cargo test", 0, "full")], Some("t1"));
         assert_eq!(reason(&state, "t1"), None);
+    }
+
+    #[test]
+    fn a_narrower_rerun_names_what_it_left_out() {
+        let prefix =
+            "jouet test --cmd -- mise run test:e2e test_task_usage_broken_toml test_task_usage";
+        let mut state = Checks::default();
+        state.record(
+            [test(
+                &format!("{prefix} test_task_run_entries"),
+                1,
+                "test:e2e test_task_usage_broken_toml test_task_usage test_task_run_entries",
+            )],
+            Some("t1"),
+        );
+        state.record(
+            [test(
+                &format!("{prefix} test_task_ls_usage"),
+                0,
+                "test:e2e test_task_usage_broken_toml test_task_usage test_task_ls_usage",
+            )],
+            Some("t1"),
+        );
+        let why = reason(&state, "t1").unwrap();
+        assert!(
+            why.contains("which leaves out `test_task_run_entries`)"),
+            "{why}"
+        );
     }
 
     #[test]
