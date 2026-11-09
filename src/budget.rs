@@ -301,8 +301,40 @@ fn mcp_server(tool: &str) -> Option<&str> {
 /// One transcript, or `None` without a tool snapshot (an older Claude Code,
 /// or not a session).
 fn read_session(path: &Path) -> Option<Session> {
-    let file = std::fs::File::open(path).ok()?;
     let mut session = Session::default();
+    read_into(path, &mut session, true).ok()?;
+    session.tools.as_ref()?;
+    // What the session's subagents called counts as used too: a denial
+    // reaches them as well.
+    for sub in subagent_transcripts(&path.with_extension("")) {
+        let _ = read_into(&sub, &mut session, false);
+    }
+    Some(session)
+}
+
+/// The transcripts under a session's own directory (`subagents/*.jsonl`),
+/// at any depth.
+fn subagent_transcripts(dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                pending.push(path);
+            } else if path.extension().is_some_and(|e| e == "jsonl") {
+                found.push(path);
+            }
+        }
+    }
+    found
+}
+
+/// Reads one transcript into `session`. From a subagent's transcript, or a
+/// sidechain record in the session's own, only the calls count: the
+/// definitions and context are the main conversation's.
+fn read_into(path: &Path, session: &mut Session, main: bool) -> std::io::Result<()> {
+    let file = std::fs::File::open(path)?;
     for line in std::io::BufReader::new(file).lines() {
         let Ok(line) = line else {
             break;
@@ -320,9 +352,8 @@ fn read_session(path: &Path) -> Option<Session> {
         let Ok(record) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
-        if record.get("isSidechain").and_then(Value::as_bool) == Some(true) {
-            continue;
-        }
+        let side = !main || record.get("isSidechain").and_then(Value::as_bool) == Some(true);
+        let (snapshot, listing) = (snapshot && !side, listing && !side);
         let attachment = record.get("attachment");
         let kind = attachment
             .and_then(|a| a.get("type"))
@@ -353,7 +384,7 @@ fn read_session(path: &Path) -> Option<Session> {
         }
         if let Some(message) = record.get("message") {
             if record.get("type").and_then(Value::as_str) == Some("assistant") {
-                if let Some(usage) = message.get("usage") {
+                if !side && let Some(usage) = message.get("usage") {
                     let field = |k: &str| usage.get(k).and_then(Value::as_u64).unwrap_or(0);
                     let context = field("input_tokens")
                         + field("cache_read_input_tokens")
@@ -394,7 +425,7 @@ fn read_session(path: &Path) -> Option<Session> {
             }
         }
     }
-    session.tools.is_some().then_some(session)
+    Ok(())
 }
 
 /// The skill listing's entries, `- name: description`, each possibly over
@@ -490,10 +521,23 @@ pub(crate) fn apply(doc: &mut Value, change: &Change, added: &mut Added) -> Vec<
         return notes;
     };
     if change.undo_window
-        && let Some(window) = added.auto_compact_window.take()
-        && object.get("autoCompactWindow").and_then(Value::as_u64) == Some(window)
+        && let Some(window) = added.auto_compact_window
     {
-        object.remove("autoCompactWindow");
+        // Only the value setup set is setup's to take back; one changed
+        // since is yours, and the record of setup's goes either way.
+        match object.get("autoCompactWindow") {
+            Some(current) if current.as_u64() == Some(window) => {
+                object.remove("autoCompactWindow");
+                notes.push(format!(
+                    "takes out the autoCompactWindow of {window} that setup set"
+                ));
+            }
+            Some(current) => notes.push(format!(
+                "autoCompactWindow is now {current}, not the {window} setup set, so it is left as it is"
+            )),
+            None => {}
+        }
+        added.auto_compact_window = None;
     }
     if change.undo_unused {
         let deny = std::mem::take(&mut added.deny);
@@ -785,6 +829,50 @@ mod tests {
         };
         apply(&mut doc, &undo_unused, &mut added);
         assert_eq!(doc, original);
+        assert_eq!(added, Added::default());
+    }
+
+    #[test]
+    fn what_a_subagent_or_sidechain_called_counts_as_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("s.jsonl");
+        let snapshot = json!({"type": "attachment", "attachment": {"type": "prompt_snapshot",
+            "tools": [{"name": "Workflow"}, {"name": "ListAgents"}, {"name": "ReportFindings"}]}});
+        let sidechain = json!({"type": "assistant", "isSidechain": true, "message": {
+            "usage": {"input_tokens": 900_000},
+            "content": [{"type": "tool_use", "name": "ListAgents"}]}});
+        std::fs::write(&main, format!("{snapshot}\n{sidechain}\n")).unwrap();
+        let subagents = dir.path().join("s").join("subagents");
+        std::fs::create_dir_all(&subagents).unwrap();
+        let call = json!({"type": "assistant", "message": {
+            "content": [{"type": "tool_use", "name": "Workflow"}]}});
+        std::fs::write(subagents.join("agent-a1.jsonl"), format!("{call}\n")).unwrap();
+
+        let session = read_session(&main).unwrap();
+        let mut called: Vec<_> = session.called.iter().map(String::as_str).collect();
+        called.sort_unstable();
+        assert_eq!(called, ["ListAgents", "Workflow"]);
+        // A sidechain's context is not the main conversation's.
+        assert_eq!(session.peak, 0);
+    }
+
+    #[test]
+    fn undoing_a_window_changed_since_leaves_it_and_says_so() {
+        let mut doc = json!({"autoCompactWindow": 300_000});
+        let mut added = Added {
+            auto_compact_window: Some(WINDOW),
+            ..Added::default()
+        };
+        let undo = Change {
+            undo_window: true,
+            ..Change::default()
+        };
+        let notes = apply(&mut doc, &undo, &mut added);
+        assert_eq!(doc, json!({"autoCompactWindow": 300_000}));
+        assert_eq!(
+            notes,
+            ["autoCompactWindow is now 300000, not the 200000 setup set, so it is left as it is"]
+        );
         assert_eq!(added, Added::default());
     }
 

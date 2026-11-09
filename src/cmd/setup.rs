@@ -517,12 +517,6 @@ fn budget_notes(
             budget::tokens(tokens)
         ));
     }
-    if change.undo_window && before.auto_compact_window.is_some() {
-        notes.push(format!(
-            "{} the autoCompactWindow setup set",
-            verb("removed", "would remove")
-        ));
-    }
     if change.undo_unused && !(before.deny.is_empty() && before.skills.is_empty()) {
         notes.push(format!(
             "{} the {} denials and {} skill overrides setup added",
