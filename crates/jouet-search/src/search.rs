@@ -197,7 +197,14 @@ pub fn run(options: &Options, memory: &mut Memory) -> Result<Report, Error> {
                 .fixed_strings(options.fixed_strings)
                 .line_terminator(Some(b'\n'))
                 .build(&options.pattern)
-                .map_err(|e| Error::Usage(format!("invalid pattern: {e}")))?,
+                .map_err(|e| {
+                    let hint = if options.fixed_strings {
+                        ""
+                    } else {
+                        "\nFor a literal pattern, pass -F (or --fixed-strings)."
+                    };
+                    Error::Usage(format!("invalid pattern: {e}{hint}"))
+                })?,
         ),
     };
     let structural = structural.as_ref();

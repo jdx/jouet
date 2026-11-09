@@ -60,6 +60,16 @@ RS
 	run --separate-stderr jouet search '('
 	assert_failure 2
 	assert_stderr --partial 'invalid pattern'
+	assert_stderr --partial 'For a literal pattern, pass -F (or --fixed-strings).'
+
+	run --separate-stderr jouet search -F '(' src/lib.rs
+	assert_success
+	assert_output --partial 'fn join_url('
+
+	run --separate-stderr jouet search --json '('
+	assert_failure 2
+	run jq -r '.error.message' <<<"$output"
+	assert_output --partial 'For a literal pattern, pass -F (or --fixed-strings).'
 
 	run --separate-stderr jouet search x missing/
 	assert_failure 3
