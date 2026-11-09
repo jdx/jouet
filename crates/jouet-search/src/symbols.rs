@@ -175,21 +175,25 @@ pub fn languages() -> &'static [&'static str] {
     imp::LANGUAGES
 }
 
-/// A hash of every tags query this build runs, so symbols cached by an
-/// older build are read again.
+/// A hash of the queries and the extraction logic, so changes to either
+/// invalidate definitions cached by an older build.
 pub(crate) fn queries_hash() -> u64 {
-    imp::queries()
-        .iter()
-        .fold(0xcbf2_9ce4_8422_2325, |hash, query| {
-            fnv(hash, query.as_bytes())
-        })
+    const SOURCE_HASH: u64 = fnv(0xcbf2_9ce4_8422_2325, include_bytes!("symbols.rs"));
+    static HASH: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *HASH.get_or_init(|| {
+        imp::queries()
+            .iter()
+            .fold(SOURCE_HASH, |hash, query| fnv(hash, query.as_bytes()))
+    })
 }
 
 /// FNV-1a: stable across builds and platforms, unlike std's hasher.
-pub(crate) fn fnv(mut hash: u64, bytes: &[u8]) -> u64 {
-    for byte in bytes {
-        hash ^= u64::from(*byte);
+pub(crate) const fn fnv(mut hash: u64, bytes: &[u8]) -> u64 {
+    let mut index = 0;
+    while index < bytes.len() {
+        hash ^= bytes[index] as u64;
         hash = hash.wrapping_mul(0x0100_0000_01b3);
+        index += 1;
     }
     hash
 }
@@ -300,10 +304,12 @@ mod imp {
 (program (export_statement declaration: (variable_declaration (variable_declarator name: (identifier) @name) @definition.constant)))
 ";
 
-    /// TypeScript's type aliases and enums, which its upstream tags miss.
+    /// TypeScript definitions which its upstream tags miss, including class
+    /// fields initialized to functions (a common way to bind methods).
     const TS_EXTRA: &str = r"
 (type_alias_declaration name: (type_identifier) @name) @definition.type
 (enum_declaration name: (identifier) @name) @definition.type
+(public_field_definition name: [(property_identifier) (private_property_identifier)] @name value: (_)) @definition.method
 ";
 
     const LUAU_TAGS: &str = r"
@@ -472,6 +478,14 @@ mod imp {
             {
                 continue;
             }
+            if matches!(lang, Lang::TypeScript | Lang::Tsx)
+                && node.kind() == "public_field_definition"
+                && !node
+                    .child_by_field_name("value")
+                    .is_some_and(ts_function_value)
+            {
+                continue;
+            }
             let Ok(text) = name.utf8_text(source) else {
                 continue;
             };
@@ -525,6 +539,31 @@ mod imp {
         let mut all: Vec<Located> = found.into_values().map(|(_, l)| l).collect();
         all.sort_by_key(|l| (l.def.start, l.def.line));
         Some(all)
+    }
+
+    fn ts_function_value(mut node: Node<'_>) -> bool {
+        loop {
+            match node.kind() {
+                "arrow_function" | "function_expression" => return true,
+                "parenthesized_expression"
+                | "as_expression"
+                | "satisfies_expression"
+                | "non_null_expression" => {
+                    let Some(inner) = node.named_child(0) else {
+                        return false;
+                    };
+                    node = inner;
+                }
+                "type_assertion" => {
+                    let mut cursor = node.walk();
+                    let Some(inner) = node.named_children(&mut cursor).last() else {
+                        return false;
+                    };
+                    node = inner;
+                }
+                _ => return false,
+            }
+        }
     }
 
     fn luau_single_assignment(node: Node<'_>) -> bool {

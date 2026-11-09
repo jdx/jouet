@@ -494,6 +494,101 @@ fn an_outline_names_each_definition_with_its_scope() {
 }
 
 #[test]
+fn cached_definitions_are_reparsed_when_extraction_changes() {
+    let cache = tempfile::tempdir().unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    let file = repo.path().join("query.ts");
+    std::fs::write(
+        &file,
+        "class Query {\n  update = <Handler>(() => {\n    return target;\n  });\n}\n",
+    )
+    .unwrap();
+    let mut o = options("target");
+    o.paths = vec![file];
+    o.cache = Some(cache.path().to_path_buf());
+    let expected = run(&o).1;
+    assert!(expected.contains("method update"), "{expected}");
+    let entry = std::fs::read_dir(cache.path())
+        .unwrap()
+        .map(Result::unwrap)
+        .map(|entry| entry.path())
+        .find(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .unwrap();
+    let mut stale: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&entry).unwrap()).unwrap();
+    stale["queries"] = 0.into();
+    stale["defs"] = serde_json::json!([]);
+    std::fs::write(&entry, serde_json::to_vec(&stale).unwrap()).unwrap();
+    assert_eq!(run(&o).1, expected);
+}
+
+#[test]
+fn typescript_class_function_fields_are_selectable() {
+    let source = b"class PagedQuery {\n  count = 0;\n  optimisticUpdate = (value: number) => {\n    return value + 1;\n  };\n  legacy = function(value: number) { return value; };\n  #private = () => 1;\n  asserted = (() => 2) as Handler;\n  notFunction = (123 as number);\n  regular() {}\n}\n";
+    for extension in ["ts", "tsx"] {
+        let path = format!("example.{extension}");
+        let path = Path::new(&path);
+        let found = symbols::select(
+            path,
+            source,
+            &symbols::Selector::parse("PagedQuery.optimisticUpdate").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].def.kind, "method");
+        let text = std::str::from_utf8(&source[found[0].start_byte..found[0].end_byte]).unwrap();
+        assert!(text.contains("return value + 1"), "{text}");
+        let legacy = symbols::select(
+            path,
+            source,
+            &symbols::Selector::parse("method PagedQuery.legacy").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(legacy.len(), 1);
+        for selector in ["PagedQuery.#private", "PagedQuery.asserted"] {
+            let found = symbols::select(path, source, &symbols::Selector::parse(selector).unwrap())
+                .unwrap();
+            assert_eq!(found.len(), 1);
+            assert_eq!(found[0].def.kind, "method");
+            let text =
+                std::str::from_utf8(&source[found[0].start_byte..found[0].end_byte]).unwrap();
+            assert!(text.contains("=>"), "{text}");
+        }
+        assert!(matches!(
+            symbols::select(path, source, &symbols::Selector::parse("count").unwrap()),
+            Err(symbols::SelectError::NotFound)
+        ));
+        assert!(matches!(
+            symbols::select(
+                path,
+                source,
+                &symbols::Selector::parse("notFunction").unwrap()
+            ),
+            Err(symbols::SelectError::NotFound)
+        ));
+    }
+}
+
+#[test]
+fn typescript_angle_asserted_function_field_is_selectable() {
+    let path = Path::new("example.ts");
+    let source = b"class Query {\n  update = <Handler>(() => 1);\n  count = <number>1;\n}\n";
+    let found = symbols::select(
+        path,
+        source,
+        &symbols::Selector::parse("Query.update").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(found.len(), 1);
+    let text = std::str::from_utf8(&source[found[0].start_byte..found[0].end_byte]).unwrap();
+    assert!(text.contains("<Handler>(() => 1)"), "{text}");
+    assert!(matches!(
+        symbols::select(path, source, &symbols::Selector::parse("count").unwrap()),
+        Err(symbols::SelectError::NotFound)
+    ));
+}
+
+#[test]
 fn a_selector_picks_definitions_by_name_kind_and_scope() {
     let path = Path::new(FIXTURE).join("web/api.ts");
     let source = std::fs::read(&path).unwrap();
