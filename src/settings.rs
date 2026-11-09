@@ -8,6 +8,7 @@
 //!
 //! [hooks]
 //! verify = false
+//! gate = "block"
 //!
 //! [edit]
 //! fix_after = true
@@ -145,10 +146,17 @@ pub(crate) struct HookSettings {
     /// Print a short jouet guide when a session starts
     #[usage(env = "JOUET_HOOKS_PRIME", default = true)]
     pub prime: bool,
-    /// Block finishing while a test, lint or build run failed, or after files
-    /// changed with no test run passing since
+    /// Record test, lint and build runs, and judge each stop by them: whether
+    /// a run failed, or files changed with no test run passing since
     #[usage(env = "JOUET_HOOKS_VERIFY", default = true)]
     pub verify: bool,
+    /// What the stop gate does where it would block: observe records a would-block in the ledger and lets the agent finish; block stops the agent once with the reason
+    #[usage(
+        env = "JOUET_HOOKS_GATE",
+        default = "observe",
+        choices("observe", "block")
+    )]
+    pub gate: String,
     /// Keep a ledger of command shapes and rule decisions
     #[usage(env = "JOUET_HOOKS_LEDGER", default = true)]
     pub ledger: bool,
@@ -200,6 +208,14 @@ pub(crate) struct RuleSettings {
     /// hook never waits on the network
     #[usage(env = "JOUET_RULES_NETWORK", default = false)]
     pub network: bool,
+}
+
+impl HookSettings {
+    /// Whether the stop gate blocks where it finds a reason (`gate =
+    /// "block"`), rather than only recording it (`observe`).
+    pub(crate) fn gate_blocks(&self) -> bool {
+        self.gate == "block"
+    }
 }
 
 impl Settings {
@@ -272,6 +288,27 @@ mod tests {
         std::fs::write(&path, "[hooks]\nverify = false\n").unwrap();
         let s = Settings::load_from(&env(&[("JOUET_HOOKS_PRIME", "false")]), Some(path));
         assert!(!s.hooks.verify && !s.hooks.prime && s.hooks.steer);
+    }
+
+    #[test]
+    fn the_stop_gate_observes_until_set_to_block() {
+        let s = Settings::load_from(&env(&[]), None);
+        assert_eq!(s.hooks.gate, "observe");
+        assert!(!s.hooks.gate_blocks());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[hooks]\ngate = \"block\"\n").unwrap();
+        assert!(
+            Settings::load_from(&env(&[]), Some(path.clone()))
+                .hooks
+                .gate_blocks()
+        );
+        // The environment wins over the file, as for every setting.
+        let s = Settings::load_from(&env(&[("JOUET_HOOKS_GATE", "observe")]), Some(path));
+        assert!(!s.hooks.gate_blocks());
+        // A value jouet cannot read counts as the default.
+        let s = Settings::load_from(&env(&[("JOUET_HOOKS_GATE", "loud")]), None);
+        assert!(!s.hooks.gate_blocks());
     }
 
     #[test]

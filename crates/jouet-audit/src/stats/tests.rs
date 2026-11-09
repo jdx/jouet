@@ -386,6 +386,7 @@ fn warned_by(session: &str, rule: &str, revision: Option<&str>) -> LedgerEntry {
             rule: rule.into(),
             action: "warn".into(),
             revision: revision.map(str::to_string),
+            scope: None,
         }],
         ..LedgerEntry::default()
     }
@@ -463,6 +464,7 @@ fn a_stop_block_a_passing_check_followed_is_held_not_wasted() {
                 rule: "verify".into(),
                 action: "block".into(),
                 revision: None,
+                scope: None,
             }]
         } else {
             Vec::new()
@@ -474,6 +476,7 @@ fn a_stop_block_a_passing_check_followed_is_held_not_wasted() {
             rule: "checks".into(),
             action: "record:test".into(),
             revision: None,
+            scope: None,
         }],
         ..post("cargo test", exit_code)
     };
@@ -525,6 +528,101 @@ fn a_stop_block_a_passing_check_followed_is_held_not_wasted() {
         .find(|c| c.kind == CostKind::HeldBlocks)
         .unwrap();
     assert_eq!((held.count, held.input_tokens), (2, None));
+}
+
+#[test]
+fn the_gates_reasons_are_judged_by_what_came_next() {
+    let gate = |session: &str, action: &str, reasons: &[&str]| LedgerEntry {
+        harness: "claude".into(),
+        session: Some(session.into()),
+        event: "stop".into(),
+        decisions: reasons
+            .iter()
+            .map(|reason| LedgerDecision {
+                rule: "verify".into(),
+                action: action.into(),
+                revision: None,
+                scope: Some((*reason).into()),
+            })
+            .collect(),
+        ..LedgerEntry::default()
+    };
+    let in_session = |session: &str, e: LedgerEntry| LedgerEntry {
+        session: Some(session.into()),
+        ..e
+    };
+    let edit = |session: &str| {
+        in_session(
+            session,
+            LedgerEntry {
+                event: "edit".into(),
+                tool: Some("Edit".into()),
+                shape: None,
+                exit_code: None,
+                ..post("", 0)
+            },
+        )
+    };
+    let recorded = |session: &str, exit_code: i32| {
+        in_session(
+            session,
+            LedgerEntry {
+                decisions: vec![LedgerDecision {
+                    rule: "checks".into(),
+                    action: "record:test".into(),
+                    revision: None,
+                    scope: Some("partial".into()),
+                }],
+                ..post("cargo test", exit_code)
+            },
+        )
+    };
+    let entries = [
+        // Right: an edit came next, across the next turn's stop.
+        gate("a", "would-block", &["failed-test"]),
+        gate("a", "", &[]),
+        edit("a"),
+        recorded("a", 0),
+        // Right: a check failed before any passed.
+        gate("b", "would-block", &["failed-test", "changed-after-pass"]),
+        recorded("b", 1),
+        // Passed: a check passed with no edit before it.
+        gate("c", "would-block", &["changed-after-pass"]),
+        in_session("c", post("jouet edit replace <arg>", 1)),
+        recorded("c", 0),
+        edit("c"),
+        // Open: nothing since.
+        gate("d", "would-block", &["hk-partial"]),
+        // A block, judged the same way and counted once per stop.
+        gate("e", "block", &["failed-lint", "hk-changed"]),
+        in_session("e", post("jouet edit replace <arg>", 0)),
+    ];
+    let m = measure(&entries, &StatsFilter::default());
+    let got: Vec<(&str, &str, u64, u64, u64, u64)> = m
+        .gate
+        .iter()
+        .map(|g| {
+            (
+                g.action.as_str(),
+                g.reason.as_str(),
+                g.stops,
+                g.right,
+                g.passed,
+                g.open,
+            )
+        })
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("would-block", "changed-after-pass", 2, 1, 1, 0),
+            ("would-block", "failed-test", 2, 2, 0, 0),
+            ("block", "failed-lint", 1, 1, 0, 0),
+            ("block", "hk-changed", 1, 1, 0, 0),
+            ("would-block", "hk-partial", 1, 0, 0, 1),
+        ]
+    );
+    assert_eq!((m.verify_blocks, m.overhead[0].stop_blocks), (1, 1));
 }
 
 #[test]
