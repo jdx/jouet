@@ -7,7 +7,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from typing import Any
 
-from . import stats
+from . import stats, timing
 
 # (key, label, getter, format) for each compared metric. Lower is better
 # for all of them.
@@ -98,9 +98,10 @@ def group(records: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, list
 
 def unverified(record: dict[str, Any]) -> bool:
     check = record.get("check") or {}
-    unfinished = (record.get("command_activity") or {}).get("unmatched_starts", 0)
+    activity = record.get("command_activity")
+    incomplete = timing.verification_issue(activity, record.get("shell")) if activity is not None else None
     return (record.get("success") is None or ("passed" in check and check["passed"] is None)
-            or (record.get("success") is True and bool(unfinished)))
+            or (record.get("success") is True and bool(incomplete)))
 
 
 def unverified_reason(record: dict[str, Any]) -> str:
@@ -109,8 +110,8 @@ def unverified_reason(record: dict[str, Any]) -> str:
     if reason := (record.get("check") or {}).get("reason"):
         reasons.append(reason)
     command_reason = record.get("unverified_reason")
-    if not command_reason and (record.get("command_activity") or {}).get("unmatched_starts"):
-        command_reason = "agent command had no completion event"
+    if not command_reason and (activity := record.get("command_activity")) is not None:
+        command_reason = timing.verification_issue(activity, record.get("shell"))
     if command_reason and command_reason not in reasons:
         reasons.append(command_reason)
     return "; ".join(reasons) or "coverage unavailable"
@@ -308,7 +309,7 @@ def markdown(summary: dict[str, Any]) -> str:
         "",
         "## Summary",
         "",
-        "Success means the agent exited normally, the task checker passed, and recorded Codex commands completed. Checkers vary:",
+        "Success means the agent exited normally, the task checker passed, and a new Codex run's command events established completion. Checkers vary:",
         "some verify behavior without requiring every requested deliverable, such as a commit.",
         "Inspect the task's checker and run evidence before treating success as complete accuracy.",
         ("Unverified checks exclude runs from performance metrics; agents that fail or stop still count as failures. "

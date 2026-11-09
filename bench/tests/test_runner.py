@@ -584,6 +584,11 @@ class PlanTest(unittest.TestCase):
                 self.assertNotIn("error", failed)
 
                 agent["exit_code"] = 0
+                agent["lines"] = [json.dumps({"type": "jouet.ephemeral"}),
+                                  json.dumps({"type": "thread.started"}),
+                                  json.dumps({"type": "turn.completed"})]
+                agent["elapsed"] = [0, 1, 2]
+                agent["stream_complete"] = True
                 passed = runner.execute(runner.Planned(2, "smoke", "codex", "plain"), opts, root, root)
                 self.assertTrue(passed["success"])
 
@@ -618,6 +623,12 @@ class PlanTest(unittest.TestCase):
                 agent["lines"] = [json.dumps(event) for event in events]
                 agent["elapsed"] = [0, 1, 2, 2.5, 3]
                 completed = runner.execute(runner.Planned(2, "smoke", "codex", "plain"), opts, root, root)
+                agent["stream_complete"] = False
+                truncated = runner.execute(runner.Planned(5, "smoke", "codex", "plain"), opts, root, root)
+                agent["stream_complete"] = True
+                agent["elapsed"] = []
+                missing = runner.execute(runner.Planned(6, "smoke", "codex", "plain"), opts, root, root)
+                agent["elapsed"] = [0, 1, 2, 2.5, 3]
                 agent["exit_code"] = 1
                 failed = runner.execute(runner.Planned(3, "smoke", "codex", "plain"), opts, root, root)
                 agent["exit_code"] = 0
@@ -630,6 +641,10 @@ class PlanTest(unittest.TestCase):
             self.assertEqual(record["unverified_reason"], "agent command had no completion event")
             self.assertFalse(report.scored(record))
             self.assertTrue(completed["success"])
+            self.assertIsNone(truncated["success"])
+            self.assertEqual(truncated["unverified_reason"], "Codex event stream was incomplete")
+            self.assertIsNone(missing["success"])
+            self.assertEqual(missing["unverified_reason"], "Codex command timing unavailable")
             self.assertFalse(failed["success"])
             self.assertFalse(checker_failed["success"])
             self.assertTrue(report.scored(checker_failed))
@@ -1887,6 +1902,22 @@ class ExternalTasksTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
+    def test_older_results_with_unverifiable_codex_events_are_not_scored(self):
+        base = {"task": "smoke", "harness": "codex", "arm": "jouet", "round": 1,
+                "success": True, "check": {"passed": True}, "shell": {"completed": 1, "failed": 0}}
+        complete = {"stream_complete": True, "unmatched_starts": 0,
+                    "unmatched_completions": 0, "duplicate_starts": 0}
+        for field, value, reason in (
+            ("stream_complete", False, "Codex event stream was incomplete"),
+            ("unmatched_completions", 1, "Codex command events could not be matched"),
+            ("duplicate_starts", 1, "Codex command events could not be matched"),
+        ):
+            with self.subTest(field=field):
+                record = {**base, "command_activity": {**complete, field: value}}
+                cell = report.summarize([record], {})["cells"][0]["arms"]["jouet"]
+                self.assertEqual(cell["runs"], 0)
+                self.assertEqual(cell["unverified"][0]["reason"], reason)
+
     def test_unverified_summary_keeps_checker_and_command_reasons(self):
         record = {"task": "smoke", "harness": "codex", "arm": "jouet", "round": 1,
                   "success": None, "check": {"passed": None, "reason": "container unavailable"},

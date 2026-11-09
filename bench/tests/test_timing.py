@@ -9,6 +9,21 @@ def event(kind, item_id, item_type="commandExecution"):
 
 
 class TimingTest(unittest.TestCase):
+    def test_unverifiable_command_streams_name_the_gap(self):
+        shell = {"completed": 1, "failed": 0}
+        complete = {"stream_complete": True, "unmatched_starts": 0,
+                    "unmatched_completions": 0, "duplicate_starts": 0}
+        self.assertIsNone(timing.verification_issue(complete, shell))
+        self.assertEqual(timing.verification_issue(None, shell), "Codex command timing unavailable")
+        self.assertEqual(timing.verification_issue({**complete, "stream_complete": False}, shell),
+                         "Codex event stream was incomplete")
+        self.assertEqual(timing.verification_issue({**complete, "unmatched_starts": 1}, None),
+                         "agent command had no completion event")
+        for field in ("unmatched_completions", "duplicate_starts"):
+            self.assertEqual(timing.verification_issue({**complete, field: 1}, shell),
+                             "Codex command events could not be matched")
+        self.assertEqual(timing.verification_issue(complete, None), "Codex command event stream could not be verified")
+
     def test_overlapping_commands_count_once_and_incomplete_events_are_visible(self):
         lines = [event("item.started", "a"), event("item.started", "b"),
                  event("item.completed", "a"), event("item.completed", "b"),

@@ -673,10 +673,10 @@ def execute(
         "disk_free": agent.get("disk_free"),
         "usage": asdict(usage),
         "audit": summarize_audit(audit_report),
-        "shell": (codex_shell_metrics(agent["lines"])
+        "shell": (shell := (codex_shell_metrics(agent["lines"])
                   if harness.name == "codex" and not agent["stopped"] and agent["exit_code"] == 0
-                  else None),
-        **check_outcome(agent, check, command_activity),
+                  else None)),
+        **check_outcome(agent, check, command_activity, shell, harness.name),
         "ledger": ledger(env) if arm.jouet and not disk_stopped else None,
         "github": github,
         "setup": ran["setup"],
@@ -846,10 +846,12 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
     return records
 
 
-def check_outcome(agent: dict[str, Any], check: dict[str, Any], activity: dict | None) -> dict[str, Any]:
+def check_outcome(agent: dict[str, Any], check: dict[str, Any], activity: dict | None,
+                  shell: dict | None, harness: str) -> dict[str, Any]:
     """Keep the independent checker result while flagging unfinished commands."""
     success = False if agent["stopped"] or agent["exit_code"] != 0 else check["passed"]
-    if success is True and activity and activity["unmatched_starts"]:
-        check["output"] += "\nAgent command had no completion event; the task outcome is unverified."
-        return {"success": None, "unverified_reason": "agent command had no completion event"}
+    issue = timing.verification_issue(activity, shell) if harness == "codex" else None
+    if success is True and issue:
+        check["output"] += f"\n{issue}; the task outcome is unverified."
+        return {"success": None, "unverified_reason": issue}
     return {"success": success}

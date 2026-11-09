@@ -26,7 +26,7 @@ Each task lives in `bench/tasks/<name>/`: `task.toml` (prompt, timeout, rules), 
 
 A checker can report incomplete evidence through `_check.UNVERIFIED` and `_check.finish()`. If no assertion failed, the helper prints the reasons and a `JOUET_BENCH_UNVERIFIED_V1` marker, then exits 3. Exit 3 without that marker remains a failure. A checker timeout is also unverified. Runs with unverified checks are excluded from performance comparisons; an agent that fails or is stopped still counts as a failure in success rates and paired outcomes. `check-tasks` reports unverified results and does not claim the reference solution was validated; run details remain in `check.log`.
 
-A Codex run whose independent checker passes but whose event stream leaves a started command without a completion is also unverified. The checker result stays in the run record, but the outcome and performance pair are excluded: the unfinished command might have been a check the agent relied on. Re-rendering an older report applies the same rule when its run records include `command_activity.unmatched_starts`; missing event evidence cannot be recovered this way.
+A Codex run whose independent checker passes but whose event stream is missing, incomplete or inconsistent is also unverified. This includes a started command without a completion: it might have been a check the agent relied on. The checker result stays in the run record, but the outcome and performance pair are excluded. Re-rendering an older report applies the same rule when its run records include command-activity evidence; missing historical event evidence cannot be recovered this way.
 
 Older SWE-bench results may have counted skipped or unnamed regression tests as passing. Re-run those tasks with this checker before relying on their accuracy or performance comparisons; rewriting an old report cannot recover missing coverage evidence.
 
@@ -34,7 +34,7 @@ Older SWE-bench results may have counted skipped or unnamed regression tests as 
 
 Other tasks are real, already-fixed issues in real projects. Their `task.toml` names a local clone and a pinned commit before the fix (`[source]`) instead of a `repo/`. Prompts describe the original issue and ask for a fix, a test and a commit. The checker runs a hidden regression test and `solve.py` applies a reference fix. They set `opt_in = true`, so they run only when named with `--tasks`, and each needs its clone at the path `[source]` names.
 
-Success means the agent exited normally, the task's checker passed, and no recorded Codex command start was left without a completion; it does not by itself establish that every part of the prompt was fulfilled. Some real-project checkers report whether a fix was committed without making the commit a condition of success, and not all check that the agent added a test. Inspect the task's checker and run evidence when assessing accuracy.
+Success means the agent exited normally, the task's checker passed, and a new Codex run's command events established completion; it does not by itself establish that every part of the prompt was fulfilled. Some real-project checkers report whether a fix was committed without making the commit a condition of success, and not all check that the agent added a test. Inspect the task's checker and run evidence when assessing accuracy.
 
 Projects beyond jdx's own:
 
