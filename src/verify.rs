@@ -2022,9 +2022,9 @@ impl Checks {
         // failed selection's words the last run left out.
         let since = last.map_or(String::new(), |l| {
             let left_out: Vec<&str> = failed
-                .selection()
+                .command
                 .split_whitespace()
-                .filter(|word| !l.selection().split_whitespace().any(|ran| ran == *word))
+                .filter(|word| !l.command.split_whitespace().any(|ran| ran == *word))
                 .collect();
             if left_out.is_empty() || shown(&l.command) != shown(&failed.command) {
                 format!(" (`{}`)", shown(&l.command))
@@ -2341,6 +2341,30 @@ mod tests {
             Some("t1"),
         );
         let why = reason(&state, "t1").unwrap();
+        assert!(
+            why.contains("which leaves out `test_task_run_entries`)"),
+            "{why}"
+        );
+
+        // A failed run with no selector is named by its command, so the
+        // runner's words, which both commands share, are not listed.
+        let mut bare = Checks::default();
+        bare.record(
+            [Record {
+                selector: None,
+                ..test(&format!("{prefix} test_task_run_entries"), 1, "")
+            }],
+            Some("t1"),
+        );
+        bare.record(
+            [test(
+                &format!("{prefix} test_task_ls_usage"),
+                0,
+                "test:e2e test_task_usage_broken_toml test_task_usage test_task_ls_usage",
+            )],
+            Some("t1"),
+        );
+        let why = reason(&bare, "t1").unwrap();
         assert!(
             why.contains("which leaves out `test_task_run_entries`)"),
             "{why}"
