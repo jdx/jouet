@@ -405,7 +405,7 @@ def kill(proc: subprocess.Popen[str]) -> None:
             continue
 
 
-def sweep(run_dir: Path, session: int | None) -> list[str]:
+def sweep(run_dir: Path, session: int | None, *, errors: list[str] | None = None) -> list[str]:
     """Stops what a run left running, and returns each one's command line.
 
     A run's processes are ours that are in the agent's session, or whose
@@ -446,6 +446,8 @@ def sweep(run_dir: Path, session: int | None) -> list[str]:
             import sys
 
             print(f"benchmark cleanup: {discovery_error}", file=sys.stderr)
+            if errors is not None:
+                errors.append(discovery_error)
         if session is not None:
             try:
                 os.killpg(session, signal.SIGKILL)
@@ -853,6 +855,25 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
                 # and record a failure that says nothing about jouet.
                 log(f"stopping: {p.harness} could not authenticate ({u.get('result')}); log in again and rerun")
                 break
+    except BaseException:
+        # An interrupted agent or checker can leave processes in their own
+        # sessions. Stop them before removing the directories used to find them.
+        previously_preserved = preserve_work
+        preserve_work = True
+        cleanup_errors: list[str] = []
+        for root in (work_root, tmp_root):
+            try:
+                sweep(root, None, errors=cleanup_errors)
+            except OSError as error:
+                cleanup_errors.append(f"{root}: {error}")
+        if cleanup_errors:
+            import sys
+
+            print(f"benchmark cleanup failed ({'; '.join(cleanup_errors)}); "
+                  f"retained work: {work_root}; temp: {tmp_root}", file=sys.stderr)
+        else:
+            preserve_work = previously_preserved
+        raise
     finally:
         if not opts.get("keep_work") and not preserve_work:
             remove(work_root)
