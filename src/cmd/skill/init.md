@@ -68,7 +68,8 @@ whole-suite fallback that obscures the selection for the source change.
 When a clean repository has suitable history, `--since` the parent of a recent
 representative source change can provide a nonempty selection without editing
 the working tree. Confirm the selected tests actually cover that change; do
-not treat a configuration-only commit or an empty plan as evidence. If existing
+not treat a configuration-only commit, an empty plan or a whole-suite fallback
+as evidence that affected selection works. If existing
 working-tree changes prevent a representative selection, use a separate clean
 checkout if practical, or report the gap; do not discard the user's changes.
 Save the selected test command and its result before writing configuration. If
