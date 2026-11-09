@@ -329,6 +329,10 @@ const USAGE: &[Usage] = &[
                 "mergeable, merged, approved, ready, ...",
             ),
             (
+                "jouet wait pr [<PR>] --until needs-agent",
+                "after a push, in the background: wakes once CI and reviewers have settled, with failed logs, conflicts and new review comments that are not bot noise",
+            ),
+            (
                 "jouet wait http <URL> | port <ADDR> | file <PATH> | log <PATH> --match REGEX",
                 "a server, a file or a log line",
             ),

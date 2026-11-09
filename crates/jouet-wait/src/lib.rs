@@ -22,6 +22,8 @@ pub mod pr;
 pub mod remote;
 mod report;
 pub mod run;
+pub mod settle;
+pub mod triage;
 mod watch;
 
 pub use joblog::{Excerpt, fold_backtraces, trim as trim_excerpt};

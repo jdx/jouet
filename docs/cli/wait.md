@@ -27,5 +27,5 @@ Replaces `sleep N; check; repeat` loops. The first check is immediate; later one
 - [`jouet wait log <--match <REGEX>> [--from-start] <PATH>`](/cli/wait/log.md)
 - [`jouet wait pid <PID>`](/cli/wait/pid.md)
 - [`jouet wait port [--closed] <ADDR>`](/cli/wait/port.md)
-- [`jouet wait pr [--repo <OWNER/NAME>] <--until <CONDITION>> [PR]`](/cli/wait/pr.md)
+- [`jouet wait pr <FLAGS> [PR]`](/cli/wait/pr.md)
 - [`jouet wait run [FLAGS] <RUN>`](/cli/wait/run.md)
