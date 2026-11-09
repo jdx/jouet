@@ -99,7 +99,7 @@ static INFRA: LazyLock<Vec<(&str, Regex, bool)>> = LazyLock::new(|| {
         (
             "registry",
             i(
-                r"\b50[234] (?:bad gateway|service unavailable|gateway time-?out)|could not download https?://\S+ \(HTTP 50[234]\)|http status server error|error sending request for url|spurious network error",
+                r"\b50[234] (?:bad gateway|service unavailable|gateway time-?out)|could not download https?://\S+ \(HTTP 50[234]\)|curl: \(\d+\) the requested URL returned error: 50[234]\b|http status server error|error sending request for url|spurious network error",
             ),
             false,
         ),
@@ -420,6 +420,12 @@ Diff in /w/src/a.rs at line 4:",
         for code in [502, 503, 504] {
             let message = format!("Could not download https://example.com/file (HTTP {code}):");
             let unavailable = Signature::of(None, &lines(&message));
+            assert_eq!(
+                unavailable.infrastructure().map(|i| i.cause),
+                Some("registry")
+            );
+            let curl = format!("curl: (56) The requested URL returned error: {code}");
+            let unavailable = Signature::of(None, &lines(&curl));
             assert_eq!(
                 unavailable.infrastructure().map(|i| i.cause),
                 Some("registry")
