@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from jbench import arms, tasks
+from jbench import arms, harness, tasks
 
 
 class ResolveTest(unittest.TestCase):
@@ -22,6 +22,15 @@ class ResolveTest(unittest.TestCase):
             for name in ("parallel", "uv", "uvx"):
                 self.assertEqual((root / "run/bin" / name).resolve(), (root / name).resolve())
             self.assertTrue(env["PATH"].startswith(str(root / "run/bin")))
+
+    def test_claude_runs_as_the_desktop_app_like_real_sessions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            claude = root / "claude-bin"
+            claude.write_text("#!/bin/sh\nexit 0\n")
+            with patch.dict(os.environ, {"PATH": tmp}, clear=True):
+                env = arms.build(root / "run", harness.Claude(), arms.ARMS["plain"], claude, claude, None, "jdx/demo")
+        self.assertEqual(env["CLAUDE_CODE_ENTRYPOINT"], "claude-desktop")
 
     def test_docker_path_is_passed_only_to_the_checker_environment(self):
         with patch.object(tasks.shutil, "which") as lookup:

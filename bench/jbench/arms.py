@@ -147,6 +147,7 @@ def build(
         wrapper(bin_dir / "jouet", jouet_bin.resolve(), jouet_env(fake_url) if fake_url else {})
     env[harness.config_dir_env] = str(config_dir)
     env["DISABLE_AUTOUPDATER"] = "1"
+    env.update(harness.env)
     for key in harness.auth_env:
         if os.environ.get(key):
             env[key] = os.environ[key]
