@@ -18,9 +18,54 @@ spec = importlib.util.spec_from_file_location(
 )
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
+hidden_spec = importlib.util.spec_from_file_location(
+    "fnox_hidden_check", TASKS / "fnox-age-identity-pr" / "hidden_check.py"
+)
+hidden_checker = importlib.util.module_from_spec(hidden_spec)
+hidden_spec.loader.exec_module(hidden_checker)
 
 
 class FnoxBatsTest(unittest.TestCase):
+    def test_hidden_test_preserves_existing_file_and_cleans_up_on_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "test").mkdir()
+            original = root / "test/age_identities.bats"
+            original.write_text("agent's test\n")
+            before = Path.cwd()
+            try:
+                os.chdir(root)
+
+                def run(*args):
+                    self.assertEqual(args[0], "test/bats/bin/bats")
+                    generated = Path(args[1])
+                    self.assertEqual(generated.parent.resolve(), (root / "test").resolve())
+                    self.assertIn("default_identity selects a key", generated.read_text())
+                    self.assertEqual(original.read_text(), "agent's test\n")
+                    return True, "ok"
+
+                self.assertEqual(hidden_checker.run_hidden(run), (True, "ok"))
+                self.assertEqual(list((root / "test").iterdir()), [original])
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    hidden_checker.run_hidden(mock.Mock(side_effect=subprocess.TimeoutExpired("bats", 1)))
+                self.assertEqual(list((root / "test").iterdir()), [original])
+            finally:
+                os.chdir(before)
+
+    def test_hidden_test_refuses_a_symlinked_test_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "actual").mkdir()
+            (root / "test").symlink_to(root / "actual", target_is_directory=True)
+            before = Path.cwd()
+            try:
+                os.chdir(root)
+                with self.assertRaises(OSError):
+                    hidden_checker.run_hidden(mock.Mock())
+                self.assertEqual(list((root / "actual").iterdir()), [])
+            finally:
+                os.chdir(before)
+
     def test_age_identity_task_exposes_both_age_tools(self):
         task = tasks.load("fnox-age-identity-pr")
         self.assertEqual(task.tools.get("age"), "age")
