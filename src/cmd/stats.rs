@@ -227,8 +227,8 @@ fn ledger_first(ledger: Option<&Ledger>, arms: &BTreeMap<String, BTreeMap<String
 }
 
 /// What each session with an arm cost, from its transcripts: the files
-/// whose path names the session (both harnesses put its id there), read
-/// one by one.
+/// whose path names the session by its whole id, as `--session` matches
+/// them, read one by one.
 fn arm_metrics(
     readers: &[&dyn Reader],
     since: u64,
@@ -242,8 +242,10 @@ fn arm_metrics(
     let mut transcripts: BTreeMap<&str, Vec<jouet_audit::Transcript>> = BTreeMap::new();
     for &reader in readers {
         for source in reader.discover(&filter).unwrap_or_default() {
-            let path = source.path.to_string_lossy();
-            let Some(session) = arms.keys().find(|s| path.contains(s.as_str())) else {
+            let Some(session) = arms
+                .keys()
+                .find(|s| jouet_audit::names_session(&source.path, s))
+            else {
                 continue;
             };
             let read = jouet_audit::open(&source.path)

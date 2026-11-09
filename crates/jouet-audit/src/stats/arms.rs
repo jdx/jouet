@@ -47,19 +47,22 @@ impl SessionMetrics {
             let mut last_end: Option<i64> = None;
             for request in &t.requests {
                 let calls = &t.calls[request.calls.clone()];
-                let tool_ms: u64 = calls.iter().filter_map(|c| c.duration_ms).sum();
-                m.active_ms += tool_ms;
-                if let (Some(at), Some(end)) = (request.at, last_end) {
-                    m.active_ms += u64::try_from((at - end).clamp(0, MODEL_CAP_MS)).unwrap_or(0);
-                }
                 let ends = calls.iter().filter_map(|c| {
                     let ms = i64::try_from(c.duration_ms.unwrap_or(0)).unwrap_or(0);
                     Some(c.at? + ms)
                 });
-                last_end = ends.chain(request.at).max().or(last_end);
+                let end = ends.chain(request.at).max().or(last_end);
+                // A resumed or forked copy repeats its parent's requests:
+                // their time, like their tokens, counts once.
                 if request.id.is_some_and(|id| !seen.insert(id)) {
+                    last_end = end;
                     continue;
                 }
+                m.active_ms += calls.iter().filter_map(|c| c.duration_ms).sum::<u64>();
+                if let (Some(at), Some(before)) = (request.at, last_end) {
+                    m.active_ms += u64::try_from((at - before).clamp(0, MODEL_CAP_MS)).unwrap_or(0);
+                }
+                last_end = end;
                 m.requests += 1;
                 m.input_tokens += request.input_tokens.unwrap_or(0);
             }
@@ -299,10 +302,12 @@ mod tests {
             ci_failures: 1,
             ..Transcript::default()
         };
-        // A resumed copy repeats request 3, and the CI event.
+        // A resumed copy repeats requests 1 and 3, with the call, and the
+        // CI event: none of it counts twice.
         let resumed = Transcript {
             session: "s".into(),
-            requests: vec![request(3_640_000, 3, 0..0)],
+            requests: vec![request(0, 1, 0..1), request(3_640_000, 3, 1..1)],
+            calls: vec![call(0, 30_000)],
             ci_failures: 1,
             ..Transcript::default()
         };
