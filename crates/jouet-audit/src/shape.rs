@@ -339,29 +339,52 @@ fn skip_heredoc_bodies(b: &[u8], mut i: usize, heredocs: &mut Vec<(String, bool)
 }
 
 /// Whether a `<<` after `before` on its line is a redirection: not inside
-/// quotes or a comment, and not a shift inside `((...))` or `$((...))`.
+/// quotes or a comment, and not a shift inside `((...))` or `$((...))`. A
+/// command substitution, `$(...)` or backquotes, is a command of its own
+/// even inside double quotes.
 fn opens_a_heredoc(before: &str) -> bool {
-    let (mut single, mut double, mut escaped) = (false, false, false);
+    // The open quotes and substitutions, innermost last.
+    let mut open: Vec<char> = Vec::new();
+    let mut escaped = false;
     let mut prev = ' ';
-    for c in before.chars() {
+    let mut chars = before.chars().peekable();
+    while let Some(c) = chars.next() {
+        let top = open.last().copied();
         if escaped {
             escaped = false;
-        } else if single {
-            single = c != '\'';
+        } else if top == Some('\'') {
+            if c == '\'' {
+                open.pop();
+            }
         } else if c == '\\' {
             escaped = true;
-        } else if double {
-            double = c != '"';
-        } else if c == '\'' {
-            single = true;
-        } else if c == '"' {
-            double = true;
-        } else if c == '#' && (prev.is_whitespace() || matches!(prev, ';' | '&' | '|')) {
+        } else if c == '$' && chars.peek() == Some(&'(') {
+            chars.next();
+            // `$((` is arithmetic, which the count below handles.
+            if chars.peek() != Some(&'(') {
+                open.push('(');
+            }
+        } else if c == '`' {
+            if top == Some('`') {
+                open.pop();
+            } else {
+                open.push('`');
+            }
+        } else if top == Some('"') {
+            if c == '"' {
+                open.pop();
+            }
+        } else if c == '"' || c == '\'' {
+            open.push(c);
+        } else if c == ')' && top == Some('(') {
+            open.pop();
+        } else if c == '#' && (prev.is_whitespace() || matches!(prev, ';' | '&' | '|' | '(')) {
             return false;
         }
         prev = c;
     }
-    !single && !double && before.matches("((").count() <= before.matches("))").count()
+    !matches!(open.last(), Some('"' | '\''))
+        && before.matches("((").count() <= before.matches("))").count()
 }
 
 /// The command without its heredoc bodies, which are data for the program

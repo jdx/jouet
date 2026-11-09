@@ -390,6 +390,12 @@ mod tests {
         ] {
             assert_eq!(cat(command), Category::CiPolling, "{command}");
         }
+        // A command substitution in double quotes is a command of its own,
+        // so its heredoc's body is data.
+        assert_eq!(
+            cat("git commit -m \"$(cat <<'EOF'\nran jouet wait ci 3\nEOF\n)\""),
+            Category::Git
+        );
         // A hyphenated delimiter closes its body.
         assert_eq!(
             cat("cat > a.md <<END-NOTE\ngh pr checks 1\nEND-NOTE\njouet wait ci 3"),
