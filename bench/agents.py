@@ -405,8 +405,12 @@ def run_check_task_phase(task: tasks.Task, root: Path, phase: Path, label: str,
     try:
         tasks.setup_environment(task, base, workdir, root / "python-cache", env_log)
     except (OSError, RuntimeError, ValueError) as error:
-        details = env_log.read_text(errors="replace")[-4000:] if env_log.exists() else ""
-        failures.append(f"{task.name}: environment setup failed: {error}\n{details}")
+        # The phase directory is removed on return, so its log cannot be
+        # followed later. Preserve the whole output, including failures that
+        # preceded a verbose build, in the check-tasks report.
+        details = env_log.read_text(errors="replace") if env_log.exists() else ""
+        message = str(error).removesuffix(f" (log: {env_log})")
+        failures.append(f"{task.name}: environment setup failed: {message}\n{details}")
         return True
     fixture = task.github_fixture(shas)
     state = phase / "state.json"

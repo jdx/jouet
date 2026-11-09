@@ -1531,12 +1531,18 @@ class TasksTest(unittest.TestCase):
                 self.assertTrue((phase / "work/large-install").exists())
                 swept.append(phase)
 
+            def setup(_task, _env, _workdir, _cache, log):
+                log.write_text("installer error: unavailable\n" + "build output\n" * 500)
+                raise RuntimeError(f"setup failed (log: {log})")
+
             with patch.object(tasks, "prepare", side_effect=prepare), \
-                    patch.object(tasks, "setup_environment", side_effect=RuntimeError("setup failed")), \
+                    patch.object(tasks, "setup_environment", side_effect=setup), \
                     patch.object(agents.arms, "base_env", return_value={}), \
                     patch.object(agents.runner, "sweep", side_effect=sweep):
                 self.assertTrue(agents.check_task_phase(task, root, "unsolved", False, failures))
             self.assertIn("setup failed", failures[0])
+            self.assertIn("installer error: unavailable", failures[0])
+            self.assertNotIn("(log:", failures[0])
             self.assertEqual(len(swept), 1)
             self.assertEqual(list(root.iterdir()), [])
 
