@@ -289,26 +289,7 @@ impl Run {
                 if ran == wanted {
                     return true;
                 }
-                // Join only paths without `..`: resolving a parent across a
-                // symlink lexically could identify different directories.
-                fn scope(s: &str) -> Option<(String, &str)> {
-                    let (directory, selection) = s.split_once(' ')?;
-                    let (cwd, cd) = directory.strip_prefix("@jouet:cwd=")?.split_once(":cd=")?;
-                    if !cwd.starts_with('/')
-                        || cwd.split('/').chain(cd.split('/')).any(|p| p == "..")
-                    {
-                        return None;
-                    }
-                    let path = if cd.starts_with('/') {
-                        cd.to_string()
-                    } else if cd == "." {
-                        cwd.to_string()
-                    } else {
-                        format!("{}/{cd}", cwd.trim_end_matches('/'))
-                    };
-                    Some((path.trim_end_matches('/').to_string(), selection))
-                }
-                return scope(ran).is_some_and(|a| scope(wanted).is_some_and(|b| a == b));
+                return resolved(ran).is_some_and(|a| resolved(wanted).is_some_and(|b| a == b));
             }
             (true, false) | (false, true) => return false,
             (false, false) => {}
@@ -323,9 +304,18 @@ impl Run {
                 if ran.contains("@jouet:cwd=unknown:") || wanted.contains("@jouet:cwd=unknown:") {
                     return false;
                 }
+                if ran == wanted {
+                    return true;
+                }
+                // `cd ../.. && pnpm …` and `pnpm …` started in that
+                // directory are the same run.
+                let (ran, wanted) = (
+                    resolved(ran).unwrap_or_else(|| ran.to_string()),
+                    resolved(wanted).unwrap_or_else(|| wanted.to_string()),
+                );
                 return ran == wanted
                     || (same_runner(&self.command, &failed.command)
-                        && pnpm_vitest_covers(ran, wanted));
+                        && pnpm_vitest_covers(&ran, &wanted));
             }
             (true, false) | (false, true) => return false,
             (false, false) => {}
@@ -475,52 +465,168 @@ fn playwright_covers(ran: &[String], wanted: &[String]) -> bool {
                 && wanted.names.iter().all(|name| ran.names.contains(name))))
 }
 
-/// An unfiltered package run covers its own excluded suite, but not a
-/// different configuration, root, or unknown filter.
+/// A selection whose leading `@jouet:cwd=CWD:cd=CD` names the directory it
+/// ran in, as `@jouet:dir=PATH`. The path is the real one where it still
+/// exists; one with `..` is resolved only that way, since joining a parent
+/// across a symlink by its text could name a different directory. Both
+/// paths come as the checks rule's `scope_path` wrote them, and the result
+/// is written that way too, so it stays one word.
+fn resolved(selection: &str) -> Option<String> {
+    let (directory, rest) = selection.split_once(' ').unwrap_or((selection, ""));
+    let (cwd, cd) = directory.strip_prefix("@jouet:cwd=")?.split_once(":cd=")?;
+    let (cwd, cd) = (scope_path_decode(cwd)?, scope_path_decode(cd)?);
+    if !cwd.starts_with('/') {
+        return None;
+    }
+    let joined = if cd.starts_with('/') {
+        cd
+    } else if cd == "." {
+        cwd
+    } else {
+        format!("{}/{cd}", cwd.trim_end_matches('/'))
+    };
+    let path = match std::fs::canonicalize(&joined) {
+        Ok(path) => path.to_str()?.to_string(),
+        Err(_) if joined.split('/').any(|part| part == "..") => return None,
+        Err(_) => joined.trim_end_matches('/').to_string(),
+    };
+    Some(
+        format!("@jouet:dir={} {rest}", scope_path_encode(&path))
+            .trim_end()
+            .to_string(),
+    )
+}
+
+/// The checks rule's `scope_path`: each byte but `[A-Za-z0-9._/-]` as `%xx`.
+fn scope_path_encode(path: &str) -> String {
+    path.bytes()
+        .map(|b| match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'/' | b'-' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02x}"),
+        })
+        .collect()
+}
+
+/// The path `scope_path` encoded, or None for text it could not have written.
+fn scope_path_decode(encoded: &str) -> Option<String> {
+    let mut bytes = Vec::with_capacity(encoded.len());
+    let mut rest = encoded.as_bytes();
+    while let Some((&b, next)) = rest.split_first() {
+        if b == b'%' {
+            let hex = std::str::from_utf8(next.get(..2)?).ok()?;
+            bytes.push(u8::from_str_radix(hex, 16).ok()?);
+            rest = &next[2..];
+        } else {
+            bytes.push(b);
+            rest = next;
+        }
+    }
+    String::from_utf8(bytes).ok()
+}
+
+/// A package run covers a narrower one of the same configuration and root:
+/// its own excluded suite, a name filter, or a file under a directory it
+/// ran (`vitest run src/a` covers `vitest run src/a/b.test.ts`). Vitest
+/// runs each file whose path contains a filter, so a filter that holds
+/// another as whole path segments runs every file the other does. A
+/// different configuration, root or project, or an option this does not
+/// know, is never covered.
 fn pnpm_vitest_covers(ran: &str, wanted: &str) -> bool {
     let ran: Vec<_> = ran.split_whitespace().collect();
     let wanted: Vec<_> = wanted.split_whitespace().collect();
     let prefix_len = if ran
         .first()
-        .is_some_and(|word| word.starts_with("@jouet:cwd="))
+        .is_some_and(|word| word.starts_with("@jouet:cwd=") || word.starts_with("@jouet:dir="))
     {
         2
     } else {
         1
     };
-    if ran.len() != prefix_len
+    if ran.len() < prefix_len
         || !ran[prefix_len - 1].starts_with("@jouet:pnpm:")
         || !ran[prefix_len - 1].ends_with(":vitest")
-        || !wanted.starts_with(&ran)
+        || !wanted.starts_with(&ran[..prefix_len])
     {
         return false;
     }
-    let mut rest = &wanted[prefix_len..];
-    let mut selected = false;
-    while let Some((flag, next)) = rest.split_first() {
-        if let Some(value) = flag
-            .strip_prefix("--exclude=")
-            .or_else(|| flag.strip_prefix("--testNamePattern="))
-            .or_else(|| flag.strip_prefix("-t="))
-        {
-            if value.is_empty() {
-                return false;
+    let (Some(ran), Some(wanted)) = (
+        VitestSelection::parse(&ran[prefix_len..]),
+        VitestSelection::parse(&wanted[prefix_len..]),
+    ) else {
+        return false;
+    };
+    ran.options == wanted.options
+        && ran.names.is_empty()
+        && ran.excludes.iter().all(|e| wanted.excludes.contains(e))
+        && (ran.paths.is_empty()
+            || (!wanted.paths.is_empty()
+                && wanted
+                    .paths
+                    .iter()
+                    .all(|path| ran.paths.iter().any(|dir| holds(dir, path)))))
+}
+
+/// The words of a recorded Vitest selection, sorted by what they do.
+#[derive(Default)]
+struct VitestSelection<'a> {
+    /// Which project runs: `--config`, `--root`, `--project` and
+    /// `--typecheck.only`, as `--flag=value`, sorted.
+    options: Vec<String>,
+    /// Path filters.
+    paths: Vec<&'a str>,
+    /// `-t` name filters.
+    names: Vec<&'a str>,
+    /// `--exclude` globs.
+    excludes: Vec<&'a str>,
+}
+
+impl<'a> VitestSelection<'a> {
+    /// None for an option this does not know, or one without a value.
+    fn parse(words: &[&'a str]) -> Option<Self> {
+        let mut selection = Self::default();
+        let mut rest = words;
+        while let Some((&word, next)) = rest.split_first() {
+            rest = next;
+            if !word.starts_with('-') {
+                selection.paths.push(word);
+                continue;
             }
-            selected = true;
-            rest = next;
-        } else if matches!(*flag, "--exclude" | "--testNamePattern" | "-t")
-            && next.first().is_some_and(|value| !value.starts_with('-'))
-        {
-            selected = true;
-            rest = &next[1..];
-        } else if !flag.starts_with('-') {
-            selected = true;
-            rest = next;
-        } else {
-            return false;
+            if word == "--typecheck.only" {
+                selection.options.push(word.to_string());
+                continue;
+            }
+            let (flag, value) = match word.split_once('=') {
+                Some((flag, value)) => (flag, value),
+                None => {
+                    let (&value, next) = rest.split_first()?;
+                    rest = next;
+                    (word, value)
+                }
+            };
+            if value.is_empty() || value.starts_with('-') {
+                return None;
+            }
+            match flag {
+                "-c" | "--config" => selection.options.push(format!("--config={value}")),
+                "-r" | "--root" => selection.options.push(format!("--root={value}")),
+                "--project" => selection.options.push(format!("--project={value}")),
+                "-t" | "--testNamePattern" => selection.names.push(value),
+                "--exclude" => selection.excludes.push(value),
+                _ => return None,
+            }
         }
+        selection.options.sort();
+        Some(selection)
     }
-    selected
+}
+
+/// Whether every path that contains `path` also contains `dir`, as whole
+/// segments: `src/a` holds `src/a/b.ts` but not `src/ab.ts`.
+fn holds(dir: &str, path: &str) -> bool {
+    path.strip_prefix(dir)
+        .is_some_and(|rest| rest.is_empty() || dir.ends_with('/') || rest.starts_with('/'))
 }
 
 /// Whether two commands ran the same test runner: their program, and for
@@ -2029,7 +2135,7 @@ impl Checks {
         } else if failed.pnpm_scoped() && failed.selection().contains("@jouet:cwd=unknown:") {
             "its original working directory is unknown, so jouet cannot safely match it to another pnpm run".to_string()
         } else if failed.pnpm_scoped() {
-            "a passing run of the same supported pnpm selection, or a covering unfiltered Vitest run in the same scope, clears it".to_string()
+            "a passing run of the same supported pnpm selection, or a wider Vitest run with the same configuration in the same scope (every file, or a directory that holds its files), clears it".to_string()
         } else if failed.full {
             format!("only a full {} run clears it", kind.name())
         } else {
@@ -2511,6 +2617,145 @@ mod tests {
         assert!(!pnpm_vitest_covers(
             "@jouet:cwd=/repo/a:cd=. @jouet:pnpm:dir=web:vitest",
             "@jouet:cwd=/repo/b:cd=. @jouet:pnpm:dir=web:vitest --exclude tests/b"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pnpm_run_after_a_cd_matches_one_started_in_that_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let root = root.to_str().unwrap();
+        std::fs::create_dir_all(format!("{root}/admin/src/automations")).unwrap();
+        std::fs::create_dir_all(format!("{root}/elsewhere/admin/src")).unwrap();
+        std::os::unix::fs::symlink(
+            format!("{root}/elsewhere/admin/src"),
+            format!("{root}/linked"),
+        )
+        .unwrap();
+        let runner = "@jouet:pnpm:dir=.:vitest -c acceptance.ts";
+        let cleared = |failed_dir: &str, ran_dir: &str, ran: &str| {
+            let mut state = Checks::default();
+            state.record(
+                [test(
+                    "pnpm exec vitest run -c acceptance.ts src/automations/a.test.tsx",
+                    1,
+                    &format!("{failed_dir} {runner} src/automations/a.test.tsx"),
+                )],
+                Some("t1"),
+            );
+            state.record(
+                [test(
+                    &format!("pnpm exec vitest run -c acceptance.ts {ran}"),
+                    0,
+                    &format!("{ran_dir} {runner} {ran}"),
+                )],
+                Some("t1"),
+            );
+            reason(&state, "t1").is_none()
+        };
+        let after_cd = format!("@jouet:cwd={root}/admin/src/automations:cd=../..");
+        let started = format!("@jouet:cwd={root}/admin:cd=.");
+        assert!(cleared(&after_cd, &started, "src/automations/a.test.tsx"));
+        assert!(cleared(&after_cd, &started, "src/automations"));
+        assert!(cleared(
+            &started,
+            &format!("@jouet:cwd={root}:cd=admin"),
+            "src"
+        ));
+        // `linked/..` is the symlink target's parent, not this root.
+        assert!(!cleared(
+            &format!("@jouet:cwd={root}/linked:cd=.."),
+            &format!("@jouet:cwd={root}:cd=."),
+            "src/automations/a.test.tsx"
+        ));
+        assert!(cleared(
+            &format!("@jouet:cwd={root}/linked:cd=.."),
+            &format!("@jouet:cwd={root}/elsewhere/admin:cd=."),
+            "src/automations/a.test.tsx"
+        ));
+        // The checks rule records paths with `scope_path`: a space is `%20`.
+        std::fs::create_dir_all(format!("{root}/my app/src/automations")).unwrap();
+        let spaced = scope_path_encode(&format!("{root}/my app"));
+        assert!(spaced.contains("my%20app"));
+        assert_eq!(
+            scope_path_decode(&spaced).unwrap(),
+            format!("{root}/my app")
+        );
+        assert!(cleared(
+            &format!("@jouet:cwd={spaced}/src/automations:cd=../.."),
+            &format!("@jouet:cwd={spaced}:cd=."),
+            "src/automations"
+        ));
+        assert_eq!(
+            resolved(&format!("@jouet:cwd={spaced}/src:cd=.. {runner}")).unwrap(),
+            format!("@jouet:dir={spaced} {runner}")
+        );
+        // A `..` in a directory that is gone cannot be resolved.
+        assert!(!cleared(
+            &format!("@jouet:cwd={root}/gone/x:cd=.."),
+            &format!("@jouet:cwd={root}/gone:cd=."),
+            "src/automations/a.test.tsx"
+        ));
+    }
+
+    #[test]
+    fn a_pnpm_vitest_run_of_a_directory_clears_a_file_under_it() {
+        let prefix = "@jouet:cwd=/repo:cd=. @jouet:pnpm:dir=.:vitest";
+        let failed =
+            "-c vitest.acceptance.config.ts src/automations/trigger-tiers.acceptance.test.tsx";
+        let cleared = |ran: &str| {
+            let mut state = Checks::default();
+            state.record(
+                [test(
+                    &format!("pnpm exec vitest run {failed}"),
+                    1,
+                    &format!("{prefix} {failed}"),
+                )],
+                Some("t1"),
+            );
+            state.record(
+                [test(
+                    &format!("pnpm exec vitest run {ran}"),
+                    0,
+                    format!("{prefix} {ran}").trim_end(),
+                )],
+                Some("t1"),
+            );
+            reason(&state, "t1").is_none()
+        };
+        for ran in [
+            "-c vitest.acceptance.config.ts src/automations",
+            "-c vitest.acceptance.config.ts src/automations/",
+            "--config=vitest.acceptance.config.ts src",
+            "-c vitest.acceptance.config.ts",
+            "-c vitest.acceptance.config.ts src/automations/trigger-tiers.acceptance.test.tsx",
+        ] {
+            assert!(cleared(ran), "{ran} must clear it");
+        }
+        for ran in [
+            "src/automations",
+            "",
+            "-c vitest.unit.config.ts src/automations",
+            "-c vitest.acceptance.config.ts src/auto",
+            "-c vitest.acceptance.config.ts src/billing",
+            "-c vitest.acceptance.config.ts src/automations -t saves",
+            "-c vitest.acceptance.config.ts --project=admin src/automations",
+            "-c vitest.acceptance.config.ts --shard=1/2 src/automations",
+        ] {
+            assert!(!cleared(ran), "{ran:?} must not clear it");
+        }
+        assert!(pnpm_vitest_covers(
+            &format!("{prefix} src/a"),
+            &format!("{prefix} -t saves src/a/b.test.ts src/a/c.test.ts")
+        ));
+        assert!(!pnpm_vitest_covers(
+            &format!("{prefix} src/a"),
+            &format!("{prefix} src/a/b.test.ts src/c.test.ts")
+        ));
+        assert!(!pnpm_vitest_covers(
+            &format!("{prefix} --exclude=x src/a"),
+            &format!("{prefix} src/a/b.test.ts")
         ));
     }
 
