@@ -103,6 +103,19 @@ def unverified(record: dict[str, Any]) -> bool:
             or (record.get("success") is True and bool(unfinished)))
 
 
+def unverified_reason(record: dict[str, Any]) -> str:
+    """Keep each independent reason, including a checker's own explanation."""
+    reasons = []
+    if reason := (record.get("check") or {}).get("reason"):
+        reasons.append(reason)
+    command_reason = record.get("unverified_reason")
+    if not command_reason and (record.get("command_activity") or {}).get("unmatched_starts"):
+        command_reason = "agent command had no completion event"
+    if command_reason and command_reason not in reasons:
+        reasons.append(command_reason)
+    return "; ".join(reasons) or "coverage unavailable"
+
+
 def scored(record: dict[str, Any]) -> bool:
     """A failed or stopped agent is a known failure even if its check is incomplete."""
     exit_code = record.get("exit_code")
@@ -131,9 +144,7 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                 unanswered.update((r.get("github") or {}).get("unanswered_examples") or [])
             cell["arms"][arm] = {
                 "runs": len(outcomes),
-                "unverified": [{"round": r.get("round"), "reason": r.get("unverified_reason") or
-                                ("agent command had no completion event" if (r.get("command_activity") or {}).get("unmatched_starts")
-                                 else (r.get("check") or {}).get("reason", "coverage unavailable"))}
+                "unverified": [{"round": r.get("round"), "reason": unverified_reason(r)}
                                for r in runs if not r.get("error") and unverified(r)],
                 "errors": [r["error"] for r in runs if r.get("error")],
                 "stopped": [r["stopped"] for r in outcomes if r.get("stopped")],

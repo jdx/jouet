@@ -1887,6 +1887,15 @@ class ExternalTasksTest(unittest.TestCase):
 
 
 class ReportTest(unittest.TestCase):
+    def test_unverified_summary_keeps_checker_and_command_reasons(self):
+        record = {"task": "smoke", "harness": "codex", "arm": "jouet", "round": 1,
+                  "success": None, "check": {"passed": None, "reason": "container unavailable"},
+                  "command_activity": {"unmatched_starts": 1}}
+        cell = report.summarize([record], {})["cells"][0]["arms"]["jouet"]
+        self.assertEqual(cell["unverified"][0]["reason"],
+                         "container unavailable; agent command had no completion event")
+        self.assertEqual(cell["runs"], 0)
+
     def test_incomplete_token_usage_is_not_counted_as_zero_spend(self):
         """Partial observations cannot establish total spend per solved task."""
         from dataclasses import asdict
