@@ -66,23 +66,34 @@ pub(super) fn state(root: &Path) -> Option<String> {
 }
 
 /// The key for `job` on the tree `state`.
-pub(super) fn key(state: &str, job: &Job, env: impl Iterator<Item = (String, String)>) -> String {
+pub(super) fn key(
+    state: &str,
+    job: &Job,
+    env: impl Iterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> String {
     let mut hash = Sha256::new();
     let mut part = |bytes: &[u8]| {
         hash.update((bytes.len() as u64).to_le_bytes());
         hash.update(bytes);
     };
-    part(b"jouet test result v2");
+    part(b"jouet test result v3");
     part(state.as_bytes());
     part(job.dir.as_os_str().as_encoded_bytes());
+    part(&(job.argv.len() as u64).to_le_bytes());
     for word in &job.argv {
         part(word.as_bytes());
     }
-    let mut vars: Vec<(String, String)> = env.chain(job.env.iter().cloned()).collect();
+    let mut vars: Vec<_> = env
+        .chain(
+            job.env
+                .iter()
+                .map(|(key, value)| (key.into(), value.into())),
+        )
+        .collect();
     vars.sort();
     for (k, v) in &vars {
-        part(k.as_bytes());
-        part(v.as_bytes());
+        part(k.as_encoded_bytes());
+        part(v.as_encoded_bytes());
     }
     hash.finalize()
         .iter()
@@ -167,9 +178,11 @@ mod tests {
         }
     }
 
-    fn env(vars: &[(&str, &str)]) -> impl Iterator<Item = (String, String)> {
+    fn env(
+        vars: &[(&str, &str)],
+    ) -> impl Iterator<Item = (std::ffi::OsString, std::ffi::OsString)> {
         vars.iter()
-            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .map(|(k, v)| ((*k).into(), (*v).into()))
             .collect::<Vec<_>>()
             .into_iter()
     }
@@ -205,6 +218,14 @@ mod tests {
         assert_ne!(
             key("t", &job(&["a", "b"]), env(&[])),
             key("t", &job(&["ab"]), env(&[]))
+        );
+    }
+
+    #[test]
+    fn the_key_separates_arguments_from_environment_entries() {
+        assert_ne!(
+            key("t", &job(&["run", "A", "1"]), env(&[])),
+            key("t", &job(&["run"]), env(&[("A", "1")])),
         );
     }
 
