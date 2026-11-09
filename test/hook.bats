@@ -138,6 +138,18 @@ stop_reason() {
 		jouet hook claude stop | jq -r '.reason // empty'
 }
 
+@test "an environment-wrapped affected test clears its own failure" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+	ran 'env -u NO_COLOR jouet test --affected' 1
+	run stop_reason
+	assert_output --partial 'The last test run failed'
+	ran 'env -u NO_COLOR jouet test --affected' 0
+	run stop_reason
+	assert_output ""
+}
+
 @test "an excluded pnpm Vitest run does not clear a failed package test" {
 	git init -q repo
 	mkdir -p repo/admin
