@@ -159,6 +159,12 @@ pub(crate) trait Adapter {
     /// Whether it can trace a change to this file to the tests that depend
     /// on it.
     fn traces(&self, path: &str) -> bool;
+    /// Whether its project compiles `path` in, such as a Markdown file a
+    /// crate reads with `include_str!`, so a change to it is a source change
+    /// even when the file looks like documentation.
+    fn embeds(&self, _path: &str) -> bool {
+        false
+    }
     /// Whether it can trace a deleted file.
     fn traces_deletions(&self) -> bool;
     /// Why a change to this file (a path from its package's directory)
@@ -603,7 +609,7 @@ fn effect(
     change: &Change,
 ) -> Effect {
     let path = change.path.as_str();
-    if classify::is_docs(path) {
+    if classify::is_docs(path) && !adapter.embeds(path) {
         return Effect::Ignored("documentation".into());
     }
     if let Some(why) = classify::global_trigger(path) {

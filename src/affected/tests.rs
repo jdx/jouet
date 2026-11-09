@@ -1016,3 +1016,45 @@ fn a_branchs_own_pushed_copy_is_not_its_base() {
     assert_eq!(base.name, "origin/main");
     assert!(!changes::unchanged_since(root, &base.merge_base).unwrap());
 }
+
+#[test]
+fn a_file_a_crate_embeds_is_not_documentation() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        &root.join("Cargo.toml"),
+        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    );
+    write(
+        &root.join("src/lib.rs"),
+        "pub const SKILL: &str = include_str!(\"skill/init.md\");\n",
+    );
+    write(&root.join("src/skill/init.md"), "# skill\n");
+    write(&root.join("README.md"), "# demo\n");
+    write(&root.join(".gitignore"), "target/\n");
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "init"]);
+    git(root, &["checkout", "-q", "-b", "work"]);
+    write(&root.join("README.md"), "# changed\n");
+    let plan = plan_in(root).unwrap();
+    assert_eq!(
+        nothing_reason(&plan.suites[0]),
+        "only documentation changed"
+    );
+    write(&root.join("src/skill/init.md"), "# changed\n");
+    let plan = plan_in(root).unwrap();
+    let suite = &plan.suites[0];
+    assert_eq!(suite.decision, Decision::Affected, "{:?}", suite.files);
+    assert_eq!(
+        suite.command.as_deref(),
+        Some(
+            &[
+                "cargo".to_string(),
+                "test".into(),
+                "-p".into(),
+                "demo".into()
+            ][..]
+        )
+    );
+}
