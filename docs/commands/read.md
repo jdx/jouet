@@ -38,7 +38,7 @@ src/lib.rs: method Client::download (6-9)
 
 Code is printed with line numbers, at most `--max-lines` lines across all selections in the call (400 by default; `0` is no limit), and an outline at most that many definitions. A cut ends with a marker, such as `... 16 more lines (--range 3:18, or raise --max-lines)`; a selection skipped after the limit is reached is noted with its full line count and range.
 
-Inside an agent session, lines this session was already shown, from a file unchanged since, collapse to one line, as in [`jouet search`](/commands/search#sessions); `--again` prints them. The hooks remember what Claude Code's Read tool showed too. Each of Claude Code's subagents has a memory of its own, apart from the lead's and from each other's ([sessions](/commands/search#sessions)).
+Inside an agent session, a selection whose lines were all already shown, from a file unchanged since, collapses to one line; `--again` prints it. A selection that only partly overlaps previously shown lines is printed again, subject to `--max-lines`. The hooks remember what Claude Code's Read tool showed too. Each of Claude Code's subagents has a memory of its own, apart from the lead's and from each other's ([sessions](/commands/search#sessions)); [`jouet search`](/commands/search#sessions) also uses session memory.
 
 Definitions come from tree-sitter, for Rust, Python, JavaScript, TypeScript, Go, Ruby, Java, C, C++ and Luau. An outline or symbol of another kind of file exits 2; `--range` works on any text file. A missing file exits 3, as does a call whose every symbol is missing; that error lists what the file defines.
 
