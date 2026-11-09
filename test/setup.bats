@@ -715,8 +715,15 @@ claude_sessions() {
 	run jq -c '[.autoCompactWindow, .permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
 	assert_output '[300000,["Bash(rm:*)","Artifact","ArtifactComments","ArtifactData","Workflow","mcp__visualize"],{"loop":"off","docx":"user-invocable-only"}]'
 
+	run --separate-stderr jouet setup claude --undo window --dry-run
+	assert_success
+	assert_line "note: would remove the autoCompactWindow of 300000 that setup set"
+	run jq .autoCompactWindow "$HOME/.claude/settings.json"
+	assert_output 300000
+
 	run --separate-stderr jouet setup claude --undo window
 	assert_success
+	assert_line "note: removed the autoCompactWindow of 300000 that setup set"
 	run jq -c '[.autoCompactWindow, (.permissions.deny | length)]' "$HOME/.claude/settings.json"
 	assert_output '[null,6]'
 

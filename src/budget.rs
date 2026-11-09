@@ -505,6 +505,8 @@ pub(crate) struct Change {
     pub(crate) deny: Vec<Unused>,
     pub(crate) undo_window: bool,
     pub(crate) undo_unused: bool,
+    /// Only for the notes' wording: nothing is written either way.
+    pub(crate) dry_run: bool,
 }
 
 impl Change {
@@ -528,8 +530,13 @@ pub(crate) fn apply(doc: &mut Value, change: &Change, added: &mut Added) -> Vec<
         match object.get("autoCompactWindow") {
             Some(current) if current.as_u64() == Some(window) => {
                 object.remove("autoCompactWindow");
+                let verb = if change.dry_run {
+                    "would remove"
+                } else {
+                    "removed"
+                };
                 notes.push(format!(
-                    "takes out the autoCompactWindow of {window} that setup set"
+                    "{verb} the autoCompactWindow of {window} that setup set"
                 ));
             }
             Some(current) => notes.push(format!(
