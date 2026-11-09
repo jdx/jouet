@@ -1323,6 +1323,32 @@ SH
 	assert_output --partial 'could not be compared'
 }
 
+@test "--baseline leaves shifted Ruff diagnostics unresolved" {
+	printf '1\n' >line
+	printf 'F821\n' >rule
+	cat >ruff <<'SH'
+#!/bin/sh
+line=$(cat line)
+printf '%s Undefined name `x`\n --> a.py:%s:7\n  |\n%s | print(x)\n  |       ^\n\nFound 1 error.\n' "$(cat rule)" "$line" "$line"
+exit 1
+SH
+	chmod +x ruff
+	git add line rule ruff
+	git commit -qm base
+	git checkout -qb work
+	printf '5\n' >line
+
+	run --separate-stderr jouet test --baseline --cmd -- ./ruff check .
+	assert_failure 1
+	assert_output --partial 'could not be compared'
+	refute_output --partial 'NEW FAILURE'
+
+	printf 'F822\n' >rule
+	run --separate-stderr jouet test --baseline --cmd -- ./ruff check .
+	assert_failure 1
+	assert_output --partial 'NEW FAILURE'
+}
+
 @test "--baseline compares complete remark link warnings with their details" {
 	printf 'missing heading\n' >reason
 	cat >check-command <<'SH'
