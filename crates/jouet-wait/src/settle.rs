@@ -204,6 +204,10 @@ pub struct SettleWait {
     conflict: ConflictCheck,
     items: Vec<Item>,
     dropped: BTreeMap<&'static str, usize>,
+    /// When the PR last settled with nothing for the agent (Unix seconds).
+    settled_at: Option<i64>,
+    /// Whether the latest poll found it so.
+    last_poll_settled: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -250,6 +254,8 @@ impl SettleWait {
             conflict,
             items: Vec::new(),
             dropped: BTreeMap::new(),
+            settled_at: None,
+            last_poll_settled: false,
         }
     }
 
@@ -358,6 +364,7 @@ impl Watch for SettleWait {
                     message: format!("{repo}#{number} does not exist"),
                 })
             })?;
+        self.last_poll_settled = false;
         let (items, dropped, activity) = review(&fetched, self.options.since, self.options.acks);
         self.items = items;
         self.dropped = dropped;
@@ -406,10 +413,14 @@ impl Watch for SettleWait {
             .snap
             .checks
             .iter()
-            .filter(|c| c.state.failed())
+            // An Entire Gates failure that only repeats other checks, or
+            // waits on a base update or an approval, is not one to fix.
+            .filter(|c| c.state.failed() && !c.derived())
             .cloned()
             .collect();
         if failed.is_empty() && conflict.is_none() && self.items.is_empty() {
+            self.settled_at = Some(jouet_output::time::now());
+            self.last_poll_settled = true;
             return Ok(Poll::Pending("settled; nothing needs the agent".into()));
         }
         if let Some(lines) = self.options.log_lines {
@@ -420,12 +431,18 @@ impl Watch for SettleWait {
     }
 
     fn timed_out(&mut self, _remote: &mut Remote) -> Doc {
-        self.doc(
-            "timeout",
-            "nothing needed the agent".into(),
-            None,
-            Vec::new(),
-        )
+        // Comments seen before the PR last settled with nothing to do were
+        // judged; any later ones were not, so the next wait starts there.
+        let (state, next) = match self.settled_at {
+            Some(at) if self.last_poll_settled => ("nothing needed the agent".to_string(), at),
+            _ => (
+                "the PR had not settled".to_string(),
+                self.settled_at.unwrap_or(self.options.since),
+            ),
+        };
+        let mut doc = self.doc("timeout", state, None, Vec::new());
+        doc.next_since = format_utc(next);
+        doc
     }
 
     fn text(&self, doc: &Doc, reporter: &Reporter) -> String {
