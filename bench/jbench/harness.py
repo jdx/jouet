@@ -54,6 +54,8 @@ class Harness:
     auth_files: tuple[str, ...] = ()
     config_dir_env = ""
     default_config_dir = ""
+    # Set in every run, so the harness runs as it does for real users.
+    env: dict[str, str] = {}
 
     def command(self, binary: str, prompt: str, opts: dict[str, Any], workdir: Path) -> list[str]:
         raise NotImplementedError
@@ -125,6 +127,10 @@ class Claude(Harness):
     auth_files = (".credentials.json",)
     config_dir_env = "CLAUDE_CONFIG_DIR"
     default_config_dir = ".claude"
+    # Real sessions run in the desktop app, which sets this. Claude Code
+    # then adds the Artifact tools, about 12.8k tokens on every request, so
+    # a run without it has a smaller fixed context than any real session.
+    env = {"CLAUDE_CODE_ENTRYPOINT": "claude-desktop"}
 
     def command(self, binary: str, prompt: str, opts: dict[str, Any], workdir: Path) -> list[str]:
         cmd = [
