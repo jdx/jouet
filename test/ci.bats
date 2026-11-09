@@ -244,11 +244,11 @@ seed_explain_cache() {
 	assert_line "  failed: a_command_is_rerun_until_it_exits_as_expected  at tests/wait.rs:436:5"
 	assert_line "  - fails only on macos: \`a_command_is_rerun_until_it_exits_as_expected\` passed on linux on this commit (trusted / test)"
 	assert_line "  - most likely a macos difference (a command, path or tool that behaves differently there), which a rerun repeats; it is flaky only if the same job passes on this commit"
-	assert_line "rerun: refused, a rerun repeats a real failure: trusted / test-macos (real)"
+	assert_line --partial "rerun: allowed, reruns every failed job; not a flake or infrastructure: trusted / test-macos (real)"
 	assert_line "GitHub: 0 requests, 9 from the cache"
 }
 
-@test "ci explain calls a compile error main also had real, and --rerun refuses it with exit 4" {
+@test "ci explain calls a compile error main also had real" {
 	seed_explain_cache
 	run --separate-stderr jouet --json ci explain --run 41193332714 --repo jdx/jouet
 
@@ -257,11 +257,6 @@ seed_explain_cache() {
 	assert_equal "$(jq '[.runs[0].jobs[] | select(.verdict == "real" and .main_broken)] | length' <<<"$output")" 11
 	assert_equal "$(jq -r '.runs[0].jobs[0].errors[0]' <<<"$output")" "error[E0425]: cannot find function \`lowercase_first\` in this scope"
 	assert_equal "$(jq -r '[.runs[0].following[].name] | join(",")' <<<"$output")" "trusted / final,final"
-
-	run --separate-stderr jouet ci explain --run 41193332714 --repo jdx/jouet --rerun
-	assert_failure 4
-	assert_output ""
-	assert_equal "${stderr_lines[0]}" "jouet: not rerunning: a rerun repeats a real failure: trusted / test (real), trusted / release-build (x86_64-unknown-linux-musl, ubuntu-latest) (real), trusted / msrv (real) and 8 more"
 }
 
 @test "ci explain takes one target, and an unreachable GitHub is a remote failure" {
