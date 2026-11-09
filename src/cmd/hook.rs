@@ -832,27 +832,26 @@ fn fnox_note(cwd: Option<&Path>, proxied: bool) -> Option<String> {
 /// to the background.
 const LONG_RUN_MS: u64 = 600_000;
 
-/// For Claude Code in `bypassPermissions` mode, a Bash call that runs a
-/// test, build or lint (what the `checks` rule records) with no timeout of
-/// its own gets the longest, so it ends in that call. Past the default two
-/// minutes it moves to the background, and agents then spent a request on
-/// each look at it: three of twelve in one benchmark run. Only in that mode,
-/// since `updatedInput` needs `permissionDecision: "allow"`, which in any
-/// other would skip the user's prompt; the command itself is never changed.
+/// For Claude Code, a Bash call that runs a test, build or lint (what the
+/// `checks` rule records) with no timeout of its own gets the longest, so it
+/// ends in that call. Past the default two minutes it moves to the
+/// background, and agents then spent a request on each look at it: three of
+/// twelve in one benchmark run. The timeout goes through `updatedInput` with
+/// no `permissionDecision`: Claude Code then applies the user's own
+/// permission check to the updated call, so this works in every permission
+/// mode and skips no prompt. The command itself is never changed.
 fn with_long_timeout(
     engine: &Engine,
     payload: &Value,
     call: &Call,
     output: Option<Value>,
 ) -> Option<Value> {
-    let bypass =
-        payload.get("permission_mode").and_then(Value::as_str) == Some("bypassPermissions");
     let Some(input) = payload.get("tool_input").and_then(Value::as_object) else {
         return output;
     };
     let timed = input.contains_key("timeout")
         || input.get("run_in_background").and_then(Value::as_bool) == Some(true);
-    if !bypass || call.tool != "Bash" || timed {
+    if call.tool != "Bash" || timed {
         return output;
     }
     // A check run is what the post-tool-use rules would record.
@@ -873,11 +872,6 @@ fn with_long_timeout(
         .entry("hookSpecificOutput")
         .or_insert_with(|| json!({"hookEventName": "PreToolUse"}));
     if let Some(specific) = specific.as_object_mut() {
-        specific.insert("permissionDecision".into(), json!("allow"));
-        specific.insert(
-            "permissionDecisionReason".into(),
-            json!("jouet: a 10-minute timeout, so this run ends in this call"),
-        );
         specific.insert("updatedInput".into(), Value::Object(updated));
     }
     Some(out)
@@ -1826,6 +1820,22 @@ mod tests {
                 .get("permissionDecision")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_check_run_gets_a_long_timeout_without_a_permission_decision() {
+        let engine = engine(Vec::new());
+        let payload = json!({"tool_name": "Bash", "tool_input": {"command": "cargo test"}, "permission_mode": "default"});
+        let call = Call::from_hook(&payload, "claude");
+        let out = with_long_timeout(&engine, &payload, &call, None).unwrap();
+        let specific = &out["hookSpecificOutput"];
+        assert_eq!(
+            specific["updatedInput"],
+            json!({"command": "cargo test", "timeout": LONG_RUN_MS})
+        );
+        // No allow, so the user's own permission check still applies.
+        assert!(specific.get("permissionDecision").is_none());
+        assert!(specific.get("permissionDecisionReason").is_none());
     }
 
     #[test]
