@@ -296,6 +296,18 @@ impl Job {
         )
     }
 
+    fn failure_time(&self) -> Option<i64> {
+        self.doc["steps"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|step| step["conclusion"] == "failure")
+            .filter_map(|step| step["completed_at"].as_str())
+            .filter_map(jouet_output::time::parse_utc)
+            .min()
+            .or(self.completed_at)
+    }
+
     fn passed(&self) -> bool {
         self.conclusion == "success"
     }
@@ -790,26 +802,34 @@ fn explain_run(
         }
         !follows
     });
-    let first_failed = reads.first().map(|r| r.job.name.clone());
+    let first_failed = reads
+        .iter()
+        .filter_map(|r| r.job.failure_time().map(|end| (end, r.job.name.clone())))
+        .min();
     let cancelled: Vec<&Job> = jobs
         .iter()
         .filter(|j| j.conclusion == "cancelled")
         .collect();
-    match &first_failed {
-        Some(name) => following.extend(cancelled.iter().map(|j| Following {
-            name: j.name.clone(),
-            job_id: j.id,
-            conclusion: j.conclusion.clone(),
-            follows: name.clone(),
-        })),
-        // Cancelled with nothing failed: by hand, by a newer run, or the
-        // runner, which its log may say.
-        None if run.completed() => {
-            for job in cancelled.iter().take(OWN_LOGS) {
+    for job in cancelled {
+        if let Some((_, name)) = first_failed
+            .as_ref()
+            .filter(|(end, _)| job.completed_at.is_some_and(|time| time >= *end))
+        {
+            following.push(Following {
+                name: job.name.clone(),
+                job_id: job.id,
+                conclusion: job.conclusion.clone(),
+                follows: name.clone(),
+            });
+        } else if run.completed() || !failed.is_empty() {
+            // Earlier cancellations, and those with unknown timing, can have
+            // their own cause. Keep the log-reading budget for the whole run.
+            if reads.len() < OWN_LOGS {
                 reads.push(read(gh, job, log_lines));
+            } else {
+                unread.push(job);
             }
         }
-        None => {}
     }
     if let Some(id) = only_job {
         reads.retain(|r| r.job.id == id);
@@ -820,7 +840,12 @@ fn explain_run(
     let mut groups: Vec<(Option<String>, Vec<usize>)> = Vec::new();
     for (i, r) in reads.iter().enumerate() {
         let key = r.sig.group_key(r.job.os);
-        match groups.iter_mut().find(|(k, _)| key.is_some() && *k == key) {
+        match groups.iter_mut().find(|(k, members)| {
+            key.is_some()
+                && *k == key
+                && (reads[members[0]].job.conclusion == "cancelled")
+                    == (r.job.conclusion == "cancelled")
+        }) {
             Some((_, members)) => members.push(i),
             None => groups.push((key, vec![i])),
         }
@@ -836,8 +861,7 @@ fn explain_run(
         } else if lead.job.conclusion == "cancelled" && judged.verdict != Verdict::Infrastructure {
             judged.verdict = Verdict::Unknown;
             judged.evidence = vec![
-                "cancelled, not after a failure in this run: by hand, by a newer run, or a runner its log does not name"
-                    .into(),
+                "cancelled; its cause is not established by the other failures in this run".into(),
             ];
         }
         for &i in members {
@@ -859,7 +883,7 @@ fn explain_run(
             infrastructure: None,
             main_broken: false,
             evidence: vec![format!(
-                "its log was not read: only the first {OWN_LOGS} failed jobs of a run are"
+                "its log was not read: only the first {OWN_LOGS} failed or independently cancelled jobs of a run are"
             )],
             group: jobs_out.len(),
             log_excerpt: Vec::new(),

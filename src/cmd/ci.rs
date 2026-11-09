@@ -188,9 +188,14 @@ fn render_explain(r: &explain::Report) -> String {
         for (list, how) in [(failed, "failed after"), (cancelled, "cancelled after")] {
             if let Some(first) = list.first() {
                 let names: Vec<String> = list.iter().map(|f| f.name.clone()).collect();
+                let detail = if how == "cancelled after" {
+                    " (cause not verified)"
+                } else {
+                    ", with nothing of their own"
+                };
                 let _ = writeln!(
                     s,
-                    "\n{how} {} failed, with nothing of their own: {}",
+                    "\n{how} {} failed{detail}: {}",
                     first.follows,
                     short_list(&names)
                 );
