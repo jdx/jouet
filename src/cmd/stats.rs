@@ -593,6 +593,19 @@ fn measured_text(s: &mut String, m: &Measured) {
             m.verify_blocks
         );
     }
+    if !m.gate.is_empty() {
+        let _ = writeln!(
+            s,
+            "  stop gate by reason (right: an edit or a failed check came next; passed: a check passed first; open: neither yet):"
+        );
+        for g in &m.gate {
+            let _ = writeln!(
+                s,
+                "    {} {}: {} (right {}, passed {}, open {})",
+                g.action, g.reason, g.stops, g.right, g.passed, g.open
+            );
+        }
+    }
     if m.failure_excerpts > 0 {
         let _ = writeln!(
             s,

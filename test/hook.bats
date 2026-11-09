@@ -123,6 +123,51 @@ TOML
 	assert_output ""
 }
 
+@test "by default the stop gate observes: it records a would-block once and lets the agent finish" {
+	unset JOUET_HOOKS_GATE
+	jq -cn '{session_id: "s1", hook_event_name: "PostToolUseFailure", tool_name: "Bash",
+		tool_input: {command: "cargo test --workspace"}, error: "Exit code 101\ntest result: FAILED", is_interrupt: false}' |
+		jouet hook claude post-tool-use-failure
+
+	run --separate-stderr jouet hook claude stop <<<'{"session_id":"s1","stop_hook_active":false}'
+	assert_success
+	assert_output ""
+	# Raised once, as a block would be: the next stop records nothing new.
+	run --separate-stderr jouet hook claude stop <<<'{"session_id":"s1","stop_hook_active":false}'
+	assert_output ""
+	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	run jq -c 'select(.event == "stop") | .decisions // [] | map(.rule + ":" + .action + ":" + .scope)' "$ledger"
+	assert_line --index 0 '["verify:would-block:failed-test"]'
+	assert_line --index 1 '[]'
+
+	# An edit is recorded, for `jouet stats` to judge the would-block by.
+	jq -cn '{session_id: "s1", tool_name: "Edit", tool_input: {file_path: "a.rs"}}' | jouet hook claude post-edit
+	run jq -c 'select(.event == "edit") | [.tool, .session]' "$ledger"
+	assert_output '["Edit","s1"]'
+	run --separate-stderr jouet stats --json
+	assert_success
+	run jq -c '.measured.gate' <<<"$output"
+	assert_output '[{"reason":"failed-test","action":"would-block","stops":1,"right":1}]'
+
+	# Set to block, the same reason blocks and is recorded as a block.
+	jq -cn '{session_id: "s2", hook_event_name: "PostToolUseFailure", tool_name: "Bash",
+		tool_input: {command: "cargo test --workspace"}, error: "Exit code 101", is_interrupt: false}' |
+		jouet hook claude post-tool-use-failure
+	run --separate-stderr env JOUET_HOOKS_GATE=block jouet hook claude stop <<<'{"session_id":"s2","stop_hook_active":false}'
+	run jq -r .decision <<<"$output"
+	assert_output block
+	run jq -c 'select(.event == "stop" and .session == "s2") | .decisions | map(.action + ":" + .scope)' "$ledger"
+	assert_output '["block:failed-test"]'
+}
+
+@test "observing, the session-start primer does not say the stop gate blocks" {
+	unset JOUET_HOOKS_GATE
+	run --separate-stderr jouet hook claude session-start <<<'{"session_id":"s1","source":"startup"}'
+	refute_output --partial 'They also stop you finishing'
+	run --separate-stderr env JOUET_HOOKS_GATE=block jouet hook claude session-start <<<'{"session_id":"s1","source":"startup"}'
+	assert_output --partial 'They also stop you finishing'
+}
+
 # A finished command in the work tree at ./repo, as Claude Code reports it.
 ran() {
 	local event=PostToolUse

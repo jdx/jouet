@@ -33,6 +33,9 @@ _common_setup() {
 	# The developer's own `entire` stays out of the tests; entire.bats turns it
 	# back on with a fake one on PATH.
 	export JOUET_ENTIRE=false
+	# The stop gate observes by default; most tests are of what it blocks
+	# for, so they ask it to block. hook.bats tests the default.
+	export JOUET_HOOKS_GATE=block
 	export HOME="$BATS_TEST_TMPDIR/home"
 	export XDG_STATE_HOME="$BATS_TEST_TMPDIR/state"
 	export JOUET_LOG_DIR="$BATS_TEST_TMPDIR/logs"

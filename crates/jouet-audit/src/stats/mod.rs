@@ -85,6 +85,10 @@ pub struct Measured {
     /// Sessions stopped from finishing after a failed check.
     #[serde(skip_serializing_if = "is_zero")]
     pub verify_blocks: u64,
+    /// The stop gate's reasons, each as it blocked for it or only
+    /// observed it (`[hooks] gate`), and what came after: most first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub gate: Vec<GateReason>,
     /// `jouet wait ci` and `wait run` runs that failed, each returning the
     /// failed step's excerpt instead of the whole log.
     #[serde(skip_serializing_if = "is_zero")]
@@ -217,6 +221,66 @@ pub struct RuleCounts {
     pub then_nothing: u64,
 }
 
+/// One reason the stop gate found, as it acted on it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct GateReason {
+    /// What the reason was about: `failed-test`, `failed-lint`,
+    /// `failed-build`, `changed-after-pass`, `hk-partial`, `hk-changed`, or
+    /// `hk-stop` for hk's own stop hook.
+    pub reason: String,
+    /// `block` where the gate stopped the agent, `would-block` where it
+    /// only observed.
+    pub action: String,
+    /// The stops it was found at.
+    pub stops: u64,
+    /// Of those, the ones that proved right: the session's next edit or
+    /// failed check came before any check passed. An edit means the agent
+    /// changed something after all; a failed check, that something was
+    /// still broken.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub right: u64,
+    /// The ones where a check passed first, with no edit before it: the
+    /// change was fine as it stood.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub passed: u64,
+    /// The rest: the session has done neither since, so far as the ledger
+    /// knows.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub open: u64,
+}
+
+/// What first followed a stop the gate found a reason at, in its session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum After {
+    /// An edit, or a check that failed.
+    Right,
+    /// A check that passed.
+    Passed,
+}
+
+/// The first edit or check among `after`, the session's entries after a
+/// stop. An edit is the harness's edit tool (`edit` entries) or a `jouet
+/// edit` that succeeded; an edit made some other way, such as by `sed -i`,
+/// is not seen. A call that edits and checks counts as the edit.
+fn judge<'a>(after: impl IntoIterator<Item = &'a LedgerEntry>) -> Option<After> {
+    after.into_iter().find_map(|e| {
+        let ran = e.shape.as_deref().map(jouet_commands).unwrap_or_default();
+        let edited = e.event == "edit"
+            || (matches!(e.event.as_str(), "jouet-run" | "post-tool-use")
+                && e.exit_code == Some(0)
+                && ran.iter().any(|c| Kind::of(c) == Some(Kind::Edit)));
+        if edited {
+            Some(After::Right)
+        } else if passing_check(e) {
+            Some(After::Passed)
+        } else if failed_check(e) {
+            Some(After::Right)
+        } else {
+            None
+        }
+    })
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckRuns {
     /// `test`, `lint` or `build`.
@@ -297,6 +361,8 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
     // Every entry of each session, for what followed a stop block.
     let mut whole_session: HashMap<&str, Vec<usize>> = HashMap::new();
     let mut blocks: Vec<usize> = Vec::new();
+    // Each reason the gate found at a stop: the entry, its reason and action.
+    let mut gate: Vec<(usize, &str, &str)> = Vec::new();
     for (i, e) in kept.iter().enumerate() {
         sessions.insert(e.session.as_deref());
         if let Some(session) = e.session.as_deref() {
@@ -343,10 +409,16 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
                     added.warnings += 1;
                 }
                 "override" if counted => rule_counts(&mut rules, &d.rule).overrides += 1,
-                "block" if d.rule == "verify" => {
-                    m.verify_blocks += 1;
-                    added.stop_blocks += 1;
-                    blocks.push(i);
+                "block" | "would-block" if d.rule == "verify" => {
+                    // A stop blocked for several reasons is one block.
+                    if d.action == "block" && blocks.last() != Some(&i) {
+                        m.verify_blocks += 1;
+                        added.stop_blocks += 1;
+                        blocks.push(i);
+                    }
+                    if let Some(reason) = d.scope.as_deref() {
+                        gate.push((i, reason, d.action.as_str()));
+                    }
                 }
                 action => {
                     if let Some(kind) = action.strip_prefix("record:") {
@@ -456,6 +528,42 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
             o.stop_blocks_resolved += 1;
         }
     }
+    let mut reasons: BTreeMap<(&str, &str), GateReason> = BTreeMap::new();
+    for (i, reason, action) in gate {
+        let r = reasons
+            .entry((reason, action))
+            .or_insert_with(|| GateReason {
+                reason: reason.to_string(),
+                action: action.to_string(),
+                ..GateReason::default()
+            });
+        r.stops += 1;
+        let after = kept[i]
+            .session
+            .as_deref()
+            .and_then(|s| whole_session.get(s))
+            .map(|entries| {
+                judge(
+                    entries
+                        .iter()
+                        .skip_while(|&&j| j != i)
+                        .skip(1)
+                        .map(|&j| kept[j]),
+                )
+            });
+        match after.flatten() {
+            Some(After::Right) => r.right += 1,
+            Some(After::Passed) => r.passed += 1,
+            None => r.open += 1,
+        }
+    }
+    m.gate = reasons.into_values().collect();
+    m.gate.sort_by(|a, b| {
+        b.stops
+            .cmp(&a.stops)
+            .then_with(|| a.action.cmp(&b.action))
+            .then_with(|| a.reason.cmp(&b.reason))
+    });
     for ((rule, _), n) in fired {
         let r = rule_counts(&mut rules, rule);
         r.sessions += 1;
@@ -493,6 +601,17 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
 /// rule recorded, or a `jouet test` that recorded its own exit code.
 fn passing_check(e: &LedgerEntry) -> bool {
     e.exit_code == Some(0)
+        && (e.decisions.iter().any(|d| d.action.starts_with("record:"))
+            || (e.event == "jouet-run"
+                && e.shape
+                    .as_deref()
+                    .is_some_and(|s| jouet_commands(s).iter().any(|c| c == "jouet test"))))
+}
+
+/// Whether `e` is a test, lint or build run that failed, as
+/// [`passing_check`] tells one that passed.
+fn failed_check(e: &LedgerEntry) -> bool {
+    e.exit_code.is_some_and(|code| code != 0)
         && (e.decisions.iter().any(|d| d.action.starts_with("record:"))
             || (e.event == "jouet-run"
                 && e.shape
