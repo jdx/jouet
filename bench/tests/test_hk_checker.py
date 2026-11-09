@@ -10,6 +10,7 @@ CHECKER = Path(__file__).resolve().parents[1] / "tasks/hk-check-file-args/check.
 
 class HkCheckerTest(unittest.TestCase):
     def test_requires_a_clean_committed_checkout_before_running_checks(self):
+        """Check checkout requirements, test outcomes, and complete failure output."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             work = root / "work"
@@ -22,6 +23,8 @@ class HkCheckerTest(unittest.TestCase):
             bats = work / "test/bats/bin/bats"
             bats.parent.mkdir(parents=True)
             bats.write_text("#!/bin/sh\n"
+                            "if [ \"$1\" = --filter ] && [ \"$BATS_CASE\" = hidden_long ]; then "
+                            "printf 'first hidden failure\\n%04000d\\nlast hidden failure\\n' 0; exit 1; fi\n"
                             "if [ \"$2\" = test/existing.bats ]; then printf '1..1\\nok 1 old\\n'; exit 0; fi\n"
                             "if [ \"$1\" = --tap ] && ! grep -q regression \"$2\"; then exit 7; fi\n"
                             "case $BATS_CASE in\n"
@@ -91,6 +94,13 @@ class HkCheckerTest(unittest.TestCase):
             result = check()
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             self.assertIn("committed Bats regression failed", result.stdout)
+
+            git("restore", "test/check.bats")
+            env["BATS_CASE"] = "hidden_long"
+            result = check()
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("first hidden failure", result.stdout)
+            self.assertIn("last hidden failure", result.stdout)
 
             git("restore", "test/check.bats")
             git("rm", "test/check.bats")
