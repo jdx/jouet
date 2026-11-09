@@ -38,7 +38,8 @@ class FnoxBatsTest(unittest.TestCase):
 
                 def run(*args):
                     self.assertEqual(args[0], "test/bats/bin/bats")
-                    generated = Path(args[1])
+                    self.assertEqual(args[1], "--tap")
+                    generated = Path(args[2])
                     self.assertEqual(generated.parent.resolve(), (root / "test").resolve())
                     self.assertIn("default_identity selects a key", generated.read_text())
                     self.assertEqual(original.read_text(), "agent's test\n")
@@ -51,6 +52,14 @@ class FnoxBatsTest(unittest.TestCase):
                 self.assertEqual(list((root / "test").iterdir()), [original])
             finally:
                 os.chdir(before)
+
+    def test_hidden_timeout_recognizes_only_named_tap_failures(self):
+        name = "FNOX_AGE_KEY outranks an unknown FNOX_AGE_IDENTITY"
+        self.assertTrue(hidden_checker.failed_hidden(f"1..5\nnot ok 3 {name}\n".encode()))
+        self.assertFalse(hidden_checker.failed_hidden(f"1..5\nok 3 {name}\n"))
+        self.assertFalse(hidden_checker.failed_hidden("not ok 3 another test\n"))
+        self.assertFalse(hidden_checker.failed_hidden(f"# not ok 3 {name}\n"))
+        self.assertFalse(hidden_checker.failed_hidden(None))
 
     def test_hidden_test_refuses_a_symlinked_test_directory(self):
         with tempfile.TemporaryDirectory() as directory:
