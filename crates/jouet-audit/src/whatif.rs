@@ -136,7 +136,8 @@ impl WhatIfAcc {
             }
         }
         for (slot, reserve) in [0, RESERVE].into_iter().enumerate() {
-            let (tokens, price, compactions) = replay(&requests, d, spec.window, reserve);
+            let start = t.start_tokens.map_or(requests[0].0, |n| n as f64);
+            let (tokens, price, compactions) = replay(&requests, start, d, spec.window, reserve);
             let s = &mut self.sims[slot];
             s.0 += tokens;
             s.1 += price;
@@ -204,20 +205,20 @@ impl WhatIfAcc {
     }
 }
 
-/// One transcript replayed: its input tokens, their price, and the
-/// compactions the window added.
+/// One transcript replayed from `start`, the context it began with: its
+/// input tokens, their price, and the compactions the window added.
 fn replay(
     requests: &[(f64, f64, bool)],
+    start: f64,
     d: f64,
     window: Option<u64>,
     reserve: u64,
 ) -> (f64, f64, u64) {
-    let base = requests[0].0;
     let fire = window.map(|w| w.saturating_sub(reserve) as f64);
     let (mut tokens, mut price, mut compactions) = (0.0, 0.0, 0);
     // The context as it would have been, before the denied definitions.
-    let mut s = base;
-    let mut previous = base;
+    let mut s = requests[0].0;
+    let mut previous = s;
     for (i, &(c, per_token, compacted)) in requests.iter().enumerate() {
         if i > 0 {
             s = if compacted || c + (DROP as f64) < previous {
@@ -227,8 +228,13 @@ fn replay(
             };
         }
         previous = c;
+        // A compaction keeps what the transcript started with and a summary,
+        // and never leaves more than it found. The denied definitions are
+        // gone from the context it measures.
+        let after = (start + POST).min(s);
         if let Some(fire) = fire
-            && s > fire
+            && s - d > fire
+            && after < s
         {
             compactions += 1;
             // The summary reads the whole context, cached; what is left is
@@ -236,7 +242,7 @@ fn replay(
             let read = (s - d).max(FLOOR);
             tokens += read;
             price += read * CACHE_READ;
-            s = base + POST;
+            s = after;
             price += (s - d).max(FLOOR) * CACHE_WRITE;
         }
         let x = (s - d).max(FLOOR);
@@ -372,6 +378,33 @@ mod tests {
         assert!(late.saved > 0.0 && early.saved > late.saved, "{r:?}");
         // Summaries and cache writes cost something.
         assert!(late.weighted_saved < late.saved);
+    }
+
+    #[test]
+    fn a_window_compacts_to_where_the_transcript_started_not_where_since_cut_it() {
+        let spec = WhatIf::parse("window=100k").unwrap();
+        let mut t = transcript(&[150_000, 160_000]);
+        // `--since` dropped the requests before 150k; it started at 20k.
+        t.start_tokens = Some(20_000);
+        let mut acc = WhatIfAcc::default();
+        acc.add(&spec, &t);
+        let late = &acc.report(&spec).unwrap().scenarios[0];
+        // One compaction to 39k, which then grows by 10k.
+        assert_eq!(late.compactions, 1);
+        assert_eq!(late.input_tokens, 150_000 + 39_000 + 49_000);
+    }
+
+    #[test]
+    fn denied_definitions_leave_room_before_the_window() {
+        // 4.6k characters a token: 92k bytes is 20k tokens.
+        let mut t = transcript(&[50_000, 110_000, 115_000]);
+        t.definitions.as_mut().unwrap().items[0].bytes = 92_000;
+        let mut acc = WhatIfAcc::default();
+        let spec = WhatIf::parse("window=100k,deny=Workflow").unwrap();
+        acc.add(&spec, &t);
+        let late = &acc.report(&spec).unwrap().scenarios[0];
+        assert_eq!(late.compactions, 0);
+        assert_eq!(late.input_tokens, 275_000 - 60_000);
     }
 
     #[test]

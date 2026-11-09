@@ -24,6 +24,9 @@ pub struct Transcript {
     pub messages: Vec<Message>,
     /// Lines in the file, counting those skipped.
     pub lines: u64,
+    /// The context of the transcript's first request with a token count,
+    /// before `--since` dropped any: what it started from.
+    pub start_tokens: Option<u64>,
     /// What the harness sent with every request besides the conversation,
     /// as the transcript first recorded it. Only Claude Code records it.
     pub definitions: Option<Definitions>,
