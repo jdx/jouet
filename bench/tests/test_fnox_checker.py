@@ -21,6 +21,27 @@ spec.loader.exec_module(checker)
 
 
 class FnoxBatsTest(unittest.TestCase):
+    def test_age_identity_task_exposes_both_age_tools(self):
+        task = tasks.load("fnox-age-identity-pr")
+        self.assertEqual(task.tools.get("age"), "age")
+        self.assertEqual(task.tools.get("age-keygen"), "age-keygen")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            binaries = {}
+            for name in ("mise", "age", "age-keygen"):
+                binary = root / name
+                binary.write_text(f"#!/bin/sh\nprintf '{name} available\\n'\n")
+                binary.chmod(0o755)
+                binaries[name] = binary
+            env = {"PATH": str(bin_dir), "HOME": str(root)}
+            with mock.patch("jbench.arms.resolve", side_effect=binaries.get):
+                task.agent_env(env, bin_dir, root)
+            for name in ("age", "age-keygen"):
+                result = subprocess.run([name], env=env, text=True, capture_output=True, check=True)
+                self.assertEqual(result.stdout, f"{name} available\n")
+
     def test_editor_task_exposes_age_keygen_to_the_isolated_environment(self):
         task = tasks.load("fnox-editor-args")
         self.assertEqual(task.tools.get("age-keygen"), "age-keygen")

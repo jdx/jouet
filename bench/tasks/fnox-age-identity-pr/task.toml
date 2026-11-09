@@ -40,6 +40,9 @@ commit = "7f5ee4088a676e94930fefce717d2b9fc5b596a0"
 # an agent can run the repository's own `mise run render`.
 [tools]
 mise = "mise"
+# The cost seed runs age.bats, whose tests need both commands.
+age = "age"
+age-keygen = "age-keygen"
 
 [env]
 RUSTUP_HOME = "~/.rustup"
