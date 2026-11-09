@@ -19,11 +19,14 @@ pub struct SessionMetrics {
     pub requests: u64,
     /// Input tokens over those requests, cached or not.
     pub input_tokens: u64,
-    /// Model time plus tool time, in milliseconds. A request's model time
-    /// is the wait from the end of what came before it (the previous
-    /// request, or its calls) to the request, at most 15 minutes, so a
-    /// person away from the keyboard is not counted; tool time is each
-    /// call's duration.
+    /// Model time plus tool time, in milliseconds, as wall time: every
+    /// request of every transcript of the session is put on one timeline,
+    /// each spanning from the model's wait before it to the end of its
+    /// calls, and the time any of them covers is counted once. The wait is
+    /// from the end of whatever came before it, at most 15 minutes, so a
+    /// person away from the keyboard is not counted. A resumed or forked
+    /// copy, or a subagent working alongside the lead, adds no time twice,
+    /// and the order the transcripts are read in does not matter.
     pub active_ms: u64,
     /// CI-monitor events reporting failing checks: the most any one of its
     /// transcripts has, since a resumed or forked copy repeats them and a
@@ -42,31 +45,29 @@ impl SessionMetrics {
             ..Self::default()
         };
         let mut seen = HashSet::new();
+        // Each request's time and the end of its calls.
+        let mut spans: Vec<(i64, i64)> = Vec::new();
         for t in transcripts {
             m.ci_failures = m.ci_failures.max(t.ci_failures);
-            let mut last_end: Option<i64> = None;
             for request in &t.requests {
-                let calls = &t.calls[request.calls.clone()];
-                let ends = calls.iter().filter_map(|c| {
-                    let ms = i64::try_from(c.duration_ms.unwrap_or(0)).unwrap_or(0);
-                    Some(c.at? + ms)
-                });
-                let end = ends.chain(request.at).max().or(last_end);
+                if let Some(at) = request.at {
+                    let calls = &t.calls[request.calls.clone()];
+                    let ends = calls.iter().filter_map(|c| {
+                        let ms = i64::try_from(c.duration_ms.unwrap_or(0)).unwrap_or(0);
+                        Some(c.at? + ms)
+                    });
+                    spans.push((at, ends.fold(at, i64::max)));
+                }
                 // A resumed or forked copy repeats its parent's requests:
-                // their time, like their tokens, counts once.
+                // their tokens count once.
                 if request.id.is_some_and(|id| !seen.insert(id)) {
-                    last_end = end;
                     continue;
                 }
-                m.active_ms += calls.iter().filter_map(|c| c.duration_ms).sum::<u64>();
-                if let (Some(at), Some(before)) = (request.at, last_end) {
-                    m.active_ms += u64::try_from((at - before).clamp(0, MODEL_CAP_MS)).unwrap_or(0);
-                }
-                last_end = end;
                 m.requests += 1;
                 m.input_tokens += request.input_tokens.unwrap_or(0);
             }
         }
+        m.active_ms = covered(spans);
         m
     }
 
@@ -79,6 +80,26 @@ impl SessionMetrics {
         };
         n as f64
     }
+}
+
+/// The time `spans` cover, each `(request, end of its calls)` widened back
+/// by the model's wait since the end of whatever came before it, at most
+/// [`MODEL_CAP_MS`]; the first has no wait to count.
+fn covered(mut spans: Vec<(i64, i64)>) -> u64 {
+    spans.sort_unstable();
+    let mut total: i64 = 0;
+    let mut reached: Option<i64> = None;
+    for (at, end) in spans {
+        let start = match reached {
+            Some(before) if before < at => before.max(at - MODEL_CAP_MS),
+            Some(_) => at,
+            None => at,
+        };
+        let from = reached.map_or(start, |before| start.max(before));
+        total += (end - from).max(0);
+        reached = Some(reached.map_or(end, |before| before.max(end)));
+    }
+    u64::try_from(total).unwrap_or(0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -319,6 +340,29 @@ mod tests {
         let m = SessionMetrics::of("s", &[main, resumed]);
         assert_eq!((m.requests, m.input_tokens, m.ci_failures), (3, 3000, 1));
         assert_eq!(m.active_ms, 30_000 + 10_000 + 15 * 60 * 1000);
+    }
+
+    #[test]
+    fn active_time_is_the_same_whatever_order_transcripts_come_in() {
+        let request = |at: i64, id: u64| Request {
+            at: Some(at),
+            id: Some(id),
+            calls: 0..0,
+            ..Request::default()
+        };
+        let transcript = |requests: Vec<Request>| Transcript {
+            session: "s".into(),
+            requests,
+            ..Transcript::default()
+        };
+        // The full copy, and one that left out request 2 and went on with
+        // a request of its own: its wait runs from request 2, not 1.
+        let full = transcript(vec![request(0, 1), request(60_000, 2)]);
+        let partial = transcript(vec![request(0, 1), request(90_000, 3)]);
+        let a = SessionMetrics::of("s", &[full.clone(), partial.clone()]);
+        let b = SessionMetrics::of("s", &[partial, full]);
+        assert_eq!(a, b);
+        assert_eq!((a.requests, a.active_ms), (3, 90_000));
     }
 
     #[test]

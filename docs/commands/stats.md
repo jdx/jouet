@@ -50,7 +50,7 @@ Two defaults changed ahead of a controlled comparison: the [stop gate](#the-stop
 - **The report.** For each toggle, `jouet stats` reads the transcripts of the sessions with an arm and shows each arm's n, and the median and interquartile range per session of four measures. The difference of the medians (control less new) comes with a 95% bootstrap interval, or none while an arm has fewer than two sessions. The measures are:
   - **requests:** model requests, each counted once even where a resumed session repeats them.
   - **input tokens:** over those requests, cached or not.
-  - **active minutes:** tool time plus model time. A request's model time is the wait since what came before it, at most 15 minutes, so time away from the keyboard is not counted.
+  - **active minutes:** tool time plus model time, as wall time. Every request of every transcript of the session goes on one timeline, from the model's wait before it (since whatever came before, at most 15 minutes, so time away from the keyboard is not counted) to the end of its calls. Time any of them covers counts once, so a resumed copy or a subagent working alongside the lead adds nothing twice.
   - **CI failures:** the desktop app's Auto-fix events that report failing checks.
 
 ```text
