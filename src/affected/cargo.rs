@@ -209,7 +209,7 @@ impl Name {
 }
 
 /// The paths the strings in `text`, a Rust file at `file` in a member at
-/// `dir`, name: each string with a `/`, read from the member's directory
+/// `dir`, name: each string with a `/` or in an include macro, read from the member's directory
 /// (`Path::new(env!("CARGO_MANIFEST_DIR")).join("../corpus")`, or after it
 /// in a `concat!` or a leading `{}` in `format!`), from the root, or, in `include_str!`, `include_bytes!`
 /// or `include!`, from the file's own directory. A string that leads out of
@@ -221,7 +221,10 @@ fn named(text: &str, dir: &str, file: &str) -> Vec<Name> {
     let here = file.rsplit_once('/').map_or("", |(d, _)| d);
     let mut names = Vec::new();
     for (start, literal) in strings(text) {
-        if !literal.contains('/') {
+        // An include macro's path is a file even without a `/`, as in
+        // `include_str!("init.md")` beside the including file.
+        let included = INCLUDE.is_match(&text[..start]);
+        if !included && !literal.contains('/') {
             continue;
         }
         // A leading placeholder is the directory the rest is read from, as
@@ -235,7 +238,6 @@ fn named(text: &str, dir: &str, file: &str) -> Vec<Name> {
             Some((fixed, _)) => (fixed, true),
             None => (literal, false),
         };
-        let included = INCLUDE.is_match(&text[..start]);
         let bases: &[&str] = if included { &[here] } else { &[dir, ""] };
         for base in bases {
             if let Some(path) = resolve(base, fixed, placeholder)
@@ -794,6 +796,11 @@ mod tests {
             "src/skill.rs",
             r#"fn init() -> &'static str { include_str!("skill/init.md") }"#,
         );
+        // Beside the including file: no `/` in the path.
+        write(
+            "src/help.rs",
+            r#"const HELP: &str = include_str!("help.md"); const W: &str = "help.txt";"#,
+        );
         // Another crate embeds a file from the root crate's directory, and
         // a path in any other string does not make a file part of a crate.
         write(
@@ -814,6 +821,8 @@ mod tests {
         assert_eq!(cargo.reached("src/skill/init.md"), vec![0]);
         assert!(cargo.embeds("guide/intro.md"));
         assert_eq!(cargo.reached("guide/intro.md"), vec![0, 1]);
+        assert!(cargo.embeds("src/help.md"));
+        assert!(!cargo.embeds("src/help.txt"));
         assert!(!cargo.embeds("notes/todo.md"));
         assert!(!cargo.embeds("README.md"));
     }
