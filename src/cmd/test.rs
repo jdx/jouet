@@ -100,6 +100,29 @@ struct Job {
     exit: Box<dyn Fn(i32) -> Exit>,
 }
 
+/// `args` with each `--budget` written after `--` taken out of the command
+/// and kept as jouet's, the last one winning; `None` when there is none, or
+/// one without a number.
+fn budget_after_separator(args: &TestArgs) -> Option<TestArgs> {
+    let mut fixed = args.clone();
+    fixed.extra.clear();
+    let mut found = false;
+    let mut words = args.extra.iter();
+    while let Some(w) = words.next() {
+        let value = if w == "--budget" {
+            words.next().map(String::as_str)
+        } else if let Some(value) = w.strip_prefix("--budget=") {
+            Some(value)
+        } else {
+            fixed.extra.push(w.clone());
+            continue;
+        };
+        fixed.budget = Some(value?.parse().ok()?);
+        found = true;
+    }
+    found.then_some(fixed)
+}
+
 pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     if !args.affected && (args.adapter.is_some() || (args.since.is_some() && !args.baseline)) {
         return out.error_with_hint(
@@ -122,7 +145,15 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
         );
     }
     // `--budget` is jouet's, and no runner's: after `--` it would go to the
-    // command, which then fails on it before running a test.
+    // command, which then fails on it before running a test. With a number,
+    // jouet takes it as its own and runs the command without it.
+    if let Some(fixed) = budget_after_separator(args) {
+        eprintln!(
+            "jouet: took `--budget {}` after `--` as jouet's; it goes before `--`",
+            fixed.budget.unwrap_or_default()
+        );
+        return run(&fixed, out);
+    }
     if let Some(word) = args
         .extra
         .iter()

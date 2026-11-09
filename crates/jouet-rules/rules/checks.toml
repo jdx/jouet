@@ -141,6 +141,9 @@ fires = [
   # `jouet test --cmd -- CMD` is a run of CMD.
   { command = "jouet test --cmd -- cargo build", exit_code = 1, kind = "build" },
   { command = "jouet test --cmd -- cargo test --workspace", exit_code = 0, kind = "test", scope = "full" },
+  # jouet takes a `--budget` written after `--` as its own.
+  { command = "jouet test --cmd -- cargo test --workspace --budget 2000", exit_code = 0, kind = "test", scope = "full" },
+  { command = "jouet test -- --budget=500", exit_code = 0, kind = "test", scope = "full" },
   { command = "jouet test --cmd -- mise run test:e2e", exit_code = 1, kind = "test", scope = "partial test:e2e" },
   { command = "jouet test --cmd -- python3 -m unittest", exit_code = 0, kind = "test", scope = "full" },
   # The command after --cmd is read through its wrappers, as any command is.
@@ -231,6 +234,10 @@ quiet = [
   # A command the rule does not know is recorded as nothing, as when run
   # directly.
   { command = "jouet test --budget 2000 --cmd -- ./run-tests.sh", exit_code = 0 },
+  # A budget from a variable may expand to more words for the command, so
+  # the run is not known to be the full suite.
+  { command = "jouet test --cmd -- cargo test --workspace --budget $OPTS", exit_code = 0 },
+  { command = "jouet test -- --budget=\"$N\"", exit_code = 0 },
   { command = "./run-tests.sh", exit_code = 0 },
   # A script that failed says nothing of which of its commands did, and
   # one that changes directory ran its checks in a work tree the rule

@@ -967,15 +967,35 @@ hint: jouet test --cmd -- cargo test -p mycrate"
 	assert_stderr --partial 'running no-such-program-here'
 }
 
-@test "--budget after -- is refused, with the command it meant" {
-	run --separate-stderr jouet test --cmd -- mise run test:e2e test_a --budget 600
+@test "--budget after -- is taken as jouet's, and the command never sees it" {
+	tap_script 6 "2 3 4 5 6"
+	mv run-tests tap
+	printf '#!/bin/sh\necho "$*" > args\nexec ./tap\n' >run-tests
+	chmod +x run-tests
+
+	run --separate-stderr jouet test --cmd -- ./run-tests test_a --budget 150
+
+	assert_failure 1
+	assert_equal "$(cat args)" "test_a"
+	assert_equal "$stderr" "jouet: took \`--budget 150\` after \`--\` as jouet's; it goes before \`--\`"
+	assert_line --index 0 --regexp '^cmd: failed \(exit 1\) in [0-9.]+s: 5 failed, 1 passed$'
+	assert_output --partial '... 3 more failures'
+
+	run --separate-stderr jouet test --budget 4000 --cmd -- ./run-tests --budget=150 test_b
+	assert_failure 1
+	assert_equal "$(cat args)" "test_b"
+	assert_output --partial '... 3 more failures'
+}
+
+@test "--budget after -- without a number is refused, with the command it meant" {
+	run --separate-stderr jouet test --cmd -- mise run test:e2e test_a --budget
 	assert_failure 2
 	assert_equal "$stderr" "jouet: \`--budget\` after \`--\` would go to the command, not to jouet: put it before \`--\`
-hint: jouet test --budget 600 --cmd -- mise run test:e2e test_a"
+hint: jouet test --budget BYTES --cmd -- mise run test:e2e test_a"
 
-	run --separate-stderr jouet test -- -k x --budget=100
+	run --separate-stderr jouet test -- -k x --budget=lots
 	assert_failure 2
-	assert_stderr --partial 'hint: jouet test --budget 100 -- -k x'
+	assert_stderr --partial 'hint: jouet test --budget lots -- -k x'
 }
 
 @test "a person at a terminal sees the output as it runs" {

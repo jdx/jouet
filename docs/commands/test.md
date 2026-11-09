@@ -285,7 +285,7 @@ An agent that runs a suite and cuts its output with `head`, `tail` or `grep` oft
 
 - **The whole output goes to a log**, stdout and stderr together, under jouet's log directory (`$JOUET_LOG_DIR`, else `~/.local/state/jouet/logs`), kept for a week. Its path is printed on every run. Read more from it with `grep` or `jouet read` rather than running the tests again.
 - **A pass is one line**, with the counts the runner printed. A run of up to eight tests whose runner names each one (cargo test without `-q`, and TAP, so bats) also lists their names, as in `cmd: passed in 0.9s: 2 passed (edit::tests::editor_with_args, edit::tests::visual_fallback)`, so an agent that added a test sees it ran without reading the log. A larger run names, instead, the passing tests the change names in a line it adds since `HEAD` (a new `@test "..."`, a new `fn name()`), as in `cmd: passed in 2.2s: 19 passed, among them the changed edit command accepts an editor command with arguments`: up to eight, matched as whole words, and none when more match. Output streamed to a person, who saw the names go by, leaves them out.
-- **A failure shows each failing test** by name, with the lines that explain it: the assertion or panic, the diff, the compiler error with its code frame. A long one keeps its first and last lines and the error and diff lines between. Failures are shown in the order the output has them until `--budget` bytes (default 4000; `0` for no limit), then only their names, then a count, so nothing is left out without saying so.
+- **A failure shows each failing test** by name, with the lines that explain it: the assertion or panic, the diff, the compiler error with its code frame. A long one keeps its first and last lines and the error and diff lines between. Failures are shown in the order the output has them until `--budget` bytes (default 4000; `0` for no limit), then only their names, then a count, so nothing is left out without saying so. No runner takes `--budget`, so one written after `--` is jouet's too: jouet takes it out of the command and says so on stderr.
 
 ```sh
 $ jouet test --cmd -- cargo test
@@ -408,7 +408,7 @@ run = "jouet test --affected"
 |---|---|
 | `0` | the tests passed, every failure also fails at the merge base, or nothing needed to run |
 | `1` | the tests failed (the runner exited non-zero), the `--cmd` command exited non-zero, or the runner could not list the tests a change affects |
-| `2` | a usage error: `--adapter` without `--affected`, `--since` without `--affected` or `--baseline`, `--cmd` without a command or with `--affected`, `--budget` after `--` (where it would go to the command), an unknown adapter, an unknown ref or one with no merge base, `--baseline` where the merge base is `HEAD` with nothing changed, or pytest's or unittest's own usage error |
+| `2` | a usage error: `--adapter` without `--affected`, `--since` without `--affected` or `--baseline`, `--cmd` without a command or with `--affected`, `--budget` after `--` without a number, an unknown adapter, an unknown ref or one with no merge base, `--baseline` where the merge base is `HEAD` with nothing changed, or pytest's or unittest's own usage error |
 | `4` | a recognised `--cmd` test ran no tests, no adapter or test task was found, the runner or the `--cmd` program is not installed, not in a git repository, or `.jouet/test.toml` is untrusted or has changed since it was trusted |
 
 With several adapters, every suite runs, and the exit is `1` if any failed.
