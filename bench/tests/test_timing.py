@@ -23,6 +23,8 @@ class TimingTest(unittest.TestCase):
             self.assertEqual(timing.verification_issue({**complete, field: 1}, shell),
                              "Codex command events could not be matched")
         self.assertEqual(timing.verification_issue(complete, None), "Codex command event stream could not be verified")
+        self.assertEqual(timing.verification_issue(complete, {"completed": 1, "failed": None}),
+                         "Codex command exit status was unavailable")
 
     def test_overlapping_commands_count_once_and_incomplete_events_are_visible(self):
         lines = [event("item.started", "a"), event("item.started", "b"),

@@ -67,4 +67,6 @@ def verification_issue(activity: dict | None, shell: dict | None) -> str | None:
         return "Codex command events could not be matched"
     if shell is None:
         return "Codex command event stream could not be verified"
+    if shell.get("failed") is None:
+        return "Codex command exit status was unavailable"
     return None

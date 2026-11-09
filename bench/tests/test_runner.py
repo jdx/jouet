@@ -1918,6 +1918,11 @@ class ReportTest(unittest.TestCase):
                 self.assertEqual(cell["runs"], 0)
                 self.assertEqual(cell["unverified"][0]["reason"], reason)
 
+        unknown_exit = {**base, "command_activity": complete, "shell": {"completed": 1, "failed": None}}
+        cell = report.summarize([unknown_exit], {})["cells"][0]["arms"]["jouet"]
+        self.assertEqual(cell["runs"], 0)
+        self.assertEqual(cell["unverified"][0]["reason"], "Codex command exit status was unavailable")
+
     def test_unverified_summary_keeps_checker_and_command_reasons(self):
         record = {"task": "smoke", "harness": "codex", "arm": "jouet", "round": 1,
                   "success": None, "check": {"passed": None, "reason": "container unavailable"},
