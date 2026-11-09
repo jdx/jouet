@@ -99,7 +99,7 @@ static INFRA: LazyLock<Vec<(&str, Regex, bool)>> = LazyLock::new(|| {
         (
             "registry",
             i(
-                r"\b50[234] (?:bad gateway|service unavailable|gateway time-?out)|http status server error|error sending request for url|spurious network error",
+                r"\b50[234] (?:bad gateway|service unavailable|gateway time-?out)|could not download https?://\S+ \(HTTP 50[234]\)|curl: \(\d+\) the requested URL returned error: 50[234]\b|http status server error|error sending request for url|spurious network error",
             ),
             false,
         ),
@@ -412,6 +412,57 @@ Diff in /w/src/a.rs at line 4:",
             &lines("gh: API rate limit exceeded for installation ID 1"),
         );
         assert_eq!(limit.infrastructure().map(|i| i.cause), Some("rate_limit"));
+    }
+
+    #[test]
+    fn download_server_errors_are_infrastructure_only_without_other_failures() {
+        let download = "Could not download https://github.com/jdx/mise/releases/download/v1/packslip.sigstore.json (HTTP 504):";
+        for code in [502, 503, 504] {
+            let message = format!("Could not download https://example.com/file (HTTP {code}):");
+            let unavailable = Signature::of(None, &lines(&message));
+            assert_eq!(
+                unavailable.infrastructure().map(|i| i.cause),
+                Some("registry")
+            );
+            let curl = format!("curl: (56) The requested URL returned error: {code}");
+            let unavailable = Signature::of(None, &lines(&curl));
+            assert_eq!(
+                unavailable.infrastructure().map(|i| i.cause),
+                Some("registry")
+            );
+        }
+
+        let test = Signature::of(
+            None,
+            &lines(&format!("test example ... FAILED\n{download}")),
+        );
+        assert_eq!(test.infrastructure(), None);
+
+        let compile = Signature::of(
+            None,
+            &lines(&format!(
+                "error[E0425]: cannot find value `missing`\n{download}"
+            )),
+        );
+        assert_eq!(compile.infrastructure(), None);
+
+        let missing = Signature::of(
+            None,
+            &lines("Could not download https://example.com/file (HTTP 404):"),
+        );
+        assert_eq!(missing.infrastructure(), None);
+        let missing_curl = Signature::of(
+            None,
+            &lines("curl: (22) The requested URL returned error: 404"),
+        );
+        assert_eq!(missing_curl.infrastructure(), None);
+
+        // curl's exit 22 alone does not say which HTTP status it received.
+        let unspecified = Signature::of(
+            None,
+            &lines("Download failed: The process '/usr/bin/curl' failed with exit code 22."),
+        );
+        assert_eq!(unspecified.infrastructure(), None);
     }
 
     #[test]
