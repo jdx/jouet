@@ -30,6 +30,13 @@ static GO_FRAME_ARGS: LazyLock<regex::Regex> = LazyLock::new(|| {
 static GO_FRAME_OFFSET: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"^(\s+\S+\.go:\d+) \+0x[0-9a-fA-F]+$").expect("frame offset pattern")
 });
+/// A Go test's `t.TempDir()`: the test name with random digits, then a
+/// sequence directory, reached by whatever absolute or relative path the
+/// test printed. Both differ between a run and its merge-base run.
+static GO_TEMP_DIR: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?:[\w.~+-]*/)*((?:Test|Benchmark|Fuzz)\w*?)\d+/(\d{3})\b")
+        .expect("Go temporary directory pattern")
+});
 static REMARK_WARNING: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(
         r"^\s*(\d+:\d+(?:-\d+:\d+)?)\s+warning\s+(.+\s+remark-validate-links:[\w-]+)\s*$",
@@ -51,7 +58,7 @@ static FAILURE_PREFIX: LazyLock<regex::Regex> = LazyLock::new(|| {
 static ZERO_FAILURES: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"(?i)\b0 (?:errors?|failed|failures?)\b").expect("zero failures pattern")
 });
-const DETAILS_VERSION: u32 = 4;
+const DETAILS_VERSION: u32 = 5;
 
 /// What a failing run's failures were at the merge base.
 #[derive(Debug, Serialize)]
@@ -488,6 +495,7 @@ pub(super) fn failure_evidence(
                         let line = GO_GOROUTINE.replace_all(&line, "goroutine N");
                         let line = GO_FRAME_ARGS.replace(&line, "$1...$2");
                         let line = GO_FRAME_OFFSET.replace(&line, "$1");
+                        let line = GO_TEMP_DIR.replace_all(&line, "<TempDir $1>/$2");
                         PYTEST_SELF_ADDRESS
                             .replace(&line, "${1}<address>${2}")
                             .into_owned()
@@ -1831,6 +1839,35 @@ docs/README.md\n\
         assert_eq!(
             RUST_THREAD_ID.replace(&line(123), "$1$2"),
             RUST_THREAD_ID.replace(&line(456), "$1$2")
+        );
+    }
+
+    #[test]
+    fn go_temp_dirs_compare_without_their_random_names_or_paths() {
+        let output = |path: &str, message: &str| {
+            format!(
+                "--- FAIL: TestLint (0.01s)\n    lint_test.go:254: status = 1: {path}/.github/ci.yaml:11:19: {message}\nFAIL\nFAIL\texample.com/p\t0.004s\nFAIL\n"
+            )
+        };
+        let details = |text: String| {
+            let evidence = failure_evidence(&text, &[], Path::new("/w"), false).unwrap();
+            assert!(evidence.details.contains_key("TestLint"), "{text}");
+            evidence.details
+        };
+        // The base checkout sits elsewhere, so the relative path differs too.
+        let here = details(output("../../../../tmp/TestLint3553677864/001", "SC2086"));
+        assert_eq!(
+            here,
+            details(output("../../TestLint2355314083/001", "SC2086"))
+        );
+        assert_eq!(here, details(output("/tmp/TestLint17/001", "SC2086")));
+        assert_ne!(
+            here,
+            details(output("../../TestLint2355314083/002", "SC2086"))
+        );
+        assert_ne!(
+            here,
+            details(output("../../TestLint2355314083/001", "SC2046"))
         );
     }
 
