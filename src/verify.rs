@@ -237,14 +237,6 @@ impl Run {
     /// must otherwise match exactly.
     fn covers(&self, failed: &Run) -> bool {
         let (ran, wanted) = (self.selection(), failed.selection());
-        // A successful baseline comparison establishes the same command's
-        // failures, even when its runner has no parsed selector. Compare the
-        // complete command so options and environment stay exact. Codex
-        // transcripts omit trees, so two unknown trees follow the existing
-        // coverage behavior; known but different trees must not match.
-        if self.tree == failed.tree && self.command == baseline_command(&failed.command) {
-            return true;
-        }
         // An affected baseline only established that this tree's selected
         // jobs have pre-existing failures. Another tree may select other jobs.
         if ran.split_whitespace().next() == Some("--affected")
@@ -337,6 +329,18 @@ impl Run {
             }
             (true, false) | (false, true) => return false,
             (false, false) => {}
+        }
+        // A successful baseline comparison establishes the same command's
+        // failures, even when its runner has no parsed selector. Compare the
+        // complete command so options and environment stay exact. Codex
+        // transcripts omit trees, so two unknown trees follow the existing
+        // coverage behavior; known but different trees must not match.
+        if self.selector.is_none()
+            && failed.selector.is_none()
+            && self.tree == failed.tree
+            && self.command == baseline_command(&failed.command)
+        {
+            return true;
         }
         if ran == wanted {
             return true;
@@ -2605,6 +2609,16 @@ mod tests {
             Some("old"),
         );
         assert!(!checks.failures.contains_key(&Kind::Test));
+
+        // A Codex transcript has no tree IDs, so it cannot establish that
+        // the two affected plans selected the same commands.
+        let mut unknown = Checks::default();
+        unknown.record([test("jouet test --affected", 1, "--affected")], None);
+        unknown.record(
+            [test("jouet test --baseline --affected", 0, "--affected")],
+            None,
+        );
+        assert_eq!(unknown.failures[&Kind::Test].len(), 1);
     }
 
     #[test]
