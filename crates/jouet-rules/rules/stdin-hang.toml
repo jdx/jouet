@@ -44,6 +44,12 @@ quiet = [
   "python3 -m pytest",
   "python3 script.py",
   "python3 --version",
+  "python3 -V",
+  "python3 -h",
+  "cat --help",
+  "cat --version",
   "command -v python3 >/dev/null && echo yes",
+  "command -pv python3",
+  "command -p -v python3",
   { command = "cat > /tmp/x", harness = "codex" },
 ]

@@ -225,8 +225,14 @@ impl Command {
                     let rest = skip_options(rest, &["-s", "-k", "--signal", "--kill-after"], false);
                     rest.get(1..).unwrap_or_default()
                 }
-                // `command -v git` looks the program up and runs nothing.
-                "command" if matches!(rest.first().map(String::as_str), Some("-v" | "-V")) => {
+                // `command -v git`, `-pv` or `-p -V` looks the program up
+                // and runs nothing.
+                "command"
+                    if rest
+                        .iter()
+                        .take_while(|a| a.starts_with('-') && *a != "--")
+                        .any(|a| a.contains(['v', 'V'])) =>
+                {
                     return (via, w);
                 }
                 "command" | "exec" | "nohup" | "time" | "rtk" => skip_options(rest, &[], false),

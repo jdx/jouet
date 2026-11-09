@@ -14,7 +14,9 @@ local function reads_stdin(command: JouetCommand): boolean
 	local argv = command.argv
 	if command.program == "cat" then
 		for i = 2, #argv do
-			if argv[i] == "-" or string.sub(argv[i], 1, 1) ~= "-" then
+			if argv[i] == "--help" or argv[i] == "--version" then
+				return false
+			elseif argv[i] == "-" or string.sub(argv[i], 1, 1) ~= "-" then
 				return argv[i] == "-"
 			end
 		end
@@ -24,6 +26,9 @@ local function reads_stdin(command: JouetCommand): boolean
 		local arg = argv[i]
 		if arg == "-" then
 			return true
+		elseif string.match(arg, "^%-[VhE?]*[Vh?][VhE?]*$") then
+			-- `-V`, `-VV` and `-h` print and exit.
+			return false
 		elseif arg == "-c" or arg == "-m" or string.sub(arg, 1, 1) ~= "-" or string.sub(arg, 1, 2) == "--" then
 			-- A script, inline code, a module, or `--version` and the like.
 			return false
