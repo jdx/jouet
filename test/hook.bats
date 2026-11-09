@@ -92,6 +92,27 @@ TOML
 	refute_output --partial 'large-read'
 }
 
+@test "python-edit is off by default, and the primer no longer forbids Python" {
+	unset JOUET_RULES_ENABLE
+	run --separate-stderr jouet hook claude session-start <<<'{"session_id":"s1","source":"startup"}'
+	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
+	refute_output --partial 'python-edit'
+	refute_output --partial 'never Python'
+	assert_output --partial 'git-stash'
+
+	script="python3 - <<'E'
+p='a.rs'
+open(p,'w').write(open(p).read().replace('a', 'b'))
+E"
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload "$script")"
+	assert_success
+	refute_output --partial 'python-edit'
+	run --separate-stderr env JOUET_RULES_ENABLE=python-edit jouet hook claude pre-tool-use <<<"$(bash_payload "$script")"
+	assert_output --partial '[jouet rule: python-edit]'
+	run --separate-stderr jouet rule list
+	assert_line --regexp 'python-edit.*disabled'
+}
+
 @test "session-start tells the agent about a Luau rule file to convert" {
 	mkdir -p "$XDG_CONFIG_HOME/jouet/rules"
 	printf -- '--- why: old\nreturn { check = function() end }\n' >"$XDG_CONFIG_HOME/jouet/rules/old.luau"

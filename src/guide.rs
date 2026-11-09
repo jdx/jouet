@@ -928,9 +928,16 @@ pub(crate) fn summary(
         } else {
             format!("Test with `{cmd}` (the tests or build for what you changed).")
         };
+        // "Never Python" goes with the rule that denies it: with the rule
+        // off, nothing backs it.
+        let never_python = if rules.iter().any(|(name, _)| *name == "python-edit") {
+            ", never Python"
+        } else {
+            ""
+        };
         let _ = writeln!(
             out,
-            "{test} {wait}Commit only the paths you name with {commit}. If needed, combine test and commit (`jouet test ... && jouet commit ...`); don't rerun a passing test just to combine calls. Use {edit} when each pair applies to every file; otherwise use a `jouet edit` spec, never Python. Find code with `jouet search PATTERN [PATHS]` (matches grouped by function, within a budget) instead of `grep -rn`, and read with `jouet read PATH --symbol NAME` or `--range A:B` (repeat; avoid overlap) instead of `sed -n` ranges. Each call costs the whole context, so put independent reads, searches and edits in one. List a PR's open review threads with `jouet pr threads [PR]`; reply with {reply} (`--resolve` for fixes, not questions), not `gh api`. These need no lookup; for others, `jouet agent-help COMMAND` gives their usage."
+            "{test} {wait}Commit only the paths you name with {commit}. If needed, combine test and commit (`jouet test ... && jouet commit ...`); don't rerun a passing test just to combine calls. Use {edit} when each pair applies to every file; otherwise use a `jouet edit` spec{never_python}. Find code with `jouet search PATTERN [PATHS]` (matches grouped by function, within a budget) instead of `grep -rn`, and read with `jouet read PATH --symbol NAME` or `--range A:B` (repeat; avoid overlap) instead of `sed -n` ranges. Each call costs the whole context, so put independent reads, searches and edits in one. List a PR's open review threads with `jouet pr threads [PR]`; reply with {reply} (`--resolve` for fixes, not questions), not `gh api`. These need no lookup; for others, `jouet agent-help COMMAND` gives their usage."
         );
     }
     if !rules.is_empty() {
@@ -1204,6 +1211,18 @@ mod tests {
         );
         assert!(text.contains("`jouet test --cmd -- CMD...`"), "{text}");
         assert!(text.contains("each pair applies to every file"), "{text}");
+        assert!(
+            text.contains("a `jouet edit` spec, never Python."),
+            "{text}"
+        );
+        // With python-edit off, nothing denies Python, so the primer does not
+        // forbid it.
+        let without = summary(&[("git-stash", None)], true, true, None, None);
+        assert!(
+            without.contains("a `jouet edit` spec. Find code"),
+            "{without}"
+        );
+        assert!(!without.contains("Python"), "{without}");
         assert!(
             text.contains("compare its command with `jouet test --baseline --cmd -- CMD`"),
             "{text}"
