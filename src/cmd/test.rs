@@ -426,7 +426,11 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 ticket.finish(
                     command,
                     ms,
-                    code == 0 && !empty_test && !contradictory && !incomplete_suite && !format_changes,
+                    code == 0
+                        && !empty_test
+                        && !contradictory
+                        && !incomplete_suite
+                        && !format_changes,
                 );
             }
             if code != 0 {
@@ -1754,7 +1758,9 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
     } else if digest.no_tests && suite.exit_code == Some(0) {
         s.push_str(", but no test ran: a filter or path that matched nothing?");
     }
-    if streamed || (suite.exit_code == Some(0) && !contradictory && !incomplete && !suite.format_changes) {
+    if streamed
+        || (suite.exit_code == Some(0) && !contradictory && !incomplete && !suite.format_changes)
+    {
         let _ = writeln!(s, " (full log: {log})");
         // A few warnings by name, so the agent can tell its own without
         // reading the log.
