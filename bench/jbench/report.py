@@ -98,7 +98,9 @@ def group(records: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, list
 
 def unverified(record: dict[str, Any]) -> bool:
     check = record.get("check") or {}
-    return record.get("success") is None or ("passed" in check and check["passed"] is None)
+    unfinished = (record.get("command_activity") or {}).get("unmatched_starts", 0)
+    return (record.get("success") is None or ("passed" in check and check["passed"] is None)
+            or (record.get("success") is True and bool(unfinished)))
 
 
 def scored(record: dict[str, Any]) -> bool:
@@ -129,7 +131,9 @@ def summarize(records: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, 
                 unanswered.update((r.get("github") or {}).get("unanswered_examples") or [])
             cell["arms"][arm] = {
                 "runs": len(outcomes),
-                "unverified": [{"round": r.get("round"), "reason": (r.get("check") or {}).get("reason", "coverage unavailable")}
+                "unverified": [{"round": r.get("round"), "reason": r.get("unverified_reason") or
+                                ("agent command had no completion event" if (r.get("command_activity") or {}).get("unmatched_starts")
+                                 else (r.get("check") or {}).get("reason", "coverage unavailable"))}
                                for r in runs if not r.get("error") and unverified(r)],
                 "errors": [r["error"] for r in runs if r.get("error")],
                 "stopped": [r["stopped"] for r in outcomes if r.get("stopped")],
@@ -293,7 +297,7 @@ def markdown(summary: dict[str, Any]) -> str:
         "",
         "## Summary",
         "",
-        "Success means the agent exited normally and the task checker passed. Checkers vary:",
+        "Success means the agent exited normally, the task checker passed, and recorded Codex commands completed. Checkers vary:",
         "some verify behavior without requiring every requested deliverable, such as a commit.",
         "Inspect the task's checker and run evidence before treating success as complete accuracy.",
         ("Unverified checks exclude runs from performance metrics; agents that fail or stop still count as failures. "

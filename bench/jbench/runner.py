@@ -663,7 +663,9 @@ def execute(
         "task_dir": str(task.dir.parent),
         "harness": p.harness,
         "arm": p.arm,
-        "success": (False if agent["stopped"] or agent["exit_code"] != 0 else check["passed"]),
+        "command_activity": (command_activity := timing.codex_commands(agent["lines"], agent.get("elapsed", []),
+                                                                        agent.get("stream_complete", False))
+                             if harness.name == "codex" else None),
         "check": {k: v for k, v in check.items() if k != "output"},
         "stopped": agent["stopped"],
         "exit_code": agent["exit_code"],
@@ -674,9 +676,7 @@ def execute(
         "shell": (codex_shell_metrics(agent["lines"])
                   if harness.name == "codex" and not agent["stopped"] and agent["exit_code"] == 0
                   else None),
-        "command_activity": (timing.codex_commands(agent["lines"], agent.get("elapsed", []),
-                                                   agent.get("stream_complete", False))
-                             if harness.name == "codex" else None),
+        **check_outcome(agent, check, command_activity),
         "ledger": ledger(env) if arm.jouet and not disk_stopped else None,
         "github": github,
         "setup": ran["setup"],
@@ -844,3 +844,12 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
             remove(work_root)
             remove(tmp_root)
     return records
+
+
+def check_outcome(agent: dict[str, Any], check: dict[str, Any], activity: dict | None) -> dict[str, Any]:
+    """Keep the independent checker result while flagging unfinished commands."""
+    success = False if agent["stopped"] or agent["exit_code"] != 0 else check["passed"]
+    if success is True and activity and activity["unmatched_starts"]:
+        check["output"] += "\nAgent command had no completion event; the task outcome is unverified."
+        return {"success": None, "unverified_reason": "agent command had no completion event"}
+    return {"success": success}
