@@ -10,7 +10,7 @@ from _check import dirty, expect, finish, new_commit
 from bats_check import check_bats
 
 build = subprocess.run(["cargo", "build", "--bin", "fnox"], capture_output=True, text=True, check=False)
-expect(build.returncode == 0, f"build fails:\n{build.stderr[-3000:]}")
+expect(build.returncode == 0, f"build fails:\n{build.stderr}")
 if build.returncode == 0:
     binary = Path.cwd() / "target/debug/fnox"
     with tempfile.TemporaryDirectory(prefix="fnox bench ") as tmp:
