@@ -63,7 +63,7 @@ const DETAILS_VERSION: u32 = 5;
 /// Tell the agent whether there is a file to review or one to create.
 pub(super) fn setup_hint(root: &Path) -> &'static str {
     if root.join(".jouet/test.toml").is_file() {
-        "review [baseline].setup in .jouet/test.toml and trust it before retrying"
+        "add or review [baseline].setup in .jouet/test.toml, then trust it before retrying"
     } else {
         "create .jouet/test.toml with [baseline].setup and trust it before retrying"
     }

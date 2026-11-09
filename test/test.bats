@@ -380,12 +380,18 @@ vitest (vitest's module graph): 2 test files
 	assert_output --partial '1 failed'
 	assert_output --partial 'the isolated checkout may need dependencies: create .jouet/test.toml with [baseline].setup'
 
-	# A configured but untrusted setup cannot run at the merge base yet.
+	# An existing file may not have baseline setup yet.
 	mkdir -p .jouet
+	printf '# no baseline setup yet\n' >.jouet/test.toml
+	run --separate-stderr jouet test --affected
+	assert_failure 1
+	assert_output --partial 'add or review [baseline].setup in .jouet/test.toml, then trust it'
+
+	# A configured but untrusted setup cannot run at the merge base yet.
 	printf '[baseline]\nsetup = ["npm", "ci"]\n' >.jouet/test.toml
 	run --separate-stderr jouet test --affected
 	assert_failure 1
-	assert_output --partial 'the isolated checkout may need dependencies: review [baseline].setup'
+	assert_output --partial 'the isolated checkout may need dependencies: add or review [baseline].setup'
 	run --separate-stderr jouet trust --yes
 	assert_success
 	run --separate-stderr jouet test --affected
