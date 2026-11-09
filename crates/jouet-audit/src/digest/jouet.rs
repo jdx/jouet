@@ -77,9 +77,15 @@ const REPLACES: &[(&str, &[&str])] = &[
 /// The jouet command a script runs: `jouet` and up to two subcommand words,
 /// such as `jouet pr status`; `joue` and its routine's name.
 pub fn subject(command: &str) -> Option<String> {
+    subjects(command).into_iter().next()
+}
+
+/// Every jouet command a script runs, as [`subject`] names them, wrappers
+/// such as `timeout`, `env` or `mise x --` seen through.
+pub(crate) fn subjects(command: &str) -> Vec<String> {
     crate::structure::simple_words(command)
         .into_iter()
-        .find_map(|(words, _)| {
+        .filter_map(|(words, _)| {
             let argv = super::unwrapped(&words);
             let program = argv.first()?.rsplit('/').next()?;
             if program != "jouet" && program != "joue" {
@@ -100,6 +106,7 @@ pub fn subject(command: &str) -> Option<String> {
             }
             Some(subject)
         })
+        .collect()
 }
 
 /// Whether `code` is one jouet itself could have meant. Codes from 126 up

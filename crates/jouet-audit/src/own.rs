@@ -10,7 +10,6 @@
 use crate::digest::jouet::Kind;
 use crate::event::{Call, Tool, Transcript};
 use crate::shape::shape;
-use crate::stats::jouet_commands;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -100,12 +99,7 @@ impl OwnAcc {
                 ..OwnSession::default()
             });
         if s.project.is_none() {
-            s.project = t.cwd.as_deref().map(|cwd| match home {
-                Some(home) if home.len() > 1 && cwd.starts_with(home) => {
-                    format!("~{}", &cwd[home.len()..])
-                }
-                _ => cwd.to_string(),
-            });
+            s.project = t.cwd.as_deref().map(|cwd| tilde(cwd, home));
         }
         s.test_runs += test_runs;
         s.findings.extend(findings);
@@ -144,11 +138,27 @@ impl OwnAcc {
     }
 }
 
-/// Whether a shell command runs `jouet test`.
+/// Whether a shell command runs `jouet test`, through a wrapper or not.
 fn runs_jouet_test(command: &str) -> bool {
-    jouet_commands(&shape(command))
+    crate::digest::jouet::subjects(command)
         .iter()
-        .any(|c| c == "jouet test" || c.starts_with("jouet test "))
+        .any(|s| s == "jouet test")
+}
+
+/// `cwd` with the home directory written `~`, only where it is a whole
+/// path component: `/home/jo` is not a prefix of `/home/john`.
+fn tilde(cwd: &str, home: Option<&str>) -> String {
+    match home
+        .map(|h| h.trim_end_matches('/'))
+        .filter(|h| !h.is_empty())
+    {
+        Some(home) if cwd == home => "~".into(),
+        Some(home) => match cwd.strip_prefix(home) {
+            Some(rest) if rest.starts_with('/') => format!("~{rest}"),
+            _ => cwd.to_string(),
+        },
+        None => cwd.to_string(),
+    }
 }
 
 /// Whether a call reads one of `jouet test`'s logs:
@@ -244,7 +254,7 @@ mod tests {
             vec![Call::shell("jouet test --cmd -- cargo test 2>&1")],
             vec![Call::shell(format!("tail -50 {LOG}"))],
             vec![read(LOG)],
-            vec![Call::shell("cd x && jouet test --affected")],
+            vec![Call::shell("cd x && timeout 600 jouet test --affected")],
             vec![Call::shell("ls")],
             vec![Call::shell("ls")],
             vec![Call::shell("ls")],
@@ -259,6 +269,15 @@ mod tests {
         assert_eq!(s.log_reads[0].read, "tail -<n> <path>");
         assert_eq!(s.log_reads[0].test, "jouet test --cmd -- <v>… 2>&1");
         assert_eq!(s.log_reads[0].after_requests, 1);
+    }
+
+    #[test]
+    fn home_is_a_whole_path_component() {
+        assert_eq!(tilde("/home/jo/src", Some("/home/jo")), "~/src");
+        assert_eq!(tilde("/home/jo", Some("/home/jo/")), "~");
+        assert_eq!(tilde("/home/john/src", Some("/home/jo")), "/home/john/src");
+        assert_eq!(tilde("/src", Some("/")), "/src");
+        assert_eq!(tilde("/src", None), "/src");
     }
 
     #[test]
