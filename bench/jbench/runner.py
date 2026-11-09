@@ -858,6 +858,8 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
     except BaseException:
         # An interrupted agent or checker can leave processes in their own
         # sessions. Stop them before removing the directories used to find them.
+        previously_preserved = preserve_work
+        preserve_work = True
         cleanup_errors: list[str] = []
         for root in (work_root, tmp_root):
             try:
@@ -867,9 +869,10 @@ def run_suite(planned: list[Planned], opts: dict[str, Any], out_dir: Path, log: 
         if cleanup_errors:
             import sys
 
-            preserve_work = True
             print(f"benchmark cleanup failed ({'; '.join(cleanup_errors)}); "
                   f"retained work: {work_root}; temp: {tmp_root}", file=sys.stderr)
+        else:
+            preserve_work = previously_preserved
         raise
     finally:
         if not opts.get("keep_work") and not preserve_work:

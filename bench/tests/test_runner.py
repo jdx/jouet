@@ -370,6 +370,27 @@ class PlanTest(unittest.TestCase):
             self.assertIn(str(work_root), stderr.getvalue())
             self.assertIn(str(tmp_root), stderr.getvalue())
 
+    def test_second_interrupt_during_sweep_retains_roots(self):
+        import os
+        from unittest.mock import patch
+
+        planned = [runner.Planned(1, "first", "codex", "plain")]
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            work_root, tmp_root = root / "work-root", root / "tmp-root"
+            work_root.mkdir()
+            tmp_root.mkdir()
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": str(root)}), \
+                    patch.object(runner.tempfile, "mkdtemp", side_effect=[str(work_root), str(tmp_root)]), \
+                    patch.object(runner, "snapshot", return_value=Path(sys.executable)), \
+                    patch.object(runner.costs_mod, "seeds", return_value={}), \
+                    patch.object(runner, "execute", side_effect=KeyboardInterrupt), \
+                    patch.object(runner, "sweep", side_effect=KeyboardInterrupt), \
+                    self.assertRaises(KeyboardInterrupt):
+                runner.run_suite(planned, {"jouet_bin": Path(sys.executable)}, root, lambda _: None)
+            self.assertTrue(work_root.is_dir())
+            self.assertTrue(tmp_root.is_dir())
+
     def test_result_write_failure_preserves_previous_records_and_stops(self):
         import errno
         import os
