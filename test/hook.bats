@@ -659,10 +659,12 @@ fnox_payload() {
 	assert_output --partial '[jouet rule: secret-files]'
 
 	# shellcheck disable=SC2016
+	# A test run gets only its 10-minute timeout.
 	for command in 'env FOO=bar cargo test' 'echo "$HOME"' 'fnox exec -- npm test' 'cat .env.example'; do
 		run --separate-stderr jouet hook claude pre-tool-use <<<"$(fnox_payload Bash "$command")"
 		assert_success
-		assert_output ""
+		run jq -c '.hookSpecificOutput | del(.updatedInput, .hookEventName) // empty' <<<"$output"
+		assert_output --regexp '^(\{\})?$'
 	done
 }
 
@@ -769,21 +771,21 @@ E"
 	assert_output --partial 'jouet edit replace PATH --old TEXT --new TEXT'
 }
 
-@test "a check run in bypassPermissions gets a 10-minute timeout, so it ends in that call" {
+@test "a check run gets a 10-minute timeout, so it ends in that call" {
 	call() {
 		jq -cn --arg c "$1" --arg mode "$2" --argjson extra "${3:-{\}}" \
 			'{session_id: "s1", permission_mode: $mode, tool_name: "Bash", tool_input: ({command: $c} + $extra)}' |
 			jouet hook claude pre-tool-use
 	}
 
-	run --separate-stderr call 'cargo test --workspace' bypassPermissions
-	assert_success
-	run jq -c '.hookSpecificOutput | [.permissionDecision, .updatedInput]' <<<"$output"
-	assert_output '["allow",{"command":"cargo test --workspace","timeout":600000}]'
-
-	# In any other mode, allow would skip the user's prompt: left alone.
-	run --separate-stderr call 'cargo test --workspace' default
-	assert_output ""
+	# In every mode, with no permission decision, so the user's own check
+	# still applies to the call.
+	for mode in default acceptEdits plan bypassPermissions; do
+		run --separate-stderr call 'cargo test --workspace' "$mode"
+		assert_success
+		run jq -c '.hookSpecificOutput | [.permissionDecision, .permissionDecisionReason, .updatedInput]' <<<"$output"
+		assert_output '[null,null,{"command":"cargo test --workspace","timeout":600000}]'
+	done
 	# A timeout of its own, or a background run, stands.
 	run --separate-stderr call 'cargo test --workspace' bypassPermissions '{"timeout": 30000}'
 	assert_output ""
