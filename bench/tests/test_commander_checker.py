@@ -100,7 +100,9 @@ class CommanderCheckerTest(unittest.TestCase):
                 'for arg in "$@"; do case "$arg" in --outputFile=*) report=${arg#--outputFile=};; esac; done\n'
                 'hash=$(git hash-object tests/command.configureOutput.test.js)\n'
                 'printf "%s|%s\\n" "$PWD" "$hash" >> "$TRACE"\n'
-                'printf "{\\"numTotalTests\\":1,\\"numPassedTests\\":1,\\"numFailedTests\\":0,\\"numPendingTests\\":0,\\"testResults\\":[{\\"name\\":\\"%s/tests/command.configureOutput.test.js\\",\\"assertionResults\\":[{\\"status\\":\\"passed\\"}]}]}\\n" "$PWD" > "$report"\n'
+                'if [ "$(cat source.js)" = "regressed source" ] && [ "$(cat tests/command.configureOutput.test.js)" = "base test" ]; then passed=0; failed=1; status=failed; else passed=1; failed=0; status=passed; fi\n'
+                'printf "{\\"numTotalTests\\":1,\\"numPassedTests\\":%s,\\"numFailedTests\\":%s,\\"numPendingTests\\":0,\\"testResults\\":[{\\"name\\":\\"%s/tests/command.configureOutput.test.js\\",\\"assertionResults\\":[{\\"status\\":\\"%s\\"}]}]}\\n" "$passed" "$failed" "$PWD" "$status" > "$report"\n'
+                'exit "$failed"\n'
             )
             jest.chmod(0o755)
             trace = Path(directory) / "trace"
@@ -123,11 +125,22 @@ class CommanderCheckerTest(unittest.TestCase):
             result = check()
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             entries = [line.split("|", 1) for line in trace.read_text().splitlines()]
-            self.assertEqual(len(entries), 2)
+            self.assertEqual(len(entries), 3)
             self.assertEqual(entries[0][1], original_hash)
             self.assertNotEqual(entries[1][1], original_hash)
+            self.assertNotEqual(entries[2][1], original_hash)
             self.assertNotEqual(entries[0][0], entries[1][0])
             self.assertEqual(test.read_text(), "agent test\n")
+            source.write_text("regressed source\n")
+            git("add", "source.js")
+            git("commit", "-qm", "regress original behavior")
+            result = check()
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("original tests on the fix reported 1 failing tests", result.stdout)
+            self.assertEqual(test.read_text(), "agent test\n")
+            source.write_text("fixed source\n")
+            git("add", "source.js")
+            git("commit", "-qm", "restore original behavior")
             git("rm", "-q", "tests/command.configureOutput.test.js")
             (work / "tests").mkdir(exist_ok=True)
             (work / "tests/other.test.js").write_text("other test\n")
