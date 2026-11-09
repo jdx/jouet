@@ -1144,8 +1144,8 @@ pub(super) fn compare(
                     let missing_dependencies = setup.is_empty()
                         && log.as_ref().is_some_and(|path| {
                             std::fs::read_to_string(path).is_ok_and(|output| {
-                                output
-                                    .contains("Local package.json exists, but node_modules missing")
+                                output.contains("Local package.json exists, but node_modules missing")
+                                    || output.contains("Usage Error: Couldn't find the node_modules state file - running an install might help")
                             })
                         });
                     let hint = if missing_dependencies {

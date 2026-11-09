@@ -1243,6 +1243,39 @@ SH
 	assert_output --partial 'trust it before retrying'
 }
 
+@test "a baseline missing Yarn's node_modules state suggests the opt-in setup" {
+	cat >fail-command <<'SH'
+#!/bin/sh
+if [ ! -e .deps-ready ]; then
+    echo "$YARN_BASELINE_MESSAGE"
+else
+    echo 'the current check failed'
+fi
+exit 1
+SH
+	chmod +x fail-command
+	printf '.deps-ready\n' >.gitignore
+	git add fail-command .gitignore
+	git commit -qm base
+	git checkout -qb work
+	touch .deps-ready
+	printf 'change\n' >change
+
+	export YARN_BASELINE_MESSAGE="Usage Error: Couldn't find the node_modules state file - running an install might help (findPackageLocation)"
+	run --separate-stderr jouet test --baseline --cmd -- ./fail-command
+	assert_failure 1
+	assert_output --partial 'without naming a failing test, so the failures could not be compared'
+	assert_output --partial 'baseline checkout reports missing node_modules'
+	assert_output --partial 'create .jouet/test.toml with [baseline].setup'
+	assert_output --partial 'trust it before retrying'
+
+	# An unrelated Yarn usage error is not evidence of missing dependencies.
+	export YARN_BASELINE_MESSAGE='Usage Error: unrelated command failure'
+	run --separate-stderr jouet test --baseline --cmd -- ./fail-command
+	assert_failure 1
+	refute_output --partial 'baseline checkout reports missing node_modules'
+}
+
 @test "a baseline missing a project-local runner suggests the opt-in setup" {
 	printf 'node_modules/\n' >.gitignore
 	printf 'base\n' >tracked
