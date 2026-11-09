@@ -2513,3 +2513,29 @@ class CostSeedTest(unittest.TestCase):
                     self.assertEqual(costs.cache_path(task, binary), first)
             finally:
                 os.chdir(previous)
+
+
+class CoreDumpTest(unittest.TestCase):
+    def test_no_core_dumps_reaches_every_process_started_after_it(self):
+        import subprocess
+
+        try:
+            import resource
+        except ImportError:
+            self.skipTest("RLIMIT_CORE is POSIX")
+        if resource.getrlimit(resource.RLIMIT_CORE)[1] == 0:
+            self.skipTest("core dumps are already off here")
+        # In a child, so this test process keeps its own limit: from the
+        # most core dumps allowed, as on a host that writes them into the
+        # crashing process's directory.
+        code = (
+            "import resource, subprocess\n"
+            "from jbench import runner\n"
+            "hard = resource.getrlimit(resource.RLIMIT_CORE)[1]\n"
+            "resource.setrlimit(resource.RLIMIT_CORE, (hard, hard))\n"
+            "runner.no_core_dumps()\n"
+            "print(subprocess.run(['sh', '-c', 'ulimit -c'], capture_output=True, text=True, check=True).stdout.strip())\n"
+        )
+        bench = Path(__file__).resolve().parents[1]
+        out = subprocess.run([sys.executable, "-c", code], cwd=bench, capture_output=True, text=True, check=True)
+        self.assertEqual(out.stdout.strip(), "0")

@@ -260,6 +260,20 @@ class DiskSamples:
             entry["samples"] += 1
 
 
+def no_core_dumps() -> None:
+    """Stops crashing processes from writing core files, for this process and
+    everything it starts. Where the kernel writes them to the crashing
+    process's directory (`core_pattern` of `core`), they land in the work
+    tree: every arm's agent then spends calls removing them, and jouet-init's
+    patch commits one into each later run of its arm."""
+    try:
+        import resource
+    except ImportError:  # Not POSIX.
+        return
+    _, hard = resource.getrlimit(resource.RLIMIT_CORE)
+    resource.setrlimit(resource.RLIMIT_CORE, (0, hard))
+
+
 def run_agent(
     harness: Harness,
     cmd: list[str],

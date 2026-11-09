@@ -194,6 +194,7 @@ def use_task_dirs(args: argparse.Namespace) -> list[str] | None:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    runner.no_core_dumps()
     if args.codex_reviewed_home:
         args.codex_reviewed_home = args.codex_reviewed_home.expanduser().resolve()
     names = use_task_dirs(args)
