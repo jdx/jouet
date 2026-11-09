@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -47,6 +48,7 @@ def head_sha() -> str:
 
 
 def tests_pass(*args: str, env: dict[str, str] | None = None) -> tuple[bool, str]:
+    """Run unittest, rejecting a successful command that discovers no tests."""
     proc = subprocess.run(
         [sys.executable, "-m", "unittest", *args],
         capture_output=True,
@@ -54,7 +56,9 @@ def tests_pass(*args: str, env: dict[str, str] | None = None) -> tuple[bool, str
         env={**os.environ, **(env or {})},
         timeout=120,
     )
-    return proc.returncode == 0, proc.stdout + proc.stderr
+    output = proc.stdout + proc.stderr
+    empty = re.search(r"^Ran 0 tests? in [0-9.]+s$", proc.stderr, re.MULTILINE) is not None
+    return proc.returncode == 0 and not empty, output
 
 
 def unchanged(*paths: str) -> bool:
