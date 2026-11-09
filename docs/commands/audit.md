@@ -104,15 +104,15 @@ $ jouet audit --harness claude --since 14d --top 4
 `--what-if SPEC` replays the same requests with fewer definitions or a smaller compaction window. `SPEC` is `window=SIZE` (`200k`, `1m`, `200000`), `deny=NAME` with more names after it (`deny=Workflow,Artifact`), or both: `window=200k,deny=Workflow`. A name is one from the fixed-context table: a tool, an MCP server, a plugin or a skill.
 
 - **A denial** takes the definition's estimated tokens off every request of every transcript that carried it. That replays exactly, up to the size estimate, and each denied name is listed with what it saves.
-- **A window** is simulated: when the context would pass it, the replay compacts to what the transcript started with plus 19k (the median after real compactions on the machine this was measured on), and charges one read of the whole context for the summary and one cache write of what is left. Where compaction fires inside the window is not known, so the result is a range, from firing at the window to firing 33k below it. A real compaction in the transcript resets the replay. It assumes the same requests follow a compaction, while real sessions re-read some of what was dropped, so the saving is an upper bound.
+- **A window** is simulated: when the context left after any denials would pass it, the replay compacts to what the transcript started with (before `--since` cut it) plus 19k (the median after real compactions on the machine this was measured on), and charges one read of the whole context for the summary and one cache write of what is left. Where compaction fires inside the window is not known, so the result is a range, from firing at the window to firing 33k below it. A real compaction in the transcript resets the replay. It assumes the same requests follow a compaction, while real sessions re-read some of what was dropped, so the saving is an upper bound.
 
 Each result is shown in tokens and price-weighted, counting an uncached token 1, a cache write 1.25 and a cache read 0.1, with each request keeping its own mix.
 
 ```console
 $ jouet audit --harness claude --since 14d --what-if window=200k
 …
-  what if (window 200k): replaying 51,400 requests that read 12.62B tokens (1.41B price-weighted: uncached 1, cache write 1.25, cache read 0.1)
-  input 7.14B to 6.58B (-43.5% to -47.9%), price-weighted -36.6% to -37.4%; 460 to 813 compactions added
+  what if (window 200k): replaying 51,622 requests that read 12.67B tokens (1.41B price-weighted: uncached 1, cache write 1.25, cache read 0.1)
+  input 7.17B to 6.60B (-43.5% to -47.9%), price-weighted -36.8% to -37.5%; 453 to 811 compactions added
   the range is compaction firing at the window, then 33k below it; it assumes the same requests after a compaction
 ```
 
