@@ -261,6 +261,23 @@ SH
 	assert_equal "$stderr" 'fixture registry unavailable'
 }
 
+@test "a successful npm fixture install is reused" {
+	DEPS="$BATS_TEST_TMPDIR/npm-deps"
+	cat >"$BATS_TEST_TMPDIR/bin/npm" <<'SH'
+#!/bin/sh
+printf 'install\n' >>"$BATS_TEST_TMPDIR/npm-invocations"
+mkdir -p node_modules/.bin
+touch node_modules/.bin/jest
+chmod +x node_modules/.bin/jest
+SH
+	chmod +x "$BATS_TEST_TMPDIR/bin/npm"
+	run --separate-stderr npm_install jest
+	assert_success
+	run --separate-stderr npm_install jest
+	assert_success
+	assert_equal "$(cat "$BATS_TEST_TMPDIR/npm-invocations")" 'install'
+}
+
 # A virtualenv NAME with pytest, plus the packages given.
 venv() {
 	command -v python3 >/dev/null || need python3 "not installed"
