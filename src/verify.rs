@@ -1382,23 +1382,24 @@ fn listed_files(selector: &str, dir: &Path, vars: &[(String, String)]) -> Option
 }
 
 /// The values a script gives shell variables for its later commands: its
-/// assignments that stand alone (`S=/tmp/x;`) and its `export`s, a later
-/// one of a kind winning, and an `export` over an assignment. An assignment before a program (`S=x cmd`) lasts for that
-/// program only, so it is not one.
+/// assignments that stand alone (`S=/tmp/x;`) and its `export`s, the later
+/// one winning, then those of the scripts it gives `sh -c` and the like,
+/// which is where an hk check run that way reads them. An assignment before
+/// a program (`S=x cmd`) lasts for that program only, so it is not one.
 fn assigned_vars(script: &str) -> Vec<(String, String)> {
-    let script = jouet_rules::shell::parse(script);
-    let exported = script
-        .commands
-        .iter()
-        .filter(|c| c.words.first().is_some_and(|w| w == "export"))
-        .flat_map(|c| c.words[1..].iter().cloned());
-    let mut vars: Vec<(String, String)> = Vec::new();
-    for word in script.assigned.iter().cloned().chain(exported) {
-        if let Some((name, value)) = word.split_once('=') {
-            vars.retain(|(n, _)| n != name);
-            vars.push((name.to_string(), value.to_string()));
+    fn collect(script: &jouet_rules::shell::Script, vars: &mut Vec<(String, String)>) {
+        for word in &script.assigned {
+            if let Some((name, value)) = word.split_once('=') {
+                vars.retain(|(n, _)| n != name);
+                vars.push((name.to_string(), value.to_string()));
+            }
+        }
+        for inner in script.inner_scripts() {
+            collect(&inner, vars);
         }
     }
+    let mut vars = Vec::new();
+    collect(&jouet_rules::shell::parse(script), &mut vars);
     vars
 }
 
@@ -4881,6 +4882,29 @@ mod hk_file_list_tests {
             ),
             changed
         );
+        // The later of an export and an assignment wins, and a script given
+        // to `bash -c` sets the variables its hk check reads.
+        for (command, set) in [
+            (
+                format!("export S={dir}; S=/nowhere; hk run check --files0-from $S/files0"),
+                false,
+            ),
+            (
+                format!("S=/nowhere; export S={dir}; hk run check --files0-from $S/files0"),
+                true,
+            ),
+            (
+                format!("bash -c 'S={dir} && hk run check --files0-from $S/files0'"),
+                true,
+            ),
+        ] {
+            let want = if set {
+                &changed
+            } else {
+                &Some(selector.to_string())
+            };
+            assert_eq!(&widened(&command, selector, repo.path()), want, "{command}");
+        }
         // An assignment before a program lasts for that program only, and
         // one the script does not make leaves the list unread.
         for set in [format!("S={dir} true"), "T=1".to_string()] {

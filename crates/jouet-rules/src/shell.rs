@@ -52,9 +52,10 @@ pub struct Command {
 pub struct Script {
     pub commands: Vec<Command>,
     pub nested: Vec<Command>,
-    /// The top-level assignments that stand alone (`S=/tmp/x;`), in order,
-    /// as written after quote removal. They set the variable for the rest
-    /// of the script, and run nothing, so `commands` leaves them out.
+    /// The top-level assignments that set a variable for the rest of the
+    /// script, in order, as written after quote removal: those that stand
+    /// alone (`S=/tmp/x;`), which run nothing, so `commands` leaves them out,
+    /// and those an `export` makes, whose command `commands` keeps.
     pub assigned: Vec<String>,
 }
 
@@ -434,6 +435,10 @@ impl Builder {
                 last.op = Some(op);
             }
             return;
+        }
+        if command.words.first().is_some_and(|w| w == "export") {
+            let set = command.words[1..].iter().filter(|w| is_assignment(w));
+            self.assigned.extend(set.cloned());
         }
         self.chained = matches!(op, Some(Op::And | Op::Or));
         self.commands.push(command);
@@ -895,6 +900,9 @@ mod tests {
         let script = parse("S=/tmp/x && A='a b'; RUST_LOG=1 cargo test $(T=1; echo)");
         assert_eq!(script.assigned, ["S=/tmp/x", "A=a b"]);
         assert_eq!(script.commands.len(), 1);
+        let script = parse("export S=/a; S=/b; export -n T U=/c");
+        assert_eq!(script.assigned, ["S=/a", "S=/b", "U=/c"]);
+        assert_eq!(script.commands.len(), 2);
     }
 
     #[test]
