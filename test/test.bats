@@ -241,11 +241,39 @@ npm_deps() {
 }
 
 npm_install() {
-	local dir="$DEPS/$1"
+	local dir="${2:-$DEPS}/$1"
 	[[ -x "$dir/node_modules/.bin/$1" ]] && return 0
 	mkdir -p "$dir"
 	cp "$FIXTURES/$1/package.json" "$dir/"
-	(cd "$dir" && npm install --no-audit --no-fund --silent >/dev/null 2>&1)
+	(cd "$dir" && npm install --no-audit --no-fund --loglevel=error)
+}
+
+@test "a failed npm fixture install reports its error" {
+	cat >"$BATS_TEST_TMPDIR/bin/npm" <<'SH'
+#!/bin/sh
+echo 'fixture registry unavailable' >&2
+exit 1
+SH
+	chmod +x "$BATS_TEST_TMPDIR/bin/npm"
+	run --separate-stderr npm_install jest "$BATS_TEST_TMPDIR/npm-deps"
+	assert_failure
+	assert_equal "$stderr" 'fixture registry unavailable'
+}
+
+@test "a successful npm fixture install is reused" {
+	cat >"$BATS_TEST_TMPDIR/bin/npm" <<'SH'
+#!/bin/sh
+printf 'install\n' >>"$BATS_TEST_TMPDIR/npm-invocations"
+mkdir -p node_modules/.bin
+touch node_modules/.bin/jest
+chmod +x node_modules/.bin/jest
+SH
+	chmod +x "$BATS_TEST_TMPDIR/bin/npm"
+	run --separate-stderr npm_install jest "$BATS_TEST_TMPDIR/npm-deps"
+	assert_success
+	run --separate-stderr npm_install jest "$BATS_TEST_TMPDIR/npm-deps"
+	assert_success
+	assert_equal "$(cat "$BATS_TEST_TMPDIR/npm-invocations")" 'install'
 }
 
 # A virtualenv NAME with pytest, plus the packages given.
