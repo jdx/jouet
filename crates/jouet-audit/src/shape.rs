@@ -338,6 +338,97 @@ fn skip_heredoc_bodies(b: &[u8], mut i: usize, heredocs: &mut Vec<(String, bool)
     i
 }
 
+/// Whether a `<<` after `before` on its line is a redirection: not inside
+/// quotes or a comment, and not a shift inside `((...))` or `$((...))`. A
+/// command substitution, `$(...)` or backquotes, is a command of its own
+/// even inside double quotes.
+fn opens_a_heredoc(before: &str) -> bool {
+    // The open quotes and substitutions, innermost last.
+    let mut open: Vec<char> = Vec::new();
+    let mut escaped = false;
+    let mut prev = ' ';
+    let mut chars = before.chars().peekable();
+    while let Some(c) = chars.next() {
+        let top = open.last().copied();
+        if escaped {
+            escaped = false;
+        } else if top == Some('\'') {
+            if c == '\'' {
+                open.pop();
+            }
+        } else if c == '\\' {
+            escaped = true;
+        } else if c == '$' && chars.peek() == Some(&'(') {
+            chars.next();
+            // `$((` is arithmetic, which the count below handles.
+            if chars.peek() != Some(&'(') {
+                open.push('(');
+            }
+        } else if c == '`' {
+            if top == Some('`') {
+                open.pop();
+            } else {
+                open.push('`');
+            }
+        } else if top == Some('"') {
+            if c == '"' {
+                open.pop();
+            }
+        } else if c == '"' || c == '\'' {
+            open.push(c);
+        } else if c == ')' && top == Some('(') {
+            open.pop();
+        } else if c == '#' && (prev.is_whitespace() || matches!(prev, ';' | '&' | '|' | '(')) {
+            return false;
+        }
+        prev = c;
+    }
+    !matches!(open.last(), Some('"' | '\''))
+        && before.matches("((").count() <= before.matches("))").count()
+}
+
+/// The command without its heredoc bodies, which are data for the program
+/// they feed: a note appended with `cat >> notes.md <<EOF` that mentions
+/// `jouet wait ci` does not wait on CI.
+pub(crate) fn without_heredoc_bodies(command: &str) -> String {
+    static START: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r#"<<(-?)\s*(?:'([^']+)'|"([^"]+)"|\\?([^\s;&|<>()'"]+))"#)
+            .expect("the heredoc pattern compiles")
+    });
+    let b = command.as_bytes();
+    let mut out = String::with_capacity(command.len());
+    let mut i = 0;
+    while i < b.len() {
+        let end = b[i..]
+            .iter()
+            .position(|&c| c == b'\n')
+            .map_or(b.len(), |p| i + p);
+        let line = &command[i..end];
+        out.push_str(line);
+        out.push('\n');
+        let mut heredocs: Vec<(String, bool)> = START
+            .captures_iter(line)
+            .filter(|c| {
+                // `<<<` is a here-string, not a heredoc.
+                let at = c.get(0).expect("a match").start();
+                !line[at + 2..].starts_with('<')
+                    && !line[..at].ends_with('<')
+                    && opens_a_heredoc(&line[..at])
+            })
+            .filter_map(|c| {
+                let delim = c.get(2).or(c.get(3)).or(c.get(4))?.as_str().to_string();
+                Some((delim, !c[1].is_empty()))
+            })
+            .collect();
+        i = (end + 1).min(b.len());
+        if !heredocs.is_empty() {
+            i = skip_heredoc_bodies(b, i, &mut heredocs);
+        }
+    }
+    out.truncate(out.trim_end_matches('\n').len());
+    out
+}
+
 /// A command with every value replaced: `gh pr checks 15002 --repo jdx/mise`
 /// becomes `gh pr checks <n> --repo <v>`. Programs keep only their file
 /// name; long scripts are cut at their 8th command with a marker saying how

@@ -1,7 +1,7 @@
 //! What a call was for.
 
 use crate::event::{Call, Tool};
-use crate::shape::{is_python, program_shapes};
+use crate::shape::{is_python, program_shapes, without_heredoc_bodies};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
@@ -125,7 +125,7 @@ static EDIT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         r"\bsed\s+(?:-[a-zA-Z]*\s+)*-[a-zA-Z]*i|\bperl\s+-[a-z]*p[a-z]*i|\bapply_patch\b|\bjouet\s+edit\b",
         r"|\.write_text\(|\.replace\(.*(?s:.*)\.write|writeFileSync|File\.write",
-        r"|\b(?:cat|tee)\s+(?:-a\s+)?>?\s*[^\s|;&<>]+\s*<<|\bcat\s+<<-?\s*\S+\s*>",
+        r"|\b(?:cat|tee)\s+(?:-a\s+)?>?>?\s*[^\s|;&<>]+\s*<<|\bcat\s+<<-?\s*\S+\s*>",
     ))
     .expect("the edit pattern compiles")
 });
@@ -227,18 +227,20 @@ pub fn categorize(call: &Call) -> Category {
 
 /// The category of a shell command, or of its shape.
 pub(crate) fn categorize_command(command: &str) -> Category {
-    if CI.is_match(command) {
+    // What a command runs is in its lines, not in the heredocs it feeds.
+    let run = without_heredoc_bodies(command);
+    if CI.is_match(&run) {
         return Category::CiPolling;
     }
     // A sleep before a GitHub query is waiting on CI or a PR, whatever it asks.
-    let sleeps = SLEEP.is_match(command);
-    if sleeps && GITHUB.is_match(command) {
+    let sleeps = SLEEP.is_match(&run);
+    if sleeps && GITHUB.is_match(&run) {
         return Category::CiPolling;
     }
-    if THREADS.is_match(command) {
+    if THREADS.is_match(&run) {
         return Category::PrThreads;
     }
-    if STATUS.is_match(command) {
+    if STATUS.is_match(&run) {
         return Category::PrStatus;
     }
     let shapes = program_shapes(command);
@@ -282,7 +284,7 @@ pub(crate) fn categorize_command(command: &str) -> Category {
     if sleeps || runs("pgrep") || runs("wait") {
         return Category::ProcessPolling;
     }
-    if GITHUB.is_match(command) {
+    if GITHUB.is_match(&run) {
         return Category::Github;
     }
     if runs("git") || jouet("commit") {
@@ -360,6 +362,45 @@ mod tests {
         assert_eq!(cat("gh pr create --fill"), Category::Github);
         assert_eq!(cat("jouet wait ci"), Category::CiPolling);
         assert_eq!(cat("jouet pr threads 12"), Category::PrThreads);
+    }
+
+    #[test]
+    fn a_heredoc_body_is_data_not_a_command() {
+        assert_eq!(
+            cat("cat >> notes.md <<'MD'\n- ran `jouet wait ci 12` and `gh pr checks`\nMD"),
+            Category::Edits
+        );
+        assert_eq!(
+            cat("python3 -I - <<'PY'\nprint('jouet pr threads, sleep 5; gh api')\nPY"),
+            Category::Other
+        );
+        assert_eq!(
+            cat("cat > a.md <<-EOF\n\tgh pr checks 1 --watch\n\tEOF\njouet wait ci 3"),
+            Category::CiPolling
+        );
+        assert_eq!(
+            cat("wc -l <<< 'gh pr checks 1 --watch'"),
+            Category::CiPolling
+        );
+        // A `<<` in quotes, a comment or arithmetic opens no heredoc.
+        for command in [
+            "echo '<<EOF'\ngh pr checks 1 --watch",
+            "echo hi # <<EOF\ngh pr checks 1 --watch",
+            "echo $((1<<EOF))\ngh pr checks 1 --watch",
+        ] {
+            assert_eq!(cat(command), Category::CiPolling, "{command}");
+        }
+        // A command substitution in double quotes is a command of its own,
+        // so its heredoc's body is data.
+        assert_eq!(
+            cat("git commit -m \"$(cat <<'EOF'\nran jouet wait ci 3\nEOF\n)\""),
+            Category::Git
+        );
+        // A hyphenated delimiter closes its body.
+        assert_eq!(
+            cat("cat > a.md <<END-NOTE\ngh pr checks 1\nEND-NOTE\njouet wait ci 3"),
+            Category::CiPolling
+        );
     }
 
     #[test]
