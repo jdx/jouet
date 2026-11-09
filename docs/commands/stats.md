@@ -41,6 +41,26 @@ The stop gate [observes by default](/setup#observing-or-blocking): where it woul
 
 The reasons are `failed-test`, `failed-lint` and `failed-build` (a failed run nothing has cleared), `changed-after-pass` (files changed after the last passing test run), `hk-partial` (the last hk check covered only some files), `hk-changed` (files changed after the last hk check passed), and `hk-stop` (hk's own stop hook, which blocks in both modes). Edits made another way, such as by `sed -i`, are not seen, so an edit-only judgement undercounts. Blocks recorded before the ledger named their reasons are counted in `finishing blocked`, but not here. In `--json`, these are `measured.gate`.
 
+## Experiment arms
+
+Two defaults changed ahead of a controlled comparison: the [stop gate](#the-stop-gate) observes instead of blocking, and the `python-edit` rule is off, with the primer's "never Python" line. To compare old and new on your own sessions, `[experiment] control_share` percent of sessions (25 by default; `JOUET_EXPERIMENT_CONTROL_SHARE`) keep the old behaviour of each, assigned independently: a session can keep the gate blocking and still have `python-edit` off.
+
+- **Assignment.** A session's arm comes from a hash of its id and the toggle's name, so every hook of the session agrees without keeping any state, and the same id always gets the same arm. The `session-start` ledger entry records it, as `arm: {"gate": "control", "python-edit": "new"}`. With `control_share = 0`, no arm is assigned or recorded.
+- **What the control arm does.** The stop gate blocks as `[hooks] gate = "block"` would, and the primer says so. `python-edit` denies as `[rules] enable = ["python-edit"]` would, and the primer says "never Python". A setting that already turns the old behaviour on applies to every session, so both arms then behave alike.
+- **The report.** For each toggle, `jouet stats` reads the transcripts of the sessions with an arm and shows each arm's n, and the median and interquartile range per session of four measures. The difference of the medians (control less new) comes with a 95% bootstrap interval, or none while an arm has fewer than two sessions. The measures are:
+  - **requests:** model requests, each counted once even where a resumed session repeats them.
+  - **input tokens:** over those requests, cached or not.
+  - **active minutes:** tool time plus model time. A request's model time is the wait since what came before it, at most 15 minutes, so time away from the keyboard is not counted.
+  - **CI failures:** the desktop app's Auto-fix events that report failing checks.
+
+```text
+experiment arms, per session (control: the old behaviour; median [interquartile range]; difference: control less new, with a 95% bootstrap interval):
+  gate: control n=2, new n=2
+    requests        control 6.0 [5.5, 6.5]  new 3.0 [2.5, 3.5]  difference 3.0 [1.0, 5.0]
+```
+
+There are only tens of comparable sessions a week, so read the interval, not the difference alone. The arms are not matched on task, effort or Claude Code version; they are random by session id, which balances those only over enough sessions. In `--json`, these are `arms`.
+
 ## How the estimates work
 
 A request re-reads the whole context, so a request avoided saves its whole input. For each kind of work, the history before setup gives how many requests a run of it took and how much context each request read:

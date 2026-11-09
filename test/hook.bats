@@ -1071,3 +1071,61 @@ claude_payload() {
 	assert_output --partial "project.toml does not parse: unknown field"
 	assert_output --partial "not trusting"
 }
+
+# A Claude Code transcript for session $1 with $2 requests, made now.
+transcript() {
+	local dir="$HOME/.claude/projects/-work" now n
+	mkdir -p "$dir"
+	now=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+	for ((n = 1; n <= $2; n++)); do
+		jq -cn --arg s "$1" --arg t "$now" --arg id "$1-m$n" \
+			'{type: "assistant", timestamp: $t, sessionId: $s, cwd: "/work",
+			message: {id: $id, role: "assistant", usage: {input_tokens: 1000, output_tokens: 10}, content: []}}'
+	done >"$dir/$1.jsonl"
+}
+
+@test "a session in an experiment's control arm keeps the old behaviour, and stats compares the arms" {
+	unset JOUET_HOOKS_GATE JOUET_RULES_ENABLE CLAUDE_CONFIG_DIR
+	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	for s in c1 c2; do
+		jq -cn --arg s "$s" '{session_id: $s, source: "startup"}' |
+			env JOUET_EXPERIMENT_CONTROL_SHARE=100 jouet hook claude session-start >/dev/null
+	done
+	run jq -c 'select(.event == "session-start") | .arm' "$ledger"
+	assert_line --index 0 '{"gate":"control","python-edit":"control"}'
+
+	# The control arm: python-edit denies, and the stop gate blocks.
+	script="python3 - <<'E'
+p='a.rs'
+open(p,'w').write(open(p).read().replace('a', 'b'))
+E"
+	run --separate-stderr env JOUET_EXPERIMENT_CONTROL_SHARE=100 jouet hook claude pre-tool-use <<<"$(jq -cn --arg c "$script" '{session_id: "c1", tool_name: "Bash", tool_input: {command: $c}}')"
+	assert_output --partial '[jouet rule: python-edit]'
+	jq -cn '{session_id: "c1", hook_event_name: "PostToolUseFailure", tool_name: "Bash",
+		tool_input: {command: "cargo test --workspace"}, error: "Exit code 101", is_interrupt: false}' |
+		jouet hook claude post-tool-use-failure
+	run --separate-stderr env JOUET_EXPERIMENT_CONTROL_SHARE=100 jouet hook claude stop <<<'{"session_id":"c1","stop_hook_active":false}'
+	run jq -r .decision <<<"$output"
+	assert_output block
+	# With no share, the same session is on the new defaults, and no arm is recorded.
+	run --separate-stderr env JOUET_EXPERIMENT_CONTROL_SHARE=0 jouet hook claude pre-tool-use <<<"$(jq -cn --arg c "$script" '{session_id: "c1", tool_name: "Bash", tool_input: {command: $c}}')"
+	refute_output --partial 'python-edit'
+
+	# Two sessions on the new defaults, and a transcript for each of the four.
+	for s in n1 n2; do
+		jq -cn --arg s "$s" --argjson ts "$(date +%s)" \
+			'{ts: $ts, harness: "claude", session: $s, event: "session-start", arm: {gate: "new", "python-edit": "new"}}' >>"$ledger"
+	done
+	transcript c1 5
+	transcript c2 7
+	transcript n1 2
+	transcript n2 4
+	run --separate-stderr jouet stats --json
+	assert_success
+	run jq -c '.arms[] | [.toggle, .control.sessions, .new.sessions, (.differences[] | select(.metric == "requests") | .median, .ci_low, .ci_high)]' <<<"$output"
+	assert_line --index 0 '["gate",2,2,3.0,1.0,5.0]'
+	assert_line --index 1 '["python-edit",2,2,3.0,1.0,5.0]'
+	run --separate-stderr jouet stats --display plain
+	assert_line '  gate: control n=2, new n=2'
+	assert_line --regexp '^    requests +control 6\.0 \[5\.5, 6\.5\]  new 3\.0 \[2\.5, 3\.5\]  difference 3\.0 \[1\.0, 5\.0\]$'
+}

@@ -31,6 +31,9 @@ pub struct LedgerEntry {
     /// The bytes of output the call gave the agent, where the harness says.
     pub output_bytes: Option<u64>,
     pub decisions: Vec<LedgerDecision>,
+    /// For a `session-start`: the session's experiment arm of each toggle,
+    /// `control` or `new`, by toggle.
+    pub arm: std::collections::BTreeMap<String, String>,
 }
 
 /// What a rule decided about a call.

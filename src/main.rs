@@ -14,6 +14,7 @@ mod deps;
 mod diag;
 mod docs;
 mod entire;
+mod experiment;
 mod fnox;
 mod git;
 mod guide;

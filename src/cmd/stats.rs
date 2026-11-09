@@ -180,6 +180,15 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
     let net = measured
         .as_ref()
         .and_then(|_| stats::net(&estimates, &costs));
+    let arms = ledger
+        .as_ref()
+        .map(|l| stats::session_arms(&l.entries, &filter))
+        .filter(|arms| !arms.is_empty())
+        .map(|arms| {
+            let metrics = arm_metrics(&readers, ledger_first(ledger.as_ref(), &arms), &arms);
+            stats::compare_arms(&arms, &metrics)
+        })
+        .unwrap_or_default();
     let doc = Doc {
         ledger: LedgerDoc {
             dir: dir.map(|d| d.display().to_string()),
@@ -199,9 +208,55 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
         net_input_tokens: net,
         scan: scanned,
         after_setup_scan: after_scan,
+        arms: &arms,
     };
     out.result(&doc, || text(&doc));
     Exit::Ok
+}
+
+/// When the first session with an arm started, in seconds since the epoch.
+fn ledger_first(ledger: Option<&Ledger>, arms: &BTreeMap<String, BTreeMap<String, String>>) -> u64 {
+    ledger
+        .into_iter()
+        .flat_map(|l| &l.entries)
+        .filter(|e| e.event == "session-start")
+        .filter(|e| e.session.as_ref().is_some_and(|s| arms.contains_key(s)))
+        .map(|e| e.ts)
+        .min()
+        .unwrap_or(0)
+}
+
+/// What each session with an arm cost, from its transcripts: the files
+/// whose path names the session (both harnesses put its id there), read
+/// one by one.
+fn arm_metrics(
+    readers: &[&dyn Reader],
+    since: u64,
+    arms: &BTreeMap<String, BTreeMap<String, String>>,
+) -> Vec<stats::SessionMetrics> {
+    let filter = Filter {
+        // A session can start before its session-start hook writes.
+        since_ms: Some(i64::try_from(since).unwrap_or(i64::MAX).saturating_sub(60) * 1000),
+        ..Filter::default()
+    };
+    let mut transcripts: BTreeMap<&str, Vec<jouet_audit::Transcript>> = BTreeMap::new();
+    for &reader in readers {
+        for source in reader.discover(&filter).unwrap_or_default() {
+            let path = source.path.to_string_lossy();
+            let Some(session) = arms.keys().find(|s| path.contains(s.as_str())) else {
+                continue;
+            };
+            let read = jouet_audit::open(&source.path)
+                .and_then(|mut input| reader.read(&source, &mut input, &Filter::default()));
+            if let Ok(Some(t)) = read {
+                transcripts.entry(session).or_default().push(t);
+            }
+        }
+    }
+    transcripts
+        .into_iter()
+        .map(|(session, ts)| stats::SessionMetrics::of(session, &ts))
+        .collect()
 }
 
 /// Each harness's requests after its first ledger entry (or `since`, when
@@ -322,6 +377,9 @@ struct Doc<'a> {
     scan: ScanDoc,
     /// Reading the history after setup.
     after_setup_scan: ScanDoc,
+    /// The experiment arms compared, by toggle (see `jouet::experiment`).
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    arms: &'a [stats::ArmComparison],
 }
 
 #[derive(Serialize)]
@@ -414,6 +472,7 @@ fn text(doc: &Doc<'_>) -> String {
             "  no Claude Code or Codex history found, so nothing is estimated"
         );
     }
+    arms_text(&mut s, doc.arms);
     if doc.measured.is_some() {
         costs_text(&mut s, doc.costs);
         let totals = format!(
@@ -612,6 +671,56 @@ fn measured_text(s: &mut String, m: &Measured) {
             "  failing CI logs returned as the failing step's excerpt: {}",
             m.failure_excerpts
         );
+    }
+}
+
+/// The experiment arms: for each toggle, each arm's n and the median
+/// [IQR] of each metric per session, and the difference with its interval.
+fn arms_text(s: &mut String, arms: &[stats::ArmComparison]) {
+    if arms.is_empty() {
+        return;
+    }
+    let _ = writeln!(
+        s,
+        "\nexperiment arms, per session (control: the old behaviour; median [interquartile range]; difference: control less new, with a 95% bootstrap interval):"
+    );
+    for a in arms {
+        let _ = writeln!(
+            s,
+            "  {}: control n={}, new n={}",
+            a.toggle, a.control.sessions, a.new.sessions
+        );
+        for ((c, n), d) in a
+            .control
+            .metrics
+            .iter()
+            .zip(&a.new.metrics)
+            .zip(&a.differences)
+        {
+            let num = |v: f64| {
+                if c.metric == "input_tokens" {
+                    format!("{:.2}M", v / 1e6)
+                } else {
+                    format!("{v:.1}")
+                }
+            };
+            let interval = match (d.ci_low, d.ci_high) {
+                (Some(low), Some(high)) => format!(" [{}, {}]", num(low), num(high)),
+                _ => " (too few sessions for an interval)".to_string(),
+            };
+            let _ = writeln!(
+                s,
+                "    {:<15} control {} [{}, {}]  new {} [{}, {}]  difference {}{interval}",
+                c.metric,
+                num(c.median),
+                num(c.p25),
+                num(c.p75),
+                num(n.median),
+                num(n.p25),
+                num(n.p75),
+                num(d.median),
+            );
+        }
     }
 }
 

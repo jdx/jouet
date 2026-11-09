@@ -24,6 +24,9 @@ pub struct Transcript {
     pub messages: Vec<Message>,
     /// Lines in the file, counting those skipped.
     pub lines: u64,
+    /// Events the desktop app's CI monitor (Auto-fix) sent the session that
+    /// report failing checks. Claude Code only.
+    pub ci_failures: u64,
 }
 
 /// Something the user did, as the transcript records it.
