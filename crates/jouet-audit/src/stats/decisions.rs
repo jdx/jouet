@@ -160,10 +160,11 @@ mod tests {
     #[test]
     fn a_decision_costs_the_requests_until_the_next_check_or_edit() {
         // The denied call's request at 100.4s; the next ones at 103, 107
-        // and 110.5, the last issuing a check by 110.9s.
+        // and 110.5, the last issuing a check by 110.9s; the one at 110.9s
+        // began as the check was issued, so it is not counted.
         let times = HashMap::from([(
             "s".to_string(),
-            vec![100_400, 103_000, 107_000, 110_500, 120_000],
+            vec![100_400, 103_000, 107_000, 110_500, 110_900, 120_000],
         )]);
         let span = |rule: &str, action: &str, session: &str, at, until_ms| DecisionSpan {
             rule: rule.into(),
