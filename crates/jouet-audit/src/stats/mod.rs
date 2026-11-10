@@ -23,10 +23,10 @@ pub use costs::{AfterSetup, Cost, CostKind, costs, net};
 /// second it ended in, less how long it ran. A `jouet-run` line has no
 /// duration, so the shell call that ran it gives both: one of the session's
 /// `post-tool-use` lines of a `jouet` command in the next two seconds,
-/// preferring one whose shape names the run (older ledgers wrote every
-/// subcommand as `<arg>`). A call that would date it before `not_before`,
-/// the decision, is another one that was already running, so it is passed
-/// over; with none left the run is dated by its own line.
+/// the one whose shape names the run. Older ledgers wrote every subcommand
+/// as `<arg>`, so there it is the first `jouet` call that began at or after
+/// `not_before`, the decision (an earlier one was another, already
+/// running); with none, the run is dated by its own line.
 fn issued_ms<'a>(
     closer: &'a LedgerEntry,
     after: impl Iterator<Item = &'a LedgerEntry>,
@@ -45,15 +45,17 @@ fn issued_ms<'a>(
                 e.event == "post-tool-use"
                     && e.duration_ms.is_some()
                     && e.shape.as_deref().is_some_and(|s| s.contains("jouet"))
-                    && issued(e) >= not_before
             })
             .collect();
+        // The call that names the run is its own, whenever it began: one
+        // begun before the decision is skipped by the caller.
         let named = closer.shape.as_deref().and_then(|run| {
             calls
                 .iter()
                 .find(|e| e.shape.as_deref().is_some_and(|s| s.contains(run)))
         });
-        if let Some(call) = named.or(calls.first()) {
+        let unnamed = || calls.iter().find(|e| issued(e) >= not_before);
+        if let Some(call) = named.or_else(unnamed) {
             return issued(call);
         }
     }

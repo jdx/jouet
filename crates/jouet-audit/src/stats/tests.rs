@@ -1089,6 +1089,27 @@ fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
                 ..post("jouet <arg> --cmd -- cargo test", 0)
             },
         ),
+        // A jouet test already running when the deny came does not end it:
+        // the edit after it does.
+        decided(110, "f", "deny", Some("r1")),
+        LedgerEntry {
+            ts: 112,
+            harness: "jouet".into(),
+            session: Some("f".into()),
+            event: "jouet-run".into(),
+            shape: Some("jouet test".into()),
+            exit_code: Some(0),
+            ..LedgerEntry::default()
+        },
+        at(
+            112,
+            LedgerEntry {
+                session: Some("f".into()),
+                duration_ms: Some(5_000),
+                ..post("jouet test --cmd -- cargo test", 0)
+            },
+        ),
+        edit(115, "f"),
     ];
     let filter = StatsFilter {
         revisions: Some(BTreeMap::from([(
@@ -1114,6 +1135,7 @@ fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
             ("deny", "c", 50, Some(58_000)),
             ("deny", "d", 70, Some(73_000)),
             ("deny", "e", 90, Some(91_000)),
+            ("deny", "f", 110, Some(116_000)),
         ]
     );
 }
