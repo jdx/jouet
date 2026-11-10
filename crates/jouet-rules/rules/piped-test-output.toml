@@ -80,6 +80,11 @@ fires = [
   { command = "cargo test < answers.txt 2>&1 | tail", rewrite = true, action = "warn" },
   { command = "cargo test 2>&1 | sort | tail", rewrite = true, action = "warn" },
   { command = "jouet test --cmd -- sh -c 'cargo test | tail'", rewrite = true, action = "warn" },
+  # A negated pipeline: `!` would turn around the run's status, not the cut's.
+  { command = "! cargo test 2>&1 | grep FAIL && git push", rewrite = true, action = "warn" },
+  { command = "if !  go test ./... | grep -v ok; then echo clean; fi", rewrite = true, action = "warn" },
+  # A cut written to a file partway through the pipeline.
+  { command = "cargo test | grep FAILED > saved.txt | head", rewrite = true, action = "warn" },
   # One run it cannot rewrite keeps the whole call as written.
   { command = "cargo build | tail && cargo test | tee t.log | tail", rewrite = true, action = "warn" },
 ]

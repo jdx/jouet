@@ -175,10 +175,15 @@ end
 -- the run can go under `jouet test --cmd` instead: it is piped straight
 -- into programs that only cut it, reads no input of its own and writes no
 -- file, and the pipeline ends the call or a step of it in the foreground.
--- nil when the call must be warned about or denied as written.
-local function pipeline_end(commands: { JouetCommand }, i: number): JouetCommand?
+-- nil when the call must be warned about or denied as written. A pipeline
+-- negated with `!` is left as written: the status `!` turns around would
+-- become the run's rather than the cut's.
+local function pipeline_end(script: string, commands: { JouetCommand }, i: number): JouetCommand?
 	local command = commands[i]
 	if not command.span or not command.words_at or command.stdout_to or command.stdin_redirected then
+		return nil
+	end
+	if string.find(string.sub(script, 1, command.span.first - 1), "!%s*$") then
 		return nil
 	end
 	if i > 1 and commands[i - 1].op == "pipe" then
@@ -187,13 +192,13 @@ local function pipeline_end(commands: { JouetCommand }, i: number): JouetCommand
 	local j = i
 	while commands[j].op == "pipe" do
 		local step = commands[j + 1]
-		if not step or step.nested or not step.span or not cuts(step) or answers(step) or step.stdin_redirected then
+		if not step or step.nested or not step.span or not cuts(step) or answers(step) or step.stdin_redirected or step.stdout_to then
 			return nil
 		end
 		j += 1
 	end
 	local last = commands[j]
-	if j == i or last.stdout_to or last.op == "background" then
+	if j == i or last.op == "background" then
 		return nil
 	end
 	return last
@@ -392,7 +397,7 @@ local rule: JouetRule = {
 				continue
 			end
 			local cut = cutter(call.commands, i)
-			local last = if cut and call.rewrite and call.command then pipeline_end(call.commands, i) else nil
+			local last = if cut and call.rewrite and call.command then pipeline_end(call.command :: string, call.commands, i) else nil
 			if last then
 				table.insert(swaps, {
 					at = command.words_at :: number,
