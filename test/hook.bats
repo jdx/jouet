@@ -1131,3 +1131,23 @@ E"
 	assert_line '  gate: control n=2, new n=2'
 	assert_line --regexp '^    requests +control 6\.0 \[5\.5, 6\.5\]  new 3\.0 \[2\.5, 3\.5\]  difference 3\.0 \[1\.0, 5\.0\]$'
 }
+
+@test "a hook installed twice answers a call once" {
+	payload() { bash_payload 'git add -A' | jq -c --arg id "$1" '.tool_use_id = $id'; }
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload toolu_1)"
+	assert_output --partial 'git-add-all'
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload toolu_1)"
+	assert_success
+	assert_output ''
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload toolu_2)"
+	assert_output --partial 'git-add-all'
+	start='{"session_id":"s1","source":"startup","transcript_path":"/t/s1.jsonl"}'
+	run --separate-stderr jouet hook claude session-start <<<"$start"
+	assert_output --partial 'jouet is installed'
+	run --separate-stderr jouet hook claude session-start <<<"$start"
+	assert_output ''
+	# Without an id, nothing tells two calls apart: each is answered.
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'git add -A')"
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'git add -A')"
+	assert_output --partial 'git-add-all'
+}
