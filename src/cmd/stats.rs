@@ -251,7 +251,10 @@ fn arm_metrics(
 /// checkout's; any other directory that is gone counts as itself.
 fn repository(cwd: &str) -> String {
     let mut path = std::path::PathBuf::from(cwd);
-    if let Some((checkout, _)) = cwd.split_once("/.claude/worktrees/")
+    let gone = ["/.claude/worktrees/", "\\.claude\\worktrees\\"]
+        .into_iter()
+        .find_map(|dir| cwd.split_once(dir));
+    if let Some((checkout, _)) = gone
         && !path.exists()
     {
         path = checkout.into();
@@ -939,6 +942,19 @@ mod tests {
         ] {
             assert_eq!(arm_session(Path::new(&path), &arms), None, "{path}");
         }
+    }
+
+    #[test]
+    fn a_removed_agent_worktree_is_its_checkout_on_either_separator() {
+        assert_eq!(
+            repository("/nonexistent/w/.claude/worktrees/gone"),
+            "/nonexistent/w"
+        );
+        assert_eq!(
+            repository(r"C:\nonexistent\w\.claude\worktrees\gone"),
+            r"C:\nonexistent\w"
+        );
+        assert_eq!(repository("/nonexistent/w/gone"), "/nonexistent/w/gone");
     }
 
     #[test]

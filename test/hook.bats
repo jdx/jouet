@@ -1128,8 +1128,9 @@ E"
 	assert_line --index 0 '["gate",2,2,3.0,1.0,5.0]'
 	assert_line --index 1 '["python-edit",2,2,3.0,1.0,5.0]'
 	run --separate-stderr jouet stats --display plain
-	assert_line '  gate: control n=2, new n=2'
-	assert_line --regexp '^    requests +control 6\.0 \[5\.5, 6\.5\]  new 3\.0 \[2\.5, 3\.5\]  difference 3\.0 \[1\.0, 5\.0\]$'
+	assert_line '  /work:'
+	assert_line '    gate: control n=2, new n=2'
+	assert_line --regexp '^      requests +control 6\.0 \[5\.5, 6\.5\]  new 3\.0 \[2\.5, 3\.5\]  difference 3\.0 \[1\.0, 5\.0\]$'
 }
 
 @test "subagent-start gives a subagent the primer in its own event" {

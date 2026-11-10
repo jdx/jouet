@@ -57,10 +57,18 @@ impl SessionMetrics {
         // dates the request after its calls (Codex), to the end of the
         // last one.
         let mut spans: Vec<(i64, i64)> = Vec::new();
+        // The session ran where its earliest transcript did: the main
+        // conversation, not a subagent that started elsewhere, whichever
+        // order the transcripts were found in.
+        let mut cwd_start: Option<i64> = None;
         for t in transcripts {
             m.ci_failures = m.ci_failures.max(t.ci_failures);
-            if m.cwd.is_none() {
+            let start = t.requests.iter().filter_map(|r| r.at).min();
+            if t.cwd.is_some()
+                && (m.cwd.is_none() || start.is_some_and(|s| cwd_start.is_none_or(|c| s < c)))
+            {
                 m.cwd.clone_from(&t.cwd);
+                cwd_start = start;
             }
             for request in &t.requests {
                 if let Some(at) = request.at {
@@ -467,6 +475,33 @@ mod tests {
         let b = SessionMetrics::of("s", &[partial, full]);
         assert_eq!(a, b);
         assert_eq!((a.requests, a.active_ms), (3, 90_000));
+    }
+
+    #[test]
+    fn a_session_ran_where_its_earliest_transcript_did() {
+        let transcript = |cwd: &str, at: i64| Transcript {
+            session: "s".into(),
+            cwd: Some(cwd.into()),
+            requests: vec![Request {
+                at: Some(at),
+                ..Request::default()
+            }],
+            ..Transcript::default()
+        };
+        let main = transcript("/w/app", 1_000);
+        let subagent = transcript("/w/lib", 5_000);
+        let undated = Transcript {
+            requests: Vec::new(),
+            ..transcript("/w/other", 0)
+        };
+        for order in [
+            [subagent.clone(), main.clone(), undated.clone()],
+            [undated.clone(), main.clone(), subagent.clone()],
+            [subagent.clone(), undated.clone(), main.clone()],
+        ] {
+            let m = SessionMetrics::of("s", &order);
+            assert_eq!(m.cwd.as_deref(), Some("/w/app"));
+        }
     }
 
     #[test]
