@@ -1007,6 +1007,24 @@ fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
                 ..post("git status", 0)
             },
         ),
+        // Nor is a jouet call begun before the deny, or one that does not
+        // name the run when another does.
+        at(
+            61,
+            LedgerEntry {
+                session: Some("c".into()),
+                duration_ms: Some(30_000),
+                ..post("jouet wait ci", 0)
+            },
+        ),
+        at(
+            61,
+            LedgerEntry {
+                session: Some("c".into()),
+                duration_ms: Some(500),
+                ..post("jouet read src/main.rs", 0)
+            },
+        ),
         at(
             61,
             LedgerEntry {

@@ -21,24 +21,43 @@ pub use arms::{
 pub use costs::{AfterSetup, Cost, CostKind, costs, net};
 /// When a check or edit was issued, in milliseconds: the end of the ledger
 /// second it ended in, less how long it ran. A `jouet-run` line has no
-/// duration, so the shell call that ran it gives both: the session's next
-/// `post-tool-use` of a `jouet` command within two seconds.
-fn issued_ms<'a>(closer: &'a LedgerEntry, after: impl Iterator<Item = &'a LedgerEntry>) -> u64 {
-    let mut ran = closer;
+/// duration, so the shell call that ran it gives both: one of the session's
+/// `post-tool-use` lines of a `jouet` command in the next two seconds,
+/// preferring one whose shape names the run (older ledgers wrote every
+/// subcommand as `<arg>`). A call that would date it before `not_before`,
+/// the decision, is another one that was already running, so it is passed
+/// over; with none left the run is dated by its own line.
+fn issued_ms<'a>(
+    closer: &'a LedgerEntry,
+    after: impl Iterator<Item = &'a LedgerEntry>,
+    not_before: u64,
+) -> u64 {
+    let issued = |e: &LedgerEntry| {
+        e.ts.saturating_add(1)
+            .saturating_mul(1000)
+            .saturating_sub(e.duration_ms.unwrap_or(0))
+    };
     if closer.duration_ms.is_none() && closer.event == "jouet-run" {
         let within = closer.ts.saturating_add(2);
-        if let Some(call) = after.take_while(|e| e.ts <= within).find(|e| {
-            e.event == "post-tool-use"
-                && e.duration_ms.is_some()
-                && e.shape.as_deref().is_some_and(|s| s.contains("jouet"))
-        }) {
-            ran = call;
+        let calls: Vec<&LedgerEntry> = after
+            .take_while(|e| e.ts <= within)
+            .filter(|e| {
+                e.event == "post-tool-use"
+                    && e.duration_ms.is_some()
+                    && e.shape.as_deref().is_some_and(|s| s.contains("jouet"))
+                    && issued(e) >= not_before
+            })
+            .collect();
+        let named = closer.shape.as_deref().and_then(|run| {
+            calls
+                .iter()
+                .find(|e| e.shape.as_deref().is_some_and(|s| s.contains(run)))
+        });
+        if let Some(call) = named.or(calls.first()) {
+            return issued(call);
         }
     }
-    ran.ts
-        .saturating_add(1)
-        .saturating_mul(1000)
-        .saturating_sub(ran.duration_ms.unwrap_or(0))
+    issued(closer)
 }
 
 pub use decisions::{DecisionSpan, DecisionsAfter, after_decisions, request_times};
@@ -565,7 +584,10 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
                     .iter()
                     .enumerate()
                     .filter(|&(_, &j)| judge(std::iter::once(kept[j])).is_some())
-                    .map(|(k, &j)| issued_ms(kept[j], later[k + 1..].iter().map(|&j| kept[j])))
+                    .map(|(k, &j)| {
+                        let after = later[k + 1..].iter().map(|&j| kept[j]);
+                        issued_ms(kept[j], after, e.ts.saturating_mul(1000))
+                    })
                     // A check or edit begun before the decision, and still
                     // running when it came, does not end it.
                     .find(|&ms| ms >= e.ts.saturating_mul(1000))
