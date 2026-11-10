@@ -935,3 +935,77 @@ fn jouet_runs_own_exit_codes_decide_what_jouet_failed() {
     assert_eq!(m.overhead.len(), 1);
     assert_eq!(m.overhead[0].failed_runs, 1);
 }
+
+#[test]
+fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
+    let at = |ts: u64, e: LedgerEntry| LedgerEntry { ts, ..e };
+    let decided = |ts: u64, session: &str, action: &str, revision: Option<&str>| {
+        let mut e = warned_by(session, "piped-test-output", revision);
+        e.decisions[0].action = action.into();
+        at(ts, e)
+    };
+    let edit = |ts: u64, session: &str| LedgerEntry {
+        ts,
+        session: Some(session.into()),
+        event: "edit".into(),
+        ..LedgerEntry::default()
+    };
+    let check = |ts: u64, session: &str, exit_code: i32| LedgerEntry {
+        ts,
+        duration_ms: Some(3_000),
+        session: Some(session.into()),
+        decisions: vec![LedgerDecision {
+            rule: "checks".into(),
+            action: "record:test".into(),
+            revision: None,
+            scope: None,
+        }],
+        ..post("cargo test", exit_code)
+    };
+    let entries = [
+        decided(10, "a", "deny", Some("r1")),
+        // Neither a check nor an edit.
+        at(
+            12,
+            LedgerEntry {
+                session: Some("a".into()),
+                ..post("git status", 0)
+            },
+        ),
+        // A failing check counts as much as a passing one.
+        check(15, "a", 1),
+        decided(20, "a", "warn", Some("r1")),
+        // Another session's edit is not this one's.
+        edit(21, "b"),
+        edit(25, "a"),
+        decided(30, "a", "rewrite", None),
+        // An older revision's deny is left out.
+        decided(31, "a", "deny", Some("r0")),
+        check(32, "a", 0),
+        // Nothing follows this one.
+        decided(40, "b", "deny", Some("r1")),
+    ];
+    let filter = StatsFilter {
+        revisions: Some(BTreeMap::from([(
+            "piped-test-output".to_string(),
+            "r1".to_string(),
+        )])),
+        ..StatsFilter::default()
+    };
+    let m = measure(&entries, &filter);
+    let spans: Vec<_> = m
+        .decision_spans
+        .iter()
+        .map(|s| (s.action.as_str(), s.session.as_str(), s.at, s.until_ms))
+        .collect();
+    // A check is dated when it ended, 3 seconds after it was issued.
+    assert_eq!(
+        spans,
+        [
+            ("deny", "a", 10, Some(13_000)),
+            ("warn", "a", 20, Some(26_000)),
+            ("rewrite", "a", 30, Some(30_000)),
+            ("deny", "b", 40, None),
+        ]
+    );
+}

@@ -10,13 +10,16 @@
 
 mod arms;
 mod costs;
+mod decisions;
 mod ledger;
 mod summary;
 
+use arms::quantile;
 pub use arms::{
     ArmComparison, ArmSpread, Difference, SessionMetrics, Spread, compare_arms, session_arms,
 };
 pub use costs::{AfterSetup, Cost, CostKind, costs, net};
+pub use decisions::{DecisionSpan, DecisionsAfter, after_decisions, request_times};
 pub use ledger::{Ledger, LedgerDecision, LedgerEntry};
 pub use summary::{SummaryStyle, summary};
 
@@ -101,6 +104,15 @@ pub struct Measured {
     /// [`costs`] prices.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub overhead: Vec<Overhead>,
+    /// Each deny, warning and rewrite, and when its session next ran a
+    /// check or edited a file: what [`after_decisions`] counts the requests
+    /// over.
+    #[serde(skip)]
+    pub decision_spans: Vec<DecisionSpan>,
+    /// Each rule's decisions by action, with the requests until the next
+    /// check or edit, once the caller has read the transcripts.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub after_decisions: Vec<DecisionsAfter>,
 }
 
 /// One harness's requests jouet added, as the ledger recorded them.
@@ -513,6 +525,38 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
                     _ => r.then_other += 1,
                 }
             }
+        }
+    }
+    // Each deny, warning and rewrite, until the next check or edit.
+    for (i, e) in kept.iter().enumerate() {
+        let Some(session) = e.session.as_deref() else {
+            continue;
+        };
+        for d in &e.decisions {
+            let ruled = matches!(d.action.as_str(), "deny" | "warn" | "override");
+            if !decisions::JUDGED.contains(&d.action.as_str()) || ruled && !filter.current(d) {
+                continue;
+            }
+            let until_ms = whole_session.get(session).and_then(|entries| {
+                entries
+                    .iter()
+                    .skip_while(|&&j| j != i)
+                    .skip(1)
+                    .map(|&j| kept[j])
+                    .find(|e| judge(std::iter::once(*e)).is_some())
+                    // The ledger dates a call when it ended.
+                    .map(|e| {
+                        (e.ts.saturating_add(1).saturating_mul(1000))
+                            .saturating_sub(e.duration_ms.unwrap_or(0))
+                    })
+            });
+            m.decision_spans.push(DecisionSpan {
+                rule: d.rule.clone(),
+                action: d.action.clone(),
+                session: session.to_string(),
+                at: e.ts,
+                until_ms,
+            });
         }
     }
     for &i in &blocks {

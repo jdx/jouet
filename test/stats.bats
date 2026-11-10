@@ -40,6 +40,10 @@ stamp_revisions() {
 	assert_line --regexp '^  jouet wait ci +claude +1 +1 +0 +0 +4m$'
 	assert_line --regexp '^  sleep-poll +1 +0 +1 +0 +0 +1 +0 +0$'
 	assert_line --regexp '^  python-edit +1 +0 +1 +0 +1 +0 +1 +0$'
+	# Each decision on its own: python-edit's deny was never followed by a
+	# check or edit; the others were, in sessions with no transcript here.
+	assert_line --regexp '^  python-edit +deny +1 +- +0 +1$'
+	assert_line --regexp '^  sleep-poll +deny +1 +- +0 +0$'
 	assert_line '  checks recorded: test 1 (1 failed)'
 	assert_line "  failing CI logs returned as the failing step's excerpt: 1"
 	assert_line '  - jouet wait ci/run/pr: 1 run, not estimated: CI polling history does not establish linked, avoidable checks'
