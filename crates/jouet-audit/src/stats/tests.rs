@@ -998,12 +998,41 @@ fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
             exit_code: Some(0),
             ..LedgerEntry::default()
         },
+        // A call of something else in between is not the run's.
+        at(
+            60,
+            LedgerEntry {
+                session: Some("c".into()),
+                duration_ms: Some(9_000),
+                ..post("git status", 0)
+            },
+        ),
         at(
             61,
             LedgerEntry {
                 session: Some("c".into()),
                 duration_ms: Some(4_000),
                 ..post("jouet test --cmd -- cargo test", 0)
+            },
+        ),
+        // A run whose call was not found within two seconds is dated by
+        // its own line, not by a later jouet call.
+        decided(70, "d", "deny", Some("r1")),
+        LedgerEntry {
+            ts: 72,
+            harness: "jouet".into(),
+            session: Some("d".into()),
+            event: "jouet-run".into(),
+            shape: Some("jouet test".into()),
+            exit_code: Some(0),
+            ..LedgerEntry::default()
+        },
+        at(
+            80,
+            LedgerEntry {
+                session: Some("d".into()),
+                duration_ms: Some(1_000),
+                ..post("jouet read src/main.rs", 0)
             },
         ),
     ];
@@ -1029,6 +1058,7 @@ fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
             ("rewrite", "a", 30, Some(30_000)),
             ("deny", "b", 40, None),
             ("deny", "c", 50, Some(58_000)),
+            ("deny", "d", 70, Some(73_000)),
         ]
     );
 }
