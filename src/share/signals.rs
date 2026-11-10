@@ -313,8 +313,8 @@ fn entry_for<'a>(gaps: &'a mut Gaps, kind: Kind, subject: &str) -> &'a mut GapEn
 }
 
 /// The time budgets a hook is held to, in milliseconds: `budget` for the
-/// tool hooks, which run on every call, and ten times that for session
-/// start and stop, which wind.
+/// tool hooks, which run on every call, and ten times that for a session
+/// or subagent start, which builds the primer, and for stop, which winds.
 pub(crate) fn hook_budget(event: &str, budget: u64) -> u64 {
     match event {
         "session-start" | "subagent-start" | "stop" => budget.saturating_mul(10),
