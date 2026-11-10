@@ -83,6 +83,7 @@ fn slow_hooks_are_bugs_with_their_budget_and_slowest_run() {
     assert!(s.ready());
     assert_eq!(s.destination(), Destination::Issue);
     assert_eq!(hook_budget("stop", 500), 5000);
+    assert_eq!(hook_budget("subagent-start", 500), 5000);
     assert_eq!(hook_budget("pre-tool-use", 500), 500);
 }
 

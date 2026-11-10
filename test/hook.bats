@@ -1132,6 +1132,20 @@ E"
 	assert_line --regexp '^    requests +control 6\.0 \[5\.5, 6\.5\]  new 3\.0 \[2\.5, 3\.5\]  difference 3\.0 \[1\.0, 5\.0\]$'
 }
 
+@test "subagent-start gives a subagent the primer in its own event" {
+	run --separate-stderr jouet hook claude subagent-start <<<'{"session_id":"s1","agent_id":"a1","agent_type":"general-purpose"}'
+
+	assert_success
+	run jq -r '.hookSpecificOutput.hookEventName, .hookSpecificOutput.additionalContext' <<<"$output"
+	assert_line --index 0 'SubagentStart'
+	assert_line --index 1 --partial 'jouet is installed, a CLI toolkit for coding agents: '
+	assert_output --partial 'git-stash'
+	# Installed twice, the hook primes a subagent once.
+	run --separate-stderr jouet hook claude subagent-start <<<'{"session_id":"s1","agent_id":"a1","agent_type":"general-purpose"}'
+	assert_success
+	assert_output ''
+}
+
 @test "a hook installed twice answers a call once" {
 	payload() { bash_payload 'git add -A' | jq -c --arg id "$1" '.tool_use_id = $id'; }
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload toolu_1)"

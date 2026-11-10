@@ -134,6 +134,8 @@ impl Harness {
         match self {
             Self::Claude => &[
                 ("SessionStart", None, "session-start"),
+                // A subagent sees none of its session's context.
+                ("SubagentStart", None, "subagent-start"),
                 (
                     "PreToolUse",
                     Some("Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit"),
@@ -895,6 +897,17 @@ mod tests {
         ]
       }
     ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude subagent-start'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Bash|Read",
@@ -1109,6 +1122,17 @@ mod tests {
           {
             "type": "command",
             "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude session-start'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude subagent-start'",
             "timeout": 10
           }
         ]
