@@ -53,6 +53,15 @@ export type JouetCommand = {
 	-- The variable assignments before the program (`RUST_LOG=1 cargo test`),
 	-- which `words` leaves out.
 	env: { string },
+	-- Where the command is in the script, in bytes, for `string.sub`: from
+	-- its first assignment, word or redirection after any reserved word to
+	-- the end of its last, here-document bodies left out. In `if
+	-- RUST_LOG=1 cargo test 2>&1; then`, it is `RUST_LOG=1 cargo test
+	-- 2>&1`. nil for a command of a script passed to `sh -c`, whose text is
+	-- not the script's.
+	span: { first: number, last: number }?,
+	-- The byte where `words` starts, past the assignments; nil with `span`.
+	words_at: number?,
 	-- Inside `$(...)` or a script passed to `sh -c`.
 	nested: boolean,
 	-- One of the rule's `[rule.match]` tables matched this command: the

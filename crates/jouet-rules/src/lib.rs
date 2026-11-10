@@ -1685,7 +1685,12 @@ fn commands(script: &str) -> (Vec<shell::Command>, Vec<shell::Command>) {
         if seen > 16 {
             break;
         }
-        nested.extend(inner.all().into_iter().cloned());
+        // Their text is in the inner script, not in this one.
+        nested.extend(inner.all().into_iter().map(|c| shell::Command {
+            span: None,
+            words_at: None,
+            ..c.clone()
+        }));
         queue.extend(inner.inner_scripts());
     }
     (parsed.commands, nested)
@@ -1974,6 +1979,13 @@ fn command_table(
     t.set("stdout_to", command.stdout_to.as_deref())?;
     t.set("stdin_redirected", command.stdin_redirected)?;
     t.set("env", command.env.clone())?;
+    if let Some(span) = &command.span {
+        let at = lua.create_table()?;
+        at.set("first", span.start + 1)?;
+        at.set("last", span.end)?;
+        t.set("span", at)?;
+    }
+    t.set("words_at", command.words_at.map(|at| at + 1))?;
     t.set("nested", nested)?;
     t.set("status", status)?;
     t.set("matched", matched)?;

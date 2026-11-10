@@ -385,6 +385,8 @@ These built-in rules have scripts: `affected-tests`, `checks`, `claimed-path`, `
 | `stdout_to` | The file its standard output is redirected to (`> out.log`, `&> all`), as written; `nil` when there is none. |
 | `stdin_redirected` | Its standard input comes from a redirection: `< file`, a here-document or `<<< word`. |
 | `env` | The variable assignments before the program (`RUST_LOG=1 cargo test`), which `words` leaves out. |
+| `span` | Where it is in the script, as `{ first, last }` byte positions for `string.sub`: from its first assignment, word or redirection after any reserved word to the end of its last, here-document bodies left out. In `if RUST_LOG=1 cargo test 2>&1; then` it is `RUST_LOG=1 cargo test 2>&1`. `nil` for a command of a `sh -c` script. |
+| `words_at` | The byte where `words` starts, past the assignments; `nil` with `span`. |
 | `nested` | Whether it is inside `$(...)` or a script passed to `sh -c`. |
 | `matched` | Whether one of the rule's matchers matched it: the reason the script runs. Always false for a rule without matchers, and in `jouet.parse`. |
 | `status` | After a tool, the exit status it is known to have had ([Recording checks](#recording-checks)). |
