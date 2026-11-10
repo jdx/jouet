@@ -512,9 +512,10 @@ mod tests {
             requests,
             ..SessionMetrics::default()
         };
-        // Repository a: control takes about 10 more requests than new.
+        // Repository a: control takes a little more than new, which spreads
+        // wider.
         let mut metrics: Vec<SessionMetrics> = (0..8)
-            .map(|n| session(n, "a", if n < 4 { 50 + n } else { 40 + 2 * n }))
+            .map(|n| session(n, "a", [50, 51, 52, 53, 30, 48, 54, 80][n as usize]))
             .collect();
         // Repository b has one session in each arm; and one session's
         // repository is unknown.
@@ -540,7 +541,7 @@ mod tests {
         let [a, b, unknown] = compare_arms(&arms, &metrics).try_into().unwrap();
         assert_eq!(a.repository.as_deref(), Some("a"));
         assert_eq!((a.control.sessions, a.new.sessions), (4, 4));
-        // Pooled with b, the new median would be 52 rather than 51.
+        // Pooled with b, the new median would be 54 rather than 51.
         assert_eq!(a.new.metrics[0].median, 51.0);
         assert_eq!(b.repository.as_deref(), Some("b"));
         assert_eq!((b.control.sessions, b.new.sessions), (1, 1));
@@ -559,6 +560,8 @@ mod tests {
             );
             assert_eq!(needed.more, 2 * needed.per_arm.saturating_sub(4));
         }
+        // The spread so far is too wide for four sessions an arm.
+        assert!(requests.needed[1].per_arm > 4);
         // No interval, no estimate.
         assert!(b.differences[0].needed.is_empty());
     }
