@@ -1053,6 +1053,42 @@ fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
                 ..post("jouet read src/main.rs", 0)
             },
         ),
+        // An older ledger wrote the subcommand as <arg>: then the first
+        // jouet call that began after the deny ran it.
+        decided(90, "e", "deny", Some("r1")),
+        LedgerEntry {
+            ts: 92,
+            harness: "jouet".into(),
+            session: Some("e".into()),
+            event: "jouet-run".into(),
+            shape: Some("jouet test".into()),
+            exit_code: Some(0),
+            ..LedgerEntry::default()
+        },
+        at(
+            92,
+            LedgerEntry {
+                session: Some("e".into()),
+                duration_ms: Some(500),
+                ..post("git status", 0)
+            },
+        ),
+        at(
+            92,
+            LedgerEntry {
+                session: Some("e".into()),
+                duration_ms: Some(20_000),
+                ..post("jouet <arg> ci", 0)
+            },
+        ),
+        at(
+            93,
+            LedgerEntry {
+                session: Some("e".into()),
+                duration_ms: Some(3_000),
+                ..post("jouet <arg> --cmd -- cargo test", 0)
+            },
+        ),
     ];
     let filter = StatsFilter {
         revisions: Some(BTreeMap::from([(
@@ -1077,6 +1113,7 @@ fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
             ("deny", "b", 40, None),
             ("deny", "c", 50, Some(58_000)),
             ("deny", "d", 70, Some(73_000)),
+            ("deny", "e", 90, Some(91_000)),
         ]
     );
 }
