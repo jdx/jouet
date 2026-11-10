@@ -346,7 +346,7 @@ record = true # JOUET_COST_RECORD: keep how long each build, test and lint took 
 sequences = false # JOUET_COST_SEQUENCES: record local session-linked jouet test timings (see `jouet cost --sequences`)
 
 [experiment]
-control_share = 25 # JOUET_EXPERIMENT_CONTROL_SHARE: percent of sessions that keep the old behaviour of each toggle under test (see `jouet stats`); 0 turns the arms off
+control_share = 50 # JOUET_EXPERIMENT_CONTROL_SHARE: percent of sessions that keep the old behaviour of each toggle under test (see `jouet stats`); 0 turns the arms off
 
 [test]
 baseline = "auto" # JOUET_TEST_BASELINE: auto compares a failing run with the merge base on its own (see `jouet test`), off only with --baseline

@@ -43,7 +43,7 @@ The reasons are `failed-test`, `failed-lint` and `failed-build` (a failed run no
 
 ## Experiment arms
 
-Two defaults changed ahead of a controlled comparison: the [stop gate](#the-stop-gate) observes instead of blocking, and the `python-edit` rule is off, with the primer's "never Python" line. To compare old and new on your own sessions, `[experiment] control_share` percent of sessions (25 by default; `JOUET_EXPERIMENT_CONTROL_SHARE`) keep the old behaviour of each, assigned independently: a session can keep the gate blocking and still have `python-edit` off.
+Two defaults changed ahead of a controlled comparison: the [stop gate](#the-stop-gate) observes instead of blocking, and the `python-edit` rule is off, with the primer's "never Python" line. To compare old and new on your own sessions, `[experiment] control_share` percent of sessions (50 by default, an even split; `JOUET_EXPERIMENT_CONTROL_SHARE`) keep the old behaviour of each, assigned independently: a session can keep the gate blocking and still have `python-edit` off.
 
 - **Assignment.** A session's arm comes from a hash of its id and the toggle's name, so every hook of the session agrees without keeping any state, and the same id always gets the same arm. The `session-start` ledger entry records it, as `arm: {"gate": "control", "python-edit": "new"}`. With `control_share = 0`, no arm is assigned or recorded.
 - **What the control arm does.** The stop gate blocks as `[hooks] gate = "block"` would, and the primer says so. `python-edit` denies as `[rules] enable = ["python-edit"]` would, and the primer says "never Python". A setting that already turns the old behaviour on applies to every session, so both arms then behave alike.
