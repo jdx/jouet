@@ -1140,4 +1140,28 @@ E"
 	assert_line --index 0 'SubagentStart'
 	assert_line --index 1 --partial 'jouet is installed, a CLI toolkit for coding agents: '
 	assert_output --partial 'git-stash'
+	# Installed twice, the hook primes a subagent once.
+	run --separate-stderr jouet hook claude subagent-start <<<'{"session_id":"s1","agent_id":"a1","agent_type":"general-purpose"}'
+	assert_success
+	assert_output ''
+}
+
+@test "a hook installed twice answers a call once" {
+	payload() { bash_payload 'git add -A' | jq -c --arg id "$1" '.tool_use_id = $id'; }
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload toolu_1)"
+	assert_output --partial 'git-add-all'
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload toolu_1)"
+	assert_success
+	assert_output ''
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload toolu_2)"
+	assert_output --partial 'git-add-all'
+	start='{"session_id":"s1","source":"startup","transcript_path":"/t/s1.jsonl"}'
+	run --separate-stderr jouet hook claude session-start <<<"$start"
+	assert_output --partial 'jouet is installed'
+	run --separate-stderr jouet hook claude session-start <<<"$start"
+	assert_output ''
+	# Without an id, nothing tells two calls apart: each is answered.
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'git add -A')"
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'git add -A')"
+	assert_output --partial 'git-add-all'
 }

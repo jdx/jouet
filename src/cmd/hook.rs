@@ -43,6 +43,9 @@ pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
         let mut input = String::new();
         std::io::stdin().read_to_string(&mut input).ok()?;
         let payload: Value = serde_json::from_str(&input).ok()?;
+        if !first_run(harness, event, &payload) {
+            return None;
+        }
         let payload = harness::normalize(harness, event, payload);
         if harness == Harness::Claude && cursor_runs_its_own(&payload) {
             return None;
@@ -129,6 +132,61 @@ fn record_slow(
 
 /// The hook's stdout for one event, or `None` to print nothing. `hk_stop`
 /// is the hk stop hook a merged `stop` runs too.
+/// How long a hook's payload is remembered, to answer it once.
+const RUN_ONCE: Duration = Duration::from_secs(5);
+
+/// Whether this is the first time this hook got this payload. jouet's hooks
+/// installed twice, at user scope and in a project's committed settings with
+/// an older guard, are two commands to the harness, so it runs both on the
+/// same payload: the agent then reads the primer, and every warning and
+/// denial, twice, and the ledger counts everything twice. Only the first
+/// answers. A payload counts only with what makes it one call: a tool call's
+/// `tool_use_id`, a subagent's `agent_id`, or a session start's transcript, which cannot start twice
+/// within [`RUN_ONCE`] otherwise. A stop has no such id, and two stops of a
+/// short turn can look the same, so each is answered.
+fn first_run(harness: Harness, event: &str, payload: &Value) -> bool {
+    use std::hash::{Hash, Hasher};
+    let key = match event {
+        "session-start" => "transcript_path",
+        "subagent-start" => "agent_id",
+        _ => "tool_use_id",
+    };
+    let id = payload.get(key).and_then(Value::as_str).is_some();
+    let Some(dir) = jouet_output::paths::state_dir().map(|d| d.join("hook-runs")) else {
+        return true;
+    };
+    if !id || std::fs::create_dir_all(&dir).is_err() {
+        return true;
+    }
+    let now = SystemTime::now();
+    let stale = |path: &Path| {
+        std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .is_ok_and(|at| now.duration_since(at).unwrap_or_default() > RUN_ONCE)
+    };
+    if event == "session-start" {
+        for marker in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            if stale(&marker.path()) {
+                let _ = std::fs::remove_file(marker.path());
+            }
+        }
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (harness.name(), event, payload.to_string()).hash(&mut hasher);
+    let path = dir.join(format!("{:016x}", hasher.finish()));
+    if stale(&path) {
+        let _ = std::fs::remove_file(&path);
+    }
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Err(e) => e.kind() != std::io::ErrorKind::AlreadyExists,
+        Ok(_) => true,
+    }
+}
+
 fn handle(
     harness: Harness,
     event: &str,
