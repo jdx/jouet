@@ -9,6 +9,7 @@ setup() {
 	# Found before the test's HOME replaces the developer's, which mise's
 	# shims would need.
 	HK_BIN="$(mise which hk 2>/dev/null || command -v hk || true)"
+	RUFF_BIN="$(mise which ruff 2>/dev/null || command -v ruff || true)"
 	load "test_helper/common_setup"
 	_common_setup
 	unset JOUET_HOOKS JOUET_HOOKS_VERIFY JOUET_HOOKS_LEDGER JOUET_EDIT_FIX_AFTER JOUET_EDIT_FIX_STEPS HK_FILE
@@ -59,6 +60,10 @@ fi
 exit "$status"
 SH
 	chmod +x "$BATS_TEST_TMPDIR/tools/shellcheck"
+	# The real ruff, since its shim finds no version under the test's config.
+	if [[ -n "$RUFF_BIN" ]]; then
+		ln -s "$RUFF_BIN" "$BATS_TEST_TMPDIR/tools/ruff"
+	fi
 	export PATH="$BATS_TEST_TMPDIR/tools:$PATH"
 }
 
@@ -341,6 +346,20 @@ fake_hk_stop() {
 	assert_failure 4
 	run jq -r .status <<<"$output"
 	assert_output unavailable
+}
+
+@test "fallback checker that fails without a finding is unavailable, with its error" {
+	git rm -q hk.pkl
+	printf '%s\n' '#!/bin/sh' 'echo "mise ERROR No version is set for shim: shellcheck" >&2' 'exit 1' >"$BATS_TEST_TMPDIR/tools/shellcheck"
+
+	run --separate-stderr jouet diag check run.sh --json
+	assert_failure 4
+	run jq -c '{status, reason, findings, steps: [.steps[] | {name, status, excerpt}]}' <<<"$output"
+	assert_output '{"status":"unavailable","reason":"shellcheck failed without reporting a finding","findings":[],"steps":[{"name":"shellcheck","status":"failed","excerpt":"mise ERROR No version is set for shim: shellcheck"}]}'
+
+	run --separate-stderr jouet diag check run.sh
+	assert_failure 4
+	assert_output --partial "shellcheck failed without reporting a finding"
 }
 
 @test "Ruff fallback reports findings without applying configured fixes" {

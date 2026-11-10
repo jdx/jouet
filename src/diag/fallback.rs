@@ -40,6 +40,7 @@ pub(super) fn check(root: &Path, files: Vec<String>, timeout: Duration) -> Repor
     let mut uncovered = Vec::new();
     let mut ran = Vec::new();
     let mut invalid = Vec::new();
+    let mut unreported = Vec::new();
     for checker in CHECKERS {
         let mine: Vec<&String> = report
             .files
@@ -71,6 +72,12 @@ pub(super) fn check(root: &Path, files: Vec<String>, timeout: Duration) -> Repor
         } else {
             status
         };
+        // A checker that fails without a finding did not check the files: it
+        // could not start, timed out, or failed before it read them (a mise
+        // shim with no version set, say).
+        if status == "failed" && findings.is_empty() && !invalid.contains(&checker.name) {
+            unreported.push(checker.name);
+        }
         let excerpt = (status == "failed" && findings.is_empty())
             .then(|| super::excerpt(&output, None))
             .flatten();
@@ -113,6 +120,12 @@ pub(super) fn check(root: &Path, files: Vec<String>, timeout: Duration) -> Repor
     }
     if !invalid.is_empty() {
         reasons.push(format!("invalid JSON from {}", invalid.join(", ")));
+    }
+    if !unreported.is_empty() {
+        reasons.push(format!(
+            "{} failed without reporting a finding",
+            unreported.join(", ")
+        ));
     }
     if !reasons.is_empty() {
         report.status = Status::Unavailable;
