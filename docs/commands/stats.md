@@ -47,19 +47,26 @@ Two defaults changed ahead of a controlled comparison: the [stop gate](#the-stop
 
 - **Assignment.** A session's arm comes from a hash of its id and the toggle's name, so every hook of the session agrees without keeping any state, and the same id always gets the same arm. The `session-start` ledger entry records it, as `arm: {"gate": "control", "python-edit": "new"}`. With `control_share = 0`, no arm is assigned or recorded.
 - **What the control arm does.** The stop gate blocks as `[hooks] gate = "block"` would, and the primer says so. `python-edit` denies as `[rules] enable = ["python-edit"]` would, and the primer says "never Python". A setting that already turns the old behaviour on applies to every session, so both arms then behave alike.
-- **The report.** For each toggle, `jouet stats` reads the transcripts of the sessions with an arm and shows each arm's n, and the median and interquartile range per session of four measures. The difference of the medians (control less new) comes with a 95% bootstrap interval, or none while an arm has fewer than two sessions. The measures are:
+- **The report.** `jouet stats` compares the arms within each repository, so that a repository with long sessions in one arm does not pass for a difference between arms. A session's repository is the main checkout of the directory its transcript started in: every worktree of a repository counts as that repository, including a Claude Code worktree under `.claude/worktrees/` that has since been removed. For each toggle, it reads the transcripts of the sessions with an arm and shows each arm's n, and the median and interquartile range per session of four measures. The difference of the medians (control less new) comes with a 95% bootstrap interval, or none while an arm has fewer than two sessions. The measures are:
   - **requests:** model requests, each counted once even where a resumed session repeats them.
   - **input tokens:** over those requests, cached or not.
   - **active minutes:** tool time plus model time, as wall time. Every request of every transcript of the session goes on one timeline, from the model's wait before it (since whatever came before, at most 15 minutes, so time away from the keyboard is not counted) to the end of its calls. Time any of them covers counts once, so a resumed copy or a subagent working alongside the lead adds nothing twice.
   - **CI failures:** the desktop app's Auto-fix events that report failing checks.
 
 ```text
-experiment arms, per session (control: the old behaviour; median [interquartile range]; difference: control less new, with a 95% bootstrap interval):
-  gate: control n=2, new n=2
-    requests        control 6.0 [5.5, 6.5]  new 3.0 [2.5, 3.5]  difference 3.0 [1.0, 5.0]
+experiment arms, per session, within each repository (control: the old behaviour; median [interquartile range]; difference: control less new, with a 95% bootstrap interval):
+  ~/src/app:
+    gate: control n=2, new n=2
+      requests        control 6.0 [5.5, 6.5]  new 3.0 [2.5, 3.5]  difference 3.0 [1.0, 5.0]
+      sessions needed for a difference in requests to show: 30% about 10 an arm (16 more); 10% about 89 an arm (174 more)
+  too few to compare (an arm with fewer than two sessions), by sessions: ~/src/lib (3)
 ```
 
-There are only tens of comparable sessions a week, so read the interval, not the difference alone. The arms are not matched on task, effort or Claude Code version; they are random by session id, which balances those only over enough sessions. In `--json`, these are `arms`.
+A repository is shown once some toggle has two sessions in each arm; the rest are named on the last line with their session count, and sessions whose transcript gave no directory are `(repository unknown)`.
+
+**Sessions needed.** For each toggle, the report says how many sessions an arm would need for a difference in requests of 30%, and of 10%, of the new arm's median to show. The interval's half-width shrinks with the square root of 1/control + 1/new sessions, so from the current half-width h and a target difference d, two equal arms of n sessions give an interval of half-width d when n = 2 × (h / d)² / (1/control + 1/new). "More" is what both arms together still lack. At that size a true difference of d has about even odds of an interval that leaves out zero; for a 4-in-5 chance, double it. It is an estimate from the spread seen so far, so it moves as sessions come in.
+
+There are only tens of comparable sessions a week, so read the interval, not the difference alone. The arms are not matched on task, effort or Claude Code version; they are random by session id, which balances those only over enough sessions. In `--json`, these are `arms`: one entry per repository and toggle, with `repository`, and `needed` (`percent`, `per_arm`, `more`) on each difference.
 
 ## How the estimates work
 

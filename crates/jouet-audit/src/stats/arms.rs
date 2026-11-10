@@ -32,6 +32,14 @@ pub struct SessionMetrics {
     /// transcripts has, since a resumed or forked copy repeats them and a
     /// subagent gets none.
     pub ci_failures: u64,
+    /// The directory the session ran in, from its first transcript that
+    /// names one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    /// The repository it ran in, as the caller names it from `cwd` (the
+    /// same for every worktree of one repository); `None` when unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
 }
 
 /// Longest a request's model time counts for.
@@ -51,6 +59,9 @@ impl SessionMetrics {
         let mut spans: Vec<(i64, i64)> = Vec::new();
         for t in transcripts {
             m.ci_failures = m.ci_failures.max(t.ci_failures);
+            if m.cwd.is_none() {
+                m.cwd.clone_from(&t.cwd);
+            }
             for request in &t.requests {
                 if let Some(at) = request.at {
                     let calls = &t.calls[request.calls.clone()];
@@ -131,9 +142,13 @@ impl Metric {
     }
 }
 
-/// One toggle's arms, compared.
+/// One toggle's arms, compared within one repository.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ArmComparison {
+    /// The repository the sessions ran in; `None` for those whose
+    /// repository is unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
     /// `gate` or `python-edit`.
     pub toggle: String,
     /// The old behaviour.
@@ -173,6 +188,42 @@ pub struct Difference {
     pub ci_low: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ci_high: Option<f64>,
+    /// Sessions each arm needs before a difference of each of
+    /// [`NEEDED_FOR`] would show, with an interval: none without one, or
+    /// when the new arm's median is zero.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub needed: Vec<Needed>,
+}
+
+/// The differences, as percent of the new arm's median, that
+/// [`Difference::needed`] sizes the arms for.
+pub const NEEDED_FOR: [u64; 2] = [30, 10];
+
+/// How many sessions a difference of `percent` of the new arm's median
+/// needs to show: the 95% interval scaled from the arms' own spread to two
+/// equal arms, until its half-width is that difference. A true difference
+/// that size then has about even odds of the interval leaving out zero.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Needed {
+    pub percent: u64,
+    /// Sessions in each arm.
+    pub per_arm: u64,
+    /// Sessions still to come, over both arms: what each arm lacks of
+    /// `per_arm`.
+    pub more: u64,
+}
+
+/// The sessions per arm for a 95% interval of half-width `target`, from
+/// one of `half_width` with `control` and `new` sessions: the half-width
+/// goes as the square root of `1/control + 1/new`, which is `2/n` for two
+/// arms of `n`.
+fn per_arm(half_width: f64, target: f64, control: u64, new: u64) -> Option<u64> {
+    if target <= 0.0 || control == 0 || new == 0 {
+        return None;
+    }
+    let spread = 1.0 / control as f64 + 1.0 / new as f64;
+    let n = 2.0 * (half_width / target).powi(2) / spread;
+    Some((n.ceil() as u64).max(2))
 }
 
 /// Each session's arm of each toggle, from its session-start entries that
@@ -188,19 +239,50 @@ pub fn session_arms(
         .collect()
 }
 
-/// Each toggle's arms compared over the sessions `metrics` has.
+/// Each toggle's arms compared within each repository, over the sessions
+/// `metrics` has. Sessions in different repositories do different work, so
+/// they are never pooled. The repository with the most sessions comes
+/// first, those of an unknown repository last.
 pub fn compare_arms(
     arms: &BTreeMap<String, BTreeMap<String, String>>,
     metrics: &[SessionMetrics],
 ) -> Vec<ArmComparison> {
-    let toggles: std::collections::BTreeSet<&String> =
-        arms.values().flat_map(BTreeMap::keys).collect();
+    let mut by_repository: BTreeMap<Option<&str>, Vec<&SessionMetrics>> = BTreeMap::new();
+    for m in metrics {
+        by_repository
+            .entry(m.repository.as_deref())
+            .or_default()
+            .push(m);
+    }
+    let mut repositories: Vec<_> = by_repository.into_iter().collect();
+    repositories.sort_by_key(|(repository, sessions)| {
+        (repository.is_none(), std::cmp::Reverse(sessions.len()))
+    });
+    repositories
+        .into_iter()
+        .flat_map(|(repository, sessions)| compare_within(repository, arms, &sessions))
+        .collect()
+}
+
+/// Each toggle's arms compared over `metrics`, the sessions of one
+/// repository.
+fn compare_within(
+    repository: Option<&str>,
+    arms: &BTreeMap<String, BTreeMap<String, String>>,
+    metrics: &[&SessionMetrics],
+) -> Vec<ArmComparison> {
+    let toggles: std::collections::BTreeSet<&String> = metrics
+        .iter()
+        .filter_map(|m| arms.get(&m.session))
+        .flat_map(BTreeMap::keys)
+        .collect();
     toggles
         .into_iter()
         .map(|toggle| {
             let group = |arm: &str| -> Vec<&SessionMetrics> {
                 metrics
                     .iter()
+                    .copied()
                     .filter(|m| {
                         arms.get(&m.session)
                             .and_then(|a| a.get(toggle))
@@ -220,15 +302,34 @@ pub fn compare_arms(
                     };
                     let (c, n) = (values(&control), values(&new));
                     let ci = bootstrap(&c, &n);
+                    let base = quantile(&n, 0.5);
+                    let (sessions_c, sessions_n) = (c.len() as u64, n.len() as u64);
+                    let needed = NEEDED_FOR
+                        .iter()
+                        .filter_map(|&percent| {
+                            let (low, high) = ci?;
+                            let target = base * percent as f64 / 100.0;
+                            let per_arm =
+                                per_arm((high - low) / 2.0, target, sessions_c, sessions_n)?;
+                            Some(Needed {
+                                percent,
+                                per_arm,
+                                more: per_arm.saturating_sub(sessions_c)
+                                    + per_arm.saturating_sub(sessions_n),
+                            })
+                        })
+                        .collect();
                     Difference {
                         metric: metric.name().to_string(),
-                        median: quantile(&c, 0.5) - quantile(&n, 0.5),
+                        median: quantile(&c, 0.5) - base,
                         ci_low: ci.map(|(low, _)| low),
                         ci_high: ci.map(|(_, high)| high),
+                        needed,
                     }
                 })
                 .collect();
             ArmComparison {
+                repository: repository.map(String::from),
                 toggle: toggle.clone(),
                 control: spread(&control),
                 new: spread(&new),
@@ -395,6 +496,71 @@ mod tests {
             ..Transcript::default()
         };
         assert_eq!(SessionMetrics::of("s", &[t]).active_ms, 21 * 60 * 1000);
+    }
+
+    #[test]
+    fn arms_are_compared_within_each_repository_and_sized_for_a_difference() {
+        // The gate over two days: 7 control sessions against 28, and an
+        // interval of -40 to +105 requests on a median of 35.
+        assert_eq!(per_arm(72.5, 0.3 * 35.0, 7, 28), Some(534));
+        assert_eq!(per_arm(72.5, 0.1 * 35.0, 7, 28), Some(4806));
+        assert_eq!(per_arm(72.5, 0.0, 7, 28), None);
+        assert_eq!(per_arm(0.0, 10.0, 7, 28), Some(2));
+        let session = |n: u64, repository: &str, requests: u64| SessionMetrics {
+            session: format!("s{n}"),
+            repository: Some(repository.to_string()),
+            requests,
+            ..SessionMetrics::default()
+        };
+        // Repository a: control takes about 10 more requests than new.
+        let mut metrics: Vec<SessionMetrics> = (0..8)
+            .map(|n| session(n, "a", if n < 4 { 50 + n } else { 40 + 2 * n }))
+            .collect();
+        // Repository b has one session in each arm; and one session's
+        // repository is unknown.
+        metrics.push(session(8, "b", 500));
+        metrics.push(session(9, "b", 100));
+        metrics.push(SessionMetrics {
+            repository: None,
+            ..session(10, "", 7)
+        });
+        let arms: BTreeMap<String, BTreeMap<String, String>> = (0..11)
+            .map(|n| {
+                let arm = if n < 4 || n == 8 || n == 10 {
+                    "control"
+                } else {
+                    "new"
+                };
+                (
+                    format!("s{n}"),
+                    BTreeMap::from([("gate".to_string(), arm.to_string())]),
+                )
+            })
+            .collect();
+        let [a, b, unknown] = compare_arms(&arms, &metrics).try_into().unwrap();
+        assert_eq!(a.repository.as_deref(), Some("a"));
+        assert_eq!((a.control.sessions, a.new.sessions), (4, 4));
+        // Pooled with b, the new median would be 52 rather than 51.
+        assert_eq!(a.new.metrics[0].median, 51.0);
+        assert_eq!(b.repository.as_deref(), Some("b"));
+        assert_eq!((b.control.sessions, b.new.sessions), (1, 1));
+        assert_eq!(b.differences[0].median, 400.0);
+        assert_eq!((unknown.repository, unknown.new.sessions), (None, 0));
+        let requests = &a.differences[0];
+        let (low, high) = (requests.ci_low.unwrap(), requests.ci_high.unwrap());
+        let base = a.new.metrics[0].median;
+        let percents: Vec<u64> = requests.needed.iter().map(|n| n.percent).collect();
+        assert_eq!(percents, [30, 10]);
+        for needed in &requests.needed {
+            let target = base * needed.percent as f64 / 100.0;
+            assert_eq!(
+                Some(needed.per_arm),
+                per_arm((high - low) / 2.0, target, 4, 4)
+            );
+            assert_eq!(needed.more, 2 * needed.per_arm.saturating_sub(4));
+        }
+        // No interval, no estimate.
+        assert!(b.differences[0].needed.is_empty());
     }
 
     #[test]

@@ -236,8 +236,36 @@ fn arm_metrics(
     }
     transcripts
         .into_iter()
-        .map(|(session, ts)| stats::SessionMetrics::of(session, &ts))
+        .map(|(session, ts)| {
+            let mut m = stats::SessionMetrics::of(session, &ts);
+            m.repository = m.cwd.as_deref().map(repository);
+            m
+        })
         .collect()
+}
+
+/// The repository a session ran in, from its directory: the main checkout
+/// of the work tree that holds it, so every worktree of one repository is
+/// that repository. A worktree an agent made inside a checkout
+/// (`.claude/worktrees/NAME`) and has since removed counts as that
+/// checkout's; any other directory that is gone counts as itself.
+fn repository(cwd: &str) -> String {
+    let mut path = std::path::PathBuf::from(cwd);
+    if let Some((checkout, _)) = cwd.split_once("/.claude/worktrees/")
+        && !path.exists()
+    {
+        path = checkout.into();
+    }
+    let root = paths::work_tree(&path);
+    let main = root.as_deref().and_then(|root| {
+        let common = jouet_git::claim::common_dir(root)?;
+        // A bare repository's worktrees have no main checkout.
+        match common.file_name()? == ".git" {
+            true => common.parent().map(Path::to_path_buf),
+            false => Some(root.to_path_buf()),
+        }
+    });
+    crate::wind::memories::tilde(&main.or(root).unwrap_or(path))
 }
 
 /// The arm session a transcript's path names by its whole id, as
@@ -675,56 +703,111 @@ fn measured_text(s: &mut String, m: &Measured) {
     }
 }
 
-/// The experiment arms: for each toggle, each arm's n and the median
-/// [IQR] of each metric per session, and the difference with its interval.
+/// The experiment arms, within each repository that has two sessions in
+/// each arm of a toggle: for each toggle, each arm's n and the median [IQR]
+/// of each metric per session, the difference with its interval, and the
+/// sessions a 30% and a 10% difference in requests need. The other
+/// repositories are named on one line.
 fn arms_text(s: &mut String, arms: &[stats::ArmComparison]) {
     if arms.is_empty() {
         return;
     }
     let _ = writeln!(
         s,
-        "\nexperiment arms, per session (control: the old behaviour; median [interquartile range]; difference: control less new, with a 95% bootstrap interval):"
+        "\nexperiment arms, per session, within each repository (control: the old behaviour; median [interquartile range]; difference: control less new, with a 95% bootstrap interval):"
     );
-    for a in arms {
+    let mut too_few: Vec<String> = Vec::new();
+    for group in arms.chunk_by(|a, b| a.repository == b.repository) {
+        let name = group[0]
+            .repository
+            .as_deref()
+            .unwrap_or("(repository unknown)");
+        let comparable = group
+            .iter()
+            .any(|a| a.control.sessions >= 2 && a.new.sessions >= 2);
+        if !comparable {
+            let sessions = group
+                .iter()
+                .map(|a| a.control.sessions + a.new.sessions)
+                .max();
+            too_few.push(format!("{name} ({})", sessions.unwrap_or(0)));
+            continue;
+        }
+        let _ = writeln!(s, "  {name}:");
+        for a in group {
+            arm_text(s, a);
+        }
+    }
+    if !too_few.is_empty() {
         let _ = writeln!(
             s,
-            "  {}: control n={}, new n={}",
-            a.toggle, a.control.sessions, a.new.sessions
+            "  too few to compare (an arm with fewer than two sessions), by sessions: {}",
+            too_few.join(", ")
         );
-        if a.differences.is_empty() {
-            let _ = writeln!(s, "    nothing to compare until each arm has a session");
-        }
-        for ((c, n), d) in a
-            .control
-            .metrics
-            .iter()
-            .zip(&a.new.metrics)
-            .zip(&a.differences)
-        {
-            let num = |v: f64| {
-                if c.metric == "input_tokens" {
-                    format!("{:.2}M", v / 1e6)
-                } else {
-                    format!("{v:.1}")
-                }
-            };
-            let interval = match (d.ci_low, d.ci_high) {
-                (Some(low), Some(high)) => format!(" [{}, {}]", num(low), num(high)),
-                _ => " (too few sessions for an interval)".to_string(),
-            };
-            let _ = writeln!(
-                s,
-                "    {:<15} control {} [{}, {}]  new {} [{}, {}]  difference {}{interval}",
-                c.metric,
-                num(c.median),
-                num(c.p25),
-                num(c.p75),
-                num(n.median),
-                num(n.p25),
-                num(n.p75),
-                num(d.median),
-            );
-        }
+    }
+}
+
+/// One toggle's arms within a repository.
+fn arm_text(s: &mut String, a: &stats::ArmComparison) {
+    let _ = writeln!(
+        s,
+        "    {}: control n={}, new n={}",
+        a.toggle, a.control.sessions, a.new.sessions
+    );
+    if a.differences.is_empty() {
+        let _ = writeln!(s, "      nothing to compare until each arm has a session");
+    }
+    for ((c, n), d) in a
+        .control
+        .metrics
+        .iter()
+        .zip(&a.new.metrics)
+        .zip(&a.differences)
+    {
+        let num = |v: f64| {
+            if c.metric == "input_tokens" {
+                format!("{:.2}M", v / 1e6)
+            } else {
+                format!("{v:.1}")
+            }
+        };
+        let interval = match (d.ci_low, d.ci_high) {
+            (Some(low), Some(high)) => format!(" [{}, {}]", num(low), num(high)),
+            _ => " (too few sessions for an interval)".to_string(),
+        };
+        let _ = writeln!(
+            s,
+            "      {:<15} control {} [{}, {}]  new {} [{}, {}]  difference {}{interval}",
+            c.metric,
+            num(c.median),
+            num(c.p25),
+            num(c.p75),
+            num(n.median),
+            num(n.p25),
+            num(n.p75),
+            num(d.median),
+        );
+    }
+    let requests = a.differences.iter().find(|d| d.metric == "requests");
+    let needed: Vec<String> = requests
+        .map(|d| d.needed.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .map(|n| {
+            format!(
+                "{}% about {} an arm ({} more)",
+                n.percent,
+                stats::count_text(n.per_arm),
+                stats::count_text(n.more)
+            )
+        })
+        .collect();
+    if !needed.is_empty() {
+        let _ = writeln!(
+            s,
+            "      sessions needed for a difference in requests to show: {}",
+            needed.join("; ")
+        );
     }
 }
 
@@ -856,5 +939,61 @@ mod tests {
         ] {
             assert_eq!(arm_session(Path::new(&path), &arms), None, "{path}");
         }
+    }
+
+    #[test]
+    fn arms_are_shown_by_repository_with_the_sessions_a_difference_needs() {
+        let spread = |sessions: u64, median: f64| stats::ArmSpread {
+            sessions,
+            metrics: vec![stats::Spread {
+                metric: "requests".into(),
+                median,
+                p25: median - 1.0,
+                p75: median + 1.0,
+            }],
+        };
+        let comparison = |repository: Option<&str>, control: u64, new: u64| stats::ArmComparison {
+            repository: repository.map(str::to_string),
+            toggle: "gate".into(),
+            control: spread(control, 6.0),
+            new: spread(new, 3.0),
+            differences: vec![stats::Difference {
+                metric: "requests".into(),
+                median: 3.0,
+                ci_low: Some(1.0),
+                ci_high: Some(5.0),
+                needed: vec![
+                    stats::Needed {
+                        percent: 30,
+                        per_arm: 10,
+                        more: 16,
+                    },
+                    stats::Needed {
+                        percent: 10,
+                        per_arm: 1089,
+                        more: 2174,
+                    },
+                ],
+            }],
+        };
+        let mut s = String::new();
+        arms_text(
+            &mut s,
+            &[
+                comparison(Some("~/src/app"), 2, 2),
+                comparison(Some("~/src/lib"), 1, 2),
+                comparison(None, 2, 1),
+            ],
+        );
+        assert_eq!(
+            s.lines().skip(2).collect::<Vec<_>>(),
+            [
+                "  ~/src/app:",
+                "    gate: control n=2, new n=2",
+                "      requests        control 6.0 [5.0, 7.0]  new 3.0 [2.0, 4.0]  difference 3.0 [1.0, 5.0]",
+                "      sessions needed for a difference in requests to show: 30% about 10 an arm (16 more); 10% about 1,089 an arm (2,174 more)",
+                "  too few to compare (an arm with fewer than two sessions), by sessions: ~/src/lib (3), (repository unknown) (3)",
+            ]
+        );
     }
 }
