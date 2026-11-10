@@ -984,6 +984,28 @@ fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
         check(32, "a", 0),
         // Nothing follows this one.
         decided(40, "b", "deny", Some("r1")),
+        decided(50, "c", "deny", Some("r1")),
+        // Issued at 49s, before the deny: it does not end it.
+        check(51, "c", 0),
+        // A jouet test run is dated by the shell call that ran it, which
+        // the ledger writes after it: issued at 62s less 4.
+        LedgerEntry {
+            ts: 60,
+            harness: "jouet".into(),
+            session: Some("c".into()),
+            event: "jouet-run".into(),
+            shape: Some("jouet test".into()),
+            exit_code: Some(0),
+            ..LedgerEntry::default()
+        },
+        at(
+            61,
+            LedgerEntry {
+                session: Some("c".into()),
+                duration_ms: Some(4_000),
+                ..post("jouet test --cmd -- cargo test", 0)
+            },
+        ),
     ];
     let filter = StatsFilter {
         revisions: Some(BTreeMap::from([(
@@ -1006,6 +1028,7 @@ fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
             ("warn", "a", 20, Some(26_000)),
             ("rewrite", "a", 30, Some(30_000)),
             ("deny", "b", 40, None),
+            ("deny", "c", 50, Some(58_000)),
         ]
     );
 }

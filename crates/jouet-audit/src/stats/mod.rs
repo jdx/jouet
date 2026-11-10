@@ -19,6 +19,28 @@ pub use arms::{
     ArmComparison, ArmSpread, Difference, SessionMetrics, Spread, compare_arms, session_arms,
 };
 pub use costs::{AfterSetup, Cost, CostKind, costs, net};
+/// When a check or edit was issued, in milliseconds: the end of the ledger
+/// second it ended in, less how long it ran. A `jouet-run` line has no
+/// duration, so the shell call that ran it gives both: the session's next
+/// `post-tool-use` of a `jouet` command within two seconds.
+fn issued_ms<'a>(closer: &'a LedgerEntry, after: impl Iterator<Item = &'a LedgerEntry>) -> u64 {
+    let mut ran = closer;
+    if closer.duration_ms.is_none() && closer.event == "jouet-run" {
+        let within = closer.ts.saturating_add(2);
+        if let Some(call) = after.take_while(|e| e.ts <= within).find(|e| {
+            e.event == "post-tool-use"
+                && e.duration_ms.is_some()
+                && e.shape.as_deref().is_some_and(|s| s.contains("jouet"))
+        }) {
+            ran = call;
+        }
+    }
+    ran.ts
+        .saturating_add(1)
+        .saturating_mul(1000)
+        .saturating_sub(ran.duration_ms.unwrap_or(0))
+}
+
 pub use decisions::{DecisionSpan, DecisionsAfter, after_decisions, request_times};
 pub use ledger::{Ledger, LedgerDecision, LedgerEntry};
 pub use summary::{SummaryStyle, summary};
@@ -538,17 +560,15 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
                 continue;
             }
             let until_ms = whole_session.get(session).and_then(|entries| {
-                entries
+                let later = &entries[entries.iter().position(|&j| j == i)? + 1..];
+                later
                     .iter()
-                    .skip_while(|&&j| j != i)
-                    .skip(1)
-                    .map(|&j| kept[j])
-                    .find(|e| judge(std::iter::once(*e)).is_some())
-                    // The ledger dates a call when it ended.
-                    .map(|e| {
-                        (e.ts.saturating_add(1).saturating_mul(1000))
-                            .saturating_sub(e.duration_ms.unwrap_or(0))
-                    })
+                    .enumerate()
+                    .filter(|&(_, &j)| judge(std::iter::once(kept[j])).is_some())
+                    .map(|(k, &j)| issued_ms(kept[j], later[k + 1..].iter().map(|&j| kept[j])))
+                    // A check or edit begun before the decision, and still
+                    // running when it came, does not end it.
+                    .find(|&ms| ms >= e.ts.saturating_mul(1000))
             });
             m.decision_spans.push(DecisionSpan {
                 rule: d.rule.clone(),
