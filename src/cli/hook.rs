@@ -8,8 +8,8 @@ use usage_rs::Args;
 pub(crate) struct HookArgs {
     /// claude, codex, cursor, gemini or copilot
     pub(crate) harness: Option<String>,
-    /// session-start, pre-tool-use, post-tool-use, post-tool-use-failure,
-    /// post-edit or stop
+    /// session-start, subagent-start, pre-tool-use, post-tool-use,
+    /// post-tool-use-failure, post-edit or stop
     pub(crate) event: Option<String>,
     /// For `stop`: the hk stop hook (`hk agent stop-hook ...`) jouet runs in
     /// its place, so one hook gives one verdict

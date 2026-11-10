@@ -154,15 +154,21 @@ fn handle(
     let arm = settings.arm(log.session);
     let gate_blocks = hooks.gate_blocks() || arm.gate_blocks;
     match event {
-        "session-start" => {
-            let mut entry = log.entry("session-start");
-            if settings.experiment.control_share > 0 && log.session.is_some() {
-                entry.arm = arm.labels();
+        // Claude Code shows a subagent nothing of its session's context, so
+        // it gets the primer too, in its own start event. The session was
+        // counted when it started, and its winding notes are for the lead.
+        "session-start" | "subagent-start" => {
+            let subagent = event == "subagent-start";
+            if !subagent {
+                let mut entry = log.entry("session-start");
+                if settings.experiment.control_share > 0 && log.session.is_some() {
+                    entry.arm = arm.labels();
+                }
+                log.append(entry);
             }
-            log.append(entry);
             let loaded = load_all(payload).filter(|_| hooks.prime)?;
             let cwd = payload.get("cwd").and_then(Value::as_str).map(Path::new);
-            let primer = session_start(
+            let mut primer = session_start(
                 &loaded.engine,
                 hooks.steer,
                 hooks.verify && gate_blocks,
@@ -178,7 +184,11 @@ fn handle(
             notes.extend(cwd.and_then(crate::project::primer_line));
             // And where things are, read when needed.
             notes.extend(cwd.and_then(crate::project::map_line));
-            notes.extend(wind_notes(settings, log.session, log.repo.as_deref(), cwd));
+            if subagent {
+                primer["hookSpecificOutput"]["hookEventName"] = json!("SubagentStart");
+            } else {
+                notes.extend(wind_notes(settings, log.session, log.repo.as_deref(), cwd));
+            }
             notes.extend(untrusted_note(&loaded));
             notes.extend(fnox_note(
                 payload.get("cwd").and_then(Value::as_str).map(Path::new),
