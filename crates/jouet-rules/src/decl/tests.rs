@@ -150,6 +150,8 @@ fn the_schema_describes_every_key_the_parser_reads() {
             "node_scripts",
             "path",
             "read_lines",
+            "rewrite",
+            "rewritten",
             "scope",
             "secrets",
             "seen",

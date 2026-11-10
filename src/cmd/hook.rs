@@ -275,11 +275,17 @@ fn handle(
                 .cwd
                 .as_deref()
                 .and_then(|cwd| fnox::context(cwd.as_ref()));
+            // Claude Code runs a rewritten call through the user's own
+            // permission check; Codex has no way to rewrite one.
+            call.rewrite = harness == Harness::Claude && call.tool == "Bash" && !arm.no_rewrite;
             let (mut output, outcome) = pre_tool_use(&engine, &call);
             if let Some(outcome) = &outcome {
                 log.pre_tool_use(&call, outcome);
             }
-            if harness == Harness::Claude && outcome.as_ref().is_some_and(|o| o.deny.is_none()) {
+            if harness == Harness::Claude
+                && let Some(outcome) = outcome.as_ref().filter(|o| o.deny.is_none())
+            {
+                output = with_rewrite(payload, outcome, output);
                 output = with_long_timeout(&engine, payload, &call, output);
             }
             if hooks.verify && outcome.as_ref().is_some_and(|o| o.deny.is_none()) {
@@ -638,41 +644,63 @@ impl Log<'_> {
     }
 
     /// The call's shape and decisions, after any overrides it is: a retry
-    /// of a command of the same shape that a rule denied or warned about.
+    /// of a command of the same shape that a rule denied or warned about;
+    /// and the miss it is of a rewrite, when it runs the cut command again
+    /// or reads a test log.
     fn pre_tool_use(&self, call: &Call, outcome: &Outcome) {
-        let (Some(dir), Some(command)) = (&self.dir, &call.command) else {
+        let Some(dir) = &self.dir else {
             return;
         };
-        let shape = ledger::shape(command);
-        if outcome.deny.is_none()
-            && let Some(session) = self.session
+        let shape = call.command.as_deref().map(ledger::shape);
+        let reads_log = reads_test_log(call);
+        if let Some(session) = self.session
+            && (shape.is_some() || reads_log)
         {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs());
-            for decision in ledger::overrides(&ledger::recent(dir, session), &shape, now) {
+            let recent = ledger::recent(dir, session);
+            if let Some(miss) = ledger::miss(&recent, shape.as_deref(), reads_log, now) {
+                let mut entry = self.entry("miss");
+                entry.tool = Some(call.tool.clone());
+                entry.shape.clone_from(&shape);
+                entry.decisions.push(miss);
+                ledger::append(dir, &entry);
+            }
+            let overrides = match &shape {
+                Some(shape) if outcome.deny.is_none() => ledger::overrides(&recent, shape, now),
+                _ => Vec::new(),
+            };
+            for decision in overrides {
                 let mut entry = self.entry("override");
                 entry.tool = Some(call.tool.clone());
-                entry.shape = Some(shape.clone());
+                entry.shape.clone_from(&shape);
                 entry.decisions.push(decision);
                 ledger::append(dir, &entry);
             }
         }
+        let Some(shape) = shape else {
+            return;
+        };
         let mut entry = self.entry("pre-tool-use");
         entry.tool = Some(call.tool.clone());
         entry.shape = Some(shape);
+        // A denial wins over a rewrite: the call does not run at all.
+        let rewrite = outcome.rewrite.iter().filter(|_| outcome.deny.is_none());
         entry.decisions = outcome
             .deny
             .iter()
+            .chain(rewrite)
             .chain(&outcome.warnings)
             .map(|d| ledger::Decision {
                 rule: d.rule.clone(),
-                action: if d.action == jouet_rules::Action::Deny {
-                    "deny".into()
-                } else {
-                    "warn".into()
+                action: match d.action {
+                    jouet_rules::Action::Deny => "deny".into(),
+                    jouet_rules::Action::Rewrite => "rewrite".into(),
+                    _ => "warn".into(),
                 },
-                scope: None,
+                // What the rewrite ran instead, by its shape.
+                scope: d.rewrite.as_deref().map(ledger::shape),
                 revision: Some(d.revision.clone()).filter(|r| !r.is_empty()),
             })
             .collect();
@@ -928,7 +956,16 @@ fn with_long_timeout(
     call: &Call,
     output: Option<Value>,
 ) -> Option<Value> {
-    let Some(input) = payload.get("tool_input").and_then(Value::as_object) else {
+    // A rewrite's input already replaced the call's, and the new command
+    // is the one that runs.
+    let rewritten = output
+        .as_ref()
+        .and_then(|o| o["hookSpecificOutput"]["updatedInput"].as_object())
+        .cloned();
+    let Some(input) = rewritten
+        .as_ref()
+        .or_else(|| payload.get("tool_input").and_then(Value::as_object))
+    else {
         return output;
     };
     let timed = input.contains_key("timeout")
@@ -936,11 +973,19 @@ fn with_long_timeout(
     if call.tool != "Bash" || timed {
         return output;
     }
+    let call = match &rewritten {
+        Some(input) => {
+            let mut payload = payload.clone();
+            payload["tool_input"] = Value::Object(input.clone());
+            Call::from_hook(&payload, "claude")
+        }
+        None => call.clone(),
+    };
     // A check run is what the post-tool-use rules would record.
     let after = Call {
         event: Some(Event::PostToolUse),
         exit_code: Some(0),
-        ..call.clone()
+        ..call
     };
     if engine.evaluate(&after).records.is_empty() {
         return output;
@@ -957,6 +1002,41 @@ fn with_long_timeout(
         specific.insert("updatedInput".into(), Value::Object(updated));
     }
     Some(out)
+}
+
+/// A rule's rewrite of a Claude Code Bash call, as `updatedInput` with the
+/// new command, and no `permissionDecision`: Claude Code then applies the
+/// user's own permission check to the new command, as for the long timeout
+/// above. A denial wins over it, so the caller passes none.
+fn with_rewrite(payload: &Value, outcome: &Outcome, output: Option<Value>) -> Option<Value> {
+    let Some(command) = outcome.rewrite.as_ref().and_then(|d| d.rewrite.as_deref()) else {
+        return output;
+    };
+    let Some(input) = payload.get("tool_input").and_then(Value::as_object) else {
+        return output;
+    };
+    let mut updated = input.clone();
+    updated.insert("command".into(), json!(command));
+    let mut out = output.unwrap_or_else(|| json!({}));
+    let specific = out
+        .as_object_mut()
+        .expect("hook output is an object")
+        .entry("hookSpecificOutput")
+        .or_insert_with(|| json!({"hookEventName": "PreToolUse"}));
+    if let Some(specific) = specific.as_object_mut() {
+        specific.insert("updatedInput".into(), Value::Object(updated));
+    }
+    Some(out)
+}
+
+/// Whether a call reads a `jouet test` log, by its command or its path.
+fn reads_test_log(call: &Call) -> bool {
+    let logs = jouet_output::paths::log_dir().join("test-");
+    let logs = logs.to_string_lossy();
+    [&call.command, &call.path]
+        .into_iter()
+        .flatten()
+        .any(|text| text.contains(logs.as_ref()) || text.contains("/jouet/logs/test-"))
 }
 
 fn pre_tool_use(engine: &Engine, call: &Call) -> (Option<Value>, Option<Outcome>) {
@@ -990,10 +1070,16 @@ fn respond(outcome: &Outcome) -> Option<Value> {
             }
         }));
     }
-    if outcome.warnings.is_empty() {
+    if outcome.rewrite.is_none() && outcome.warnings.is_empty() {
         return None;
     }
-    let context: Vec<String> = outcome.warnings.iter().map(tag).collect();
+    // A rewrite's note first: it says what runs.
+    let context: Vec<String> = outcome
+        .rewrite
+        .iter()
+        .chain(&outcome.warnings)
+        .map(tag)
+        .collect();
     Some(json!({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -1902,6 +1988,79 @@ mod tests {
                 .get("permissionDecision")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_cut_test_run_is_rewritten_without_a_permission_decision() {
+        let engine = engine(Vec::new());
+        let payload = json!({"tool_name": "Bash", "tool_input": {"command": "cd src && cargo test -p jouet 2>&1 | tail -3", "description": "run tests"}});
+        let call = Call {
+            rewrite: true,
+            ..Call::from_hook(&payload, "claude")
+        };
+        let (output, outcome) = pre_tool_use(&engine, &call);
+        let outcome = outcome.unwrap();
+        assert!(
+            outcome.deny.is_none() && outcome.warnings.is_empty(),
+            "{outcome:?}"
+        );
+        let out = with_rewrite(&payload, &outcome, output);
+        let out = with_long_timeout(&engine, &payload, &call, out).unwrap();
+        let specific = &out["hookSpecificOutput"];
+        // The run goes under `jouet test --cmd`, the rest of the call and
+        // the tool's other input stay as written, and it gets the long
+        // timeout a check run gets.
+        assert_eq!(
+            specific["updatedInput"],
+            json!({
+                "command": "cd src && jouet test --cmd -- cargo test -p jouet 2>&1",
+                "description": "run tests",
+                "timeout": LONG_RUN_MS,
+            })
+        );
+        assert!(specific.get("permissionDecision").is_none());
+        let context = specific["additionalContext"].as_str().unwrap();
+        assert!(
+            context.starts_with("jouet ran this call as `cd src && jouet test --cmd -- cargo test -p jouet 2>&1`, on purpose"),
+            "{context}"
+        );
+        assert!(
+            context.ends_with("[jouet rule: piped-test-output]"),
+            "{context}"
+        );
+        // Where the call may not be rewritten, the rule only warns, and the
+        // command stays.
+        let call = Call::from_hook(&payload, "claude");
+        let (output, outcome) = pre_tool_use(&engine, &call);
+        let outcome = outcome.unwrap();
+        assert!(outcome.rewrite.is_none());
+        assert!(
+            outcome
+                .warnings
+                .iter()
+                .any(|w| w.rule == "piped-test-output")
+        );
+        let out = with_rewrite(&payload, &outcome, output).unwrap();
+        assert!(out["hookSpecificOutput"].get("updatedInput").is_none());
+    }
+
+    #[test]
+    fn a_read_of_a_test_log_is_found_by_command_or_path() {
+        let log = jouet_output::paths::log_dir().join("test-1-2-0.log");
+        let log = log.to_string_lossy();
+        assert!(reads_test_log(&bash(&format!("tail -50 {log}"))));
+        assert!(reads_test_log(&bash(
+            "cat ~/.local/state/jouet/logs/test-1-2-0.log"
+        )));
+        let read = Call::from_hook(
+            &json!({"tool_name": "Read", "tool_input": {"file_path": log}}),
+            "claude",
+        );
+        assert!(reads_test_log(&read));
+        assert!(!reads_test_log(&bash(
+            "cat ~/.local/state/jouet/logs/run-1.log"
+        )));
+        assert!(!reads_test_log(&bash("cargo test")));
     }
 
     #[test]

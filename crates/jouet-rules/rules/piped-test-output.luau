@@ -5,7 +5,9 @@
 -- output: piped into head, tail, grep, rg or `sed -n` (through `tee` too),
 -- or written to a file that a later command of the call reads with one of
 -- them. Output written to a file and left there is not cut. Lints are
--- `scoped-lint`'s.
+-- `scoped-lint`'s. Where the harness lets it (`call.rewrite`), a run piped
+-- straight into the programs that cut it runs under `jouet test --cmd`
+-- instead, uncut; the rest of the call stays as written.
 
 local function set(list: { string }): { [string]: boolean }
 	local out = {}
@@ -145,6 +147,58 @@ local function cutter(commands: { JouetCommand }, i: number): JouetCommand?
 	return nil
 end
 
+-- grep and rg options that answer with a count, file names or an exit
+-- status rather than lines of the run; a rewrite would lose that answer.
+local ANSWERS = set({
+	"--count", "--count-matches", "--quiet", "--silent", "--files-with-matches",
+	"--files-without-match",
+})
+local function answers(command: JouetCommand): boolean
+	local program = command.program or ""
+	if program == "head" or program == "tail" or program == "sed" then
+		return false
+	end
+	for _, arg in jouet.options(table.move(command.argv, 2, #command.argv, 1, {})) do
+		if ANSWERS[arg] then
+			return true
+		end
+		for _, flag in { "q", "c", "l", "L" } do
+			if jouet.short_flag(arg, flag, "efABCmdDgtT") then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+-- The last command of the pipeline that cuts `commands[i]`'s output, when
+-- the run can go under `jouet test --cmd` instead: it is piped straight
+-- into programs that only cut it, reads no input of its own and writes no
+-- file, and the pipeline ends the call or a step of it in the foreground.
+-- nil when the call must be warned about or denied as written.
+local function pipeline_end(commands: { JouetCommand }, i: number): JouetCommand?
+	local command = commands[i]
+	if not command.span or not command.words_at or command.stdout_to or command.stdin_redirected then
+		return nil
+	end
+	if i > 1 and commands[i - 1].op == "pipe" then
+		return nil
+	end
+	local j = i
+	while commands[j].op == "pipe" do
+		local step = commands[j + 1]
+		if not step or step.nested or not step.span or not cuts(step) or answers(step) or step.stdin_redirected then
+			return nil
+		end
+		j += 1
+	end
+	local last = commands[j]
+	if j == i or last.stdout_to or last.op == "background" then
+		return nil
+	end
+	return last
+end
+
 -- Commands that run a project's whole test suite, which plain `jouet test`
 -- runs too, followed only by words that do not select tests.
 local SUITES: { { string } } = {
@@ -253,8 +307,27 @@ local function speak(call: JouetCall, message: string): JouetDecision
 	return jouet.warn(message)
 end
 
+-- One run to put under `jouet test --cmd`: where its words start and end
+-- in the call's command, and where the pipeline that cut it ends.
+type Swap = { at: number, run: number, cut: number, by: string }
+
+-- The call's command with each run under `jouet test --cmd` and the
+-- programs that cut it gone.
+local function swapped(command: string, swaps: { Swap }): string
+	-- From the right, so the positions of the runs before stay true.
+	for k = #swaps, 1, -1 do
+		local s = swaps[k]
+		command = string.sub(command, 1, s.at - 1)
+			.. "jouet test --cmd -- "
+			.. string.sub(command, s.at, s.run)
+			.. string.sub(command, s.cut + 1)
+	end
+	return command
+end
+
 local rule: JouetRule = {
 	check = function(call: JouetCall): JouetDecision?
+		local swaps: { Swap } = {}
 		for i, command in call.commands do
 			if command.nested then
 				continue
@@ -319,7 +392,15 @@ local rule: JouetRule = {
 				continue
 			end
 			local cut = cutter(call.commands, i)
-			if cut then
+			local last = if cut and call.rewrite and call.command then pipeline_end(call.commands, i) else nil
+			if last then
+				table.insert(swaps, {
+					at = command.words_at :: number,
+					run = (command.span :: { first: number, last: number }).last,
+					cut = (last.span :: { first: number, last: number }).last,
+					by = (cut :: JouetCommand).program or "",
+				})
+			elseif cut then
 				-- Assignments go before jouet, whose environment the command
 				-- inherits.
 				local env = {}
@@ -339,6 +420,13 @@ local rule: JouetRule = {
 					`Run \`{table.concat(env)}{run}\` instead of cutting its output with {cut.program}. It keeps the whole output in a log, and prints one line of counts when the run passes, or each failure with the lines that explain it (up to --budget bytes) and the log's path, to read more from rather than running it again.`
 				)
 			end
+		end
+		if #swaps > 0 then
+			local command = swapped(call.command :: string, swaps)
+			return jouet.rewrite(
+				command,
+				`jouet ran this call as \`{command}\`, on purpose: a test or build run cut with {swaps[1].by} goes under \`jouet test --cmd\` instead, which keeps the whole output in a log and prints one line of counts when the run passes, or each failure with the lines that explain it and the log's path, to read rather than running it again.`
+			)
 		end
 		return nil
 	end,

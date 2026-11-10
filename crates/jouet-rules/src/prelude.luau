@@ -16,6 +16,10 @@ function jouet.allow()
 	return { action = "allow" }
 end
 
+function jouet.rewrite(command: string, message: string)
+	return { action = "rewrite", command = command, message = message }
+end
+
 function jouet.basename(path: string): string
 	local name = string.match(path, "[^/\\]*$") or path
 	return (string.gsub(name, "%.exe$", ""))

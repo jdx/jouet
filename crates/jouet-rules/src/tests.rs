@@ -698,6 +698,8 @@ return {
             node_scripts: None,
             files: None,
             fired: None,
+            rewrite: false,
+            rewritten: None,
         }
     );
     let results: Vec<(String, String, String, bool)> = engine
@@ -1822,4 +1824,54 @@ quiet = [{ command = "ls x", exit_code = 0 }]
     assert!(engine.evaluate(&bash("ls x")).warnings.is_empty());
     let examples = engine.examples(engine.rule("after-ls").unwrap()).unwrap();
     assert!(examples.iter().all(|e| e.ok), "{examples:?}");
+}
+
+#[test]
+fn only_a_builtin_deny_rule_rewrites_and_only_a_call_that_allows_it() {
+    let code = |mode: &str| {
+        format!(
+            "--- why: a test rule\n--- mode: {mode}\nreturn {{ check = function(call)
+	if call.command == 'whoami' then return jouet.warn(tostring(call.rewrite)) end
+	if call.command == 'pwd' then return jouet.rewrite('pwd', 'the same') end
+	if call.command == 'id' then return jouet.rewrite(' ', 'nothing') end
+	return jouet.rewrite('ls -la', 'swapped')
+end }}"
+        )
+    };
+    let builtin = |mode: &str| engine(vec![Source::luau("swap", Origin::Builtin, code(mode))]);
+    let allowed = |command: &str| Call {
+        rewrite: true,
+        ..bash(command)
+    };
+    let outcome = builtin("deny").evaluate(&allowed("ls"));
+    assert!(outcome.errors.is_empty(), "{:?}", outcome.errors);
+    assert!(outcome.deny.is_none() && outcome.warnings.is_empty());
+    let rewrite = outcome.rewrite.unwrap();
+    assert_eq!(rewrite.action, Action::Rewrite);
+    assert_eq!(rewrite.rewrite.as_deref(), Some("ls -la"));
+    assert_eq!(rewrite.message.as_deref(), Some("swapped"));
+    // The rule sees whether it may.
+    let says =
+        |engine: &Engine, call: &Call| engine.evaluate(call).warnings[0].message.clone().unwrap();
+    assert_eq!(says(&builtin("deny"), &allowed("whoami")), "true");
+    assert_eq!(says(&builtin("deny"), &bash("whoami")), "false");
+    assert_eq!(says(&builtin("warn"), &allowed("whoami")), "false");
+    // A rule of yours, with the examples it needs to deny.
+    let body = code("deny").replacen("--- why: a test rule\n--- mode: deny\n", "", 1);
+    let user = engine(vec![user("swap", &body)]);
+    assert_eq!(says(&user, &allowed("whoami")), "false");
+    // A rule that rewrites anyway, or to nothing new, is an error, and the
+    // call goes ahead as written.
+    for (engine, call, error) in [
+        (builtin("deny"), bash("ls"), "may not rewrite"),
+        (builtin("warn"), allowed("ls"), "may not rewrite"),
+        (user, allowed("ls"), "may not rewrite"),
+        (builtin("deny"), allowed("pwd"), "without a new command"),
+        (builtin("deny"), allowed("id"), "without a new command"),
+    ] {
+        let outcome = engine.evaluate(&call);
+        assert!(outcome.rewrite.is_none());
+        assert_eq!(outcome.errors.len(), 1, "{:?}", outcome.errors);
+        assert!(outcome.errors[0].contains(error), "{:?}", outcome.errors);
+    }
 }

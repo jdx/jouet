@@ -134,7 +134,7 @@ impl Metric {
 /// One toggle's arms, compared.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ArmComparison {
-    /// `gate` or `python-edit`.
+    /// `gate`, `python-edit` or `piped-rewrite`.
     pub toggle: String,
     /// The old behaviour.
     pub control: ArmSpread,

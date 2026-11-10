@@ -222,7 +222,9 @@ fires = [
 | `path` | For a file tool, the path it reads or writes. |
 | `harness` | `claude`, `codex` or another harness; `test` if omitted. |
 | `exit_code` | For a post-tool-use rule; `0` if omitted. |
-| `action` | For a `fires` example: `deny` or `warn`, when it matters which. |
+| `action` | For a `fires` example: `deny`, `warn` or `rewrite`, when it matters which. |
+| `rewrite` | Whether the rule may rewrite the call, as `call.rewrite` says; `false` if omitted. |
+| `rewritten` | For a `fires` example: the command the rule must run in the call's place. It implies `action = "rewrite"` and `rewrite = true`. |
 | `kind` | For a `fires` example of a post-tool-use rule: the kind it must record, `test`, `lint` or `build`. |
 | `scope` | For a `fires` example with a `kind`: the scope the record must have, `full`, or `partial` and its selector. |
 | `input` | The tool's input: `{ tool = "Grep", input = { pattern = "TODO", output_mode = "content" } }`, or `{ command = "npm run dev", input = { run_in_background = true } }` for a `Bash` call. |
@@ -340,7 +342,7 @@ local rule: JouetRule = {
 return rule
 ```
 
-The script returns a table with a `check` function, which gets the tool call and returns `jouet.deny(message)`, `jouet.warn(message)`, `jouet.allow()`, or `nil` to say nothing. In a warn-mode rule, `jouet.deny` warns. The rule's name, mode, `needs`, `on` and examples stay in its TOML, and a script rule takes no `message`: its `check` says what to tell the agent. Its `suggest`, if any, is for the session-start primer. `jouet rule new NAME --script` writes both files.
+The script returns a table with a `check` function, which gets the tool call and returns `jouet.deny(message)`, `jouet.warn(message)`, `jouet.allow()`, or `nil` to say nothing. A built-in deny-mode rule can also return `jouet.rewrite(command, message)` when `call.rewrite` is true, to run `command` in the call's place and tell the agent `message`; at any other time a rewrite is an error, and the call goes ahead as written. A denial from another rule wins over a rewrite. In a warn-mode rule, `jouet.deny` warns. The rule's name, mode, `needs`, `on` and examples stay in its TOML, and a script rule takes no `message`: its `check` says what to tell the agent. Its `suggest`, if any, is for the session-start primer. `jouet rule new NAME --script` writes both files.
 
 A matcher in front of a script is worth having: a hook only starts a Luau VM when a script has a call to look at, so a rule that matches `sleep` costs nothing on every other command. Rules without a script never start one.
 
@@ -348,7 +350,7 @@ These built-in rules have scripts: `affected-tests`, `checks`, `claimed-path`, `
 
 - `checks` reads `mise run test:e2e` and `npm run lint` by their task names, and records runs rather than denying them. A `jouet test --cmd -- sh -c '...'` script counts as the checks in it: one that passed with `cargo build && cargo test -p a` recorded a build and a test, as the same commands run directly do. A script records nothing when it failed (which command failed is unknown), changes directory or runs under a wrapper that does (`env -C`), or runs a command that is not a check, which may have changed the files after the checks ran.
 - `affected-tests` matches a whole-suite test run, then asks whether jouet can select tests here (`jouet.test.adapters()`) and whether the last test run was a whole suite too.
-- `piped-test-output` matches a test or build runner in a call that also runs `head`, `tail` or `grep`, then follows the pipeline, and the file the output went to, to see whether it is that run's output being cut. A `jouet test` cut with `head` or `tail` is warned about once, and never denied, since its output is already short and it records its own result, but a failure piped into `tail` can lose the line naming it, and the pipe hides its exit code from a `&&` after it; a cut run inside its `--cmd -- sh -c` script is not, since jouet then reads only the cut output and the script's last exit code. It warns the first time in a session, or in a subagent, and denies after that, asking `jouet.session.fired()` how often it already spoke up.
+- `piped-test-output` matches a test or build runner in a call that also runs `head`, `tail` or `grep`, then follows the pipeline, and the file the output went to, to see whether it is that run's output being cut. A `jouet test` cut with `head` or `tail` is warned about once, and never denied, since its output is already short and it records its own result, but a failure piped into `tail` can lose the line naming it, and the pipe hides its exit code from a `&&` after it; a cut run inside its `--cmd -- sh -c` script is not, since jouet then reads only the cut output and the script's last exit code. It warns the first time in a session, or in a subagent, and denies after that, asking `jouet.session.fired()` how often it already spoke up. Where `call.rewrite` is true, a run piped straight into programs that only cut it is rewritten instead, from the first time: the rule splices `jouet test --cmd -- ` in front of the run's words and drops the pipe, using each command's `span` and `words_at`.
 - `reset-to-remote` asks `jouet.git.ahead()` how many local commits a `git checkout -B` would drop.
 - `rebase-merged-base` asks `jouet.stack.layer()` whether a rebased branch's prerequisite has merged.
 - `claimed-path` matches an edit or a commit, then asks `jouet.claims.held()` whether another session claims a path it touches.
@@ -370,6 +372,7 @@ These built-in rules have scripts: `affected-tests`, `checks`, `claimed-path`, `
 | `session` | The agent session making the call: the hook payload's `session_id`. |
 | `agent` | The subagent making the call within that session: the payload's `agent_id` (Claude Code's Agent tool). `nil` for the session's own agent. |
 | `exit_code` | The command's exit code, after a tool (post-tool-use only). |
+| `rewrite` | Whether this rule may return `jouet.rewrite(...)`: only a built-in deny-mode rule, before a Claude Code Bash call, outside the `piped-rewrite` experiment's control arm. |
 | `commands` | Every command the shell command runs: top-level ones first, then those inside `$(...)` and `sh -c '...'`. |
 
 `call.commands` is the command parsed the way a shell parses it, as for a matcher. Each command has:

@@ -1134,7 +1134,10 @@ hint: jouet test --budget BYTES --cmd -- mise run test:e2e test_a"
 	assert_output --regexp 'cmd: passed in [0-9.]+s: 2 passed \(full log: '
 }
 
-@test "the hooks steer a cut test run to --cmd, denying once warned, and record a --cmd build as a build" {
+@test "in the experiment's control arm, the hooks steer a cut test run to --cmd, denying once warned, and record a --cmd build as a build" {
+	# The control arm keeps the behaviour from before rewrites: a warning,
+	# then a denial.
+	export JOUET_EXPERIMENT_CONTROL_SHARE=100
 	payload() {
 		jq -cn --arg c "$1" --arg cwd "$PWD" '{session_id: "s1", cwd: $cwd, tool_name: "Bash", tool_input: {command: $c}}'
 	}
@@ -1177,6 +1180,62 @@ hint: jouet test --budget BYTES --cmd -- mise run test:e2e test_a"
 	ran 'jouet test --cmd -- cargo build' 1
 	run --separate-stderr jq -c '.trees[].runs.build | [.command, .exit_code]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
 	assert_output '["jouet test --cmd -- cargo build",1]'
+}
+
+@test "a run piped straight into head, tail or grep runs under --cmd instead, and the ledger counts each rewrite and its miss" {
+	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	payload() {
+		jq -cn --arg c "$1" --arg cwd "$PWD" '{session_id: "s1", cwd: $cwd, tool_name: "Bash", tool_input: {command: $c, description: "tests"}}'
+	}
+	cut="cd . && RUST_LOG=1 cargo test -q -p app 2>&1 | grep -E 'panicked|FAILED' | head -20; echo done"
+
+	# From the first time, with no permission decision, so the user's own
+	# check applies to the new command; the call's other commands and the
+	# tool's other input stay as written.
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload "$cut")"
+	assert_success
+	hook=$output
+	run jq -c '.hookSpecificOutput | [.permissionDecision, .updatedInput.command, .updatedInput.description]' <<<"$hook"
+	assert_output '[null,"cd . && RUST_LOG=1 jouet test --cmd -- cargo test -q -p app 2>&1; echo done","tests"]'
+	run jq -r '.hookSpecificOutput.additionalContext' <<<"$hook"
+	# shellcheck disable=SC2016 # backticks in expected output are Markdown
+	assert_output --partial 'jouet ran this call as `cd . && RUST_LOG=1 jouet test --cmd -- cargo test -q -p app 2>&1; echo done`, on purpose: a test or build run cut with grep goes under `jouet test --cmd` instead'
+	assert_output --partial '[jouet rule: piped-test-output]'
+	# Its scope is the new command's shape.
+	run jq -c 'select(.event == "pre-tool-use") | .decisions | map(del(.revision))' "$ledger"
+	assert_output '[{"rule":"piped-test-output","action":"rewrite","scope":"cd <arg> && jouet <arg> --cmd -- <arg> <arg> -q -p <arg>; echo <arg>"}]'
+
+	# Running the cut command again is a miss, and so is reading a test
+	# log back; each rewrite is missed once.
+	jouet hook claude pre-tool-use <<<"$(payload "$cut")" >/dev/null
+	read_log=$(jq -cn --arg p "$JOUET_LOG_DIR/test-1-2-0.log" '{session_id: "s1", tool_name: "Read", tool_input: {file_path: $p}}')
+	jouet hook claude pre-tool-use <<<"$read_log" >/dev/null
+	jouet hook claude pre-tool-use <<<"$read_log" >/dev/null
+	run jq -c 'select(.event == "miss") | [.tool, .decisions[0].rule, .decisions[0].scope]' "$ledger"
+	assert_output '["Bash","piped-test-output","rerun"]
+["Read","piped-test-output","log-read"]'
+
+	# A rerun after a rewrite is no override of a warning.
+	run jq -c 'select(.event == "override")' "$ledger"
+	assert_output ""
+
+	# Tee and a file read back cannot be rewritten: they are warned about,
+	# then denied, as before. A rewrite was no warning, so the first is
+	# warned about.
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'cargo test 2>&1 | tee t.log | tail -5')"
+	run jq -r '.hookSpecificOutput | .permissionDecision // "warn", .updatedInput.command // "unchanged"' <<<"$output"
+	assert_output 'warn
+unchanged'
+	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'cargo test > t.log 2>&1; tail t.log')"
+	run jq -r '.hookSpecificOutput.permissionDecision' <<<"$output"
+	assert_output deny
+
+	# Codex has no way to run another command in the call's place: it is
+	# only warned, as before.
+	run --separate-stderr jouet hook codex pre-tool-use <<<"$(payload 'cargo test 2>&1 | tail -5' | jq -c '.session_id = "x1"')"
+	assert_success
+	refute_output --partial 'jouet test --cmd -- cargo test 2>&1'
+	assert_output --partial '[jouet rule: piped-test-output]'
 }
 
 @test "a test run piped into head does not count as passing, so a failure still holds up finishing" {

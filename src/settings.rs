@@ -56,7 +56,7 @@ pub(crate) struct Settings {
 #[derive(usage_rs::Config, Debug, Clone, PartialEq)]
 #[usage(prefix = "experiment")]
 pub(crate) struct ExperimentSettings {
-    /// Percent of sessions, 0 to 100, that keep the old behaviour of each toggle under test: the stop gate blocking, and the python-edit rule denying; 0 turns the arms off
+    /// Percent of sessions, 0 to 100, that keep the old behaviour of each toggle under test: the stop gate blocking, the python-edit rule denying, and the piped-test-output rule warning about and then denying a cut test run rather than running it under `jouet test --cmd`; 0 turns the arms off
     #[usage(env = "JOUET_EXPERIMENT_CONTROL_SHARE", default = 25)]
     pub control_share: u64,
 }
