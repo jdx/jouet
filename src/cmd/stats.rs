@@ -575,7 +575,7 @@ fn measured_text(s: &mut String, m: &Measured) {
         table(s, &rows, 2);
         let _ = writeln!(
             s,
-            "  (calls failed: calls that ran it and failed, on it or on whatever else they ran; own: runs that recorded their own exit code)"
+            "  (calls failed: calls that ran it and failed, on it or on whatever else they ran; own: runs that recorded their own exit code, a check's answer not counted as failed; own runs include jouet runs a call started itself, as a script or a test does, so they can exceed runs)"
         );
     }
     if !m.rules.is_empty() {
