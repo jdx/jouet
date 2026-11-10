@@ -216,6 +216,8 @@ To have it block, set it in the config file or the environment:
 gate = "block" # JOUET_HOOKS_GATE=block
 ```
 
+A share of sessions keeps blocking regardless, as an [experiment arm](/commands/stats#experiment-arms), unless `[experiment] control_share = 0`.
+
 Each reason is raised once either way, so a would-block is recorded where a block would have been, and not again at every stop after. hk's own stop hook, when merged in, is hk's verdict, and blocks in both modes.
 
 #### What counts as a check
@@ -339,6 +341,9 @@ summary = "quips" # JOUET_STATS_SUMMARY: quips, plain, or off for no line
 [cost]
 record = true # JOUET_COST_RECORD: keep how long each build, test and lint took as a git note on HEAD (see `jouet cost`)
 sequences = false # JOUET_COST_SEQUENCES: record local session-linked jouet test timings (see `jouet cost --sequences`)
+
+[experiment]
+control_share = 25 # JOUET_EXPERIMENT_CONTROL_SHARE: percent of sessions that keep the old behaviour of each toggle under test (see `jouet stats`); 0 turns the arms off
 
 [test]
 baseline = "auto" # JOUET_TEST_BASELINE: auto compares a failing run with the merge base on its own (see `jouet test`), off only with --baseline

@@ -178,6 +178,7 @@ pub(crate) fn trust(args: &TrustArgs, out: &Output) -> Exit {
         &Load {
             assume: Some(&set.root),
             ungated: true,
+            ..Load::default()
         },
     );
     loaded.engine.load_scripts();

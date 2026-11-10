@@ -8,10 +8,14 @@
 //! [`costs`] prices what jouet added the same way, each showing its basis or
 //! refusing when the history is too thin. [`net`] is the one less the other.
 
+mod arms;
 mod costs;
 mod ledger;
 mod summary;
 
+pub use arms::{
+    ArmComparison, ArmSpread, Difference, SessionMetrics, Spread, compare_arms, session_arms,
+};
 pub use costs::{AfterSetup, Cost, CostKind, costs, net};
 pub use ledger::{Ledger, LedgerDecision, LedgerEntry};
 pub use summary::{SummaryStyle, summary};

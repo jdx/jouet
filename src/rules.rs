@@ -56,6 +56,9 @@ pub(crate) struct Load<'a> {
     /// Leave every rule from outside unchecked against its examples; the
     /// caller checks them.
     pub ungated: bool,
+    /// The agent session the rules are for, whose experiment arm can turn
+    /// on a rule that is off by default ([`crate::experiment`]).
+    pub session: Option<&'a str>,
 }
 
 /// Loads every rule. A script's Luau VM starts only when a call needs it.
@@ -85,7 +88,7 @@ pub(crate) fn load_with(cwd: &Path, how: &Load) -> Loaded {
         rule_sources,
         Options {
             has_command: Box::new(crate::spec::has_command),
-            disabled: settings.rules.disabled(),
+            disabled: settings.rules.disabled(settings.arm(how.session)),
             budget: Budget::default(),
             cache_dir: jouet_output::paths::cache_dir().map(|d| d.join("luau")),
         },

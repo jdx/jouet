@@ -150,15 +150,22 @@ fn handle(
             .and_then(Value::as_str)
             .and_then(|cwd| ledger::repo_key(cwd.as_ref())),
     };
+    // The session's experiment arm: which toggles keep their old behaviour.
+    let arm = settings.arm(log.session);
+    let gate_blocks = hooks.gate_blocks() || arm.gate_blocks;
     match event {
         "session-start" => {
-            log.append(log.entry("session-start"));
+            let mut entry = log.entry("session-start");
+            if settings.experiment.control_share > 0 && log.session.is_some() {
+                entry.arm = arm.labels();
+            }
+            log.append(entry);
             let loaded = load_all(payload).filter(|_| hooks.prime)?;
             let cwd = payload.get("cwd").and_then(Value::as_str).map(Path::new);
             let primer = session_start(
                 &loaded.engine,
                 hooks.steer,
-                hooks.verify && hooks.gate_blocks(),
+                hooks.verify && gate_blocks,
                 harness,
                 cwd,
             );
@@ -318,7 +325,7 @@ fn handle(
             }))
         }
         "stop" => {
-            let gate = hooks.verify.then_some(hooks.gate_blocks());
+            let gate = hooks.verify.then_some(gate_blocks);
             let Stopped {
                 output,
                 reasons,
@@ -649,7 +656,14 @@ fn load_all(payload: &Value) -> Option<rules::Loaded> {
         .and_then(Value::as_str)
         .map(PathBuf::from)
         .or_else(|| std::env::current_dir().ok())?;
-    let loaded = rules::load(&cwd);
+    let session = payload.get("session_id").and_then(Value::as_str);
+    let loaded = rules::load_with(
+        &cwd,
+        &rules::Load {
+            session,
+            ..rules::Load::default()
+        },
+    );
     for error in &loaded.errors {
         eprintln!("jouet: {error}");
     }

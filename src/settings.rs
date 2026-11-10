@@ -48,6 +48,26 @@ pub(crate) struct Settings {
     pub test: TestSettings,
     #[usage(flatten)]
     pub cost: CostSettings,
+    #[usage(flatten)]
+    pub experiment: ExperimentSettings,
+}
+
+/// The experiment arms (see [`crate::experiment`]).
+#[derive(usage_rs::Config, Debug, Clone, PartialEq)]
+#[usage(prefix = "experiment")]
+pub(crate) struct ExperimentSettings {
+    /// Percent of sessions, 0 to 100, that keep the old behaviour of each toggle under test: the stop gate blocking, and the python-edit rule denying; 0 turns the arms off
+    #[usage(env = "JOUET_EXPERIMENT_CONTROL_SHARE", default = 25)]
+    pub control_share: u64,
+}
+
+impl Settings {
+    /// The arm `session` is in, by `[experiment] control_share`.
+    pub(crate) fn arm(&self, session: Option<&str>) -> crate::experiment::Arm {
+        session.map_or_else(Default::default, |s| {
+            crate::experiment::Arm::of(s, self.experiment.control_share)
+        })
+    }
 }
 
 /// What builds, tests and lints cost here, kept as git notes (see
@@ -216,9 +236,13 @@ pub(crate) struct RuleSettings {
 impl RuleSettings {
     /// The rules to load turned off: those `disable` names, and the
     /// built-in ones off by default ([`crate::rules::OFF_BY_DEFAULT`]) that
-    /// `enable` does not name.
-    pub(crate) fn disabled(&self) -> Vec<String> {
-        let enabled = self.enable.as_deref().unwrap_or_default();
+    /// `enable` does not name. A session in python-edit's control arm
+    /// ([`crate::experiment`]) has it on.
+    pub(crate) fn disabled(&self, arm: crate::experiment::Arm) -> Vec<String> {
+        let mut enabled = self.enable.clone().unwrap_or_default();
+        if arm.python_edit {
+            enabled.push(crate::experiment::PYTHON_EDIT.to_string());
+        }
         let mut disabled = self.disable.clone().unwrap_or_default();
         disabled.extend(
             crate::rules::OFF_BY_DEFAULT
@@ -313,11 +337,17 @@ mod tests {
     #[test]
     fn python_edit_is_off_until_enabled() {
         let s = Settings::load_from(&env(&[]), None);
-        assert_eq!(s.rules.disabled(), ["python-edit"]);
+        let new = crate::experiment::Arm::default();
+        assert_eq!(s.rules.disabled(new), ["python-edit"]);
+        let control = crate::experiment::Arm {
+            python_edit: true,
+            ..new
+        };
+        assert!(s.rules.disabled(control).is_empty());
         let s = Settings::load_from(&env(&[("JOUET_RULES_ENABLE", "python-edit")]), None);
-        assert!(s.rules.disabled().is_empty());
+        assert!(s.rules.disabled(new).is_empty());
         let s = Settings::load_from(&env(&[("JOUET_RULES_DISABLE", "git-stash")]), None);
-        assert_eq!(s.rules.disabled(), ["git-stash", "python-edit"]);
+        assert_eq!(s.rules.disabled(new), ["git-stash", "python-edit"]);
     }
 
     #[test]

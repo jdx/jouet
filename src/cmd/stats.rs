@@ -180,6 +180,15 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
     let net = measured
         .as_ref()
         .and_then(|_| stats::net(&estimates, &costs));
+    let arms = ledger
+        .as_ref()
+        .map(|l| stats::session_arms(&l.entries, &filter))
+        .filter(|arms| !arms.is_empty())
+        .map(|arms| {
+            let metrics = arm_metrics(&readers, &arms);
+            stats::compare_arms(&arms, &metrics)
+        })
+        .unwrap_or_default();
     let doc = Doc {
         ledger: LedgerDoc {
             dir: dir.map(|d| d.display().to_string()),
@@ -199,9 +208,56 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
         net_input_tokens: net,
         scan: scanned,
         after_setup_scan: after_scan,
+        arms: &arms,
     };
     out.result(&doc, || text(&doc));
     Exit::Ok
+}
+
+/// What each session with an arm cost, from its transcripts, read one by
+/// one: every file whose path names an arm's session ([`arm_session`]),
+/// however old, since a resumed session can add to an older one.
+fn arm_metrics(
+    readers: &[&dyn Reader],
+    arms: &BTreeMap<String, BTreeMap<String, String>>,
+) -> Vec<stats::SessionMetrics> {
+    let mut transcripts: BTreeMap<&str, Vec<jouet_audit::Transcript>> = BTreeMap::new();
+    for &reader in readers {
+        for source in reader.discover(&Filter::default()).unwrap_or_default() {
+            let Some(session) = arm_session(&source.path, arms) else {
+                continue;
+            };
+            let read = jouet_audit::open(&source.path)
+                .and_then(|mut input| reader.read(&source, &mut input, &Filter::default()));
+            if let Ok(Some(t)) = read {
+                transcripts.entry(session).or_default().push(t);
+            }
+        }
+    }
+    transcripts
+        .into_iter()
+        .map(|(session, ts)| stats::SessionMetrics::of(session, &ts))
+        .collect()
+}
+
+/// The arm session a transcript's path names by its whole id, as
+/// `--session` matches it: a directory or file named by it (Claude Code's
+/// `<id>.jsonl` and `<id>/subagents/`), or a file whose name ends in `-<id>`
+/// (Codex's `rollout-<time>-<id>.jsonl`). Each name is looked up, not
+/// compared with every session.
+fn arm_session<'a>(
+    path: &Path,
+    arms: &'a BTreeMap<String, BTreeMap<String, String>>,
+) -> Option<&'a str> {
+    path.components().find_map(|c| {
+        let name = c.as_os_str().to_str()?;
+        let file = name.strip_suffix(".zst").unwrap_or(name);
+        let stem = file.strip_suffix(".jsonl").unwrap_or(file);
+        let suffixes = stem.match_indices('-').map(|(i, _)| &stem[i + 1..]);
+        std::iter::once(stem)
+            .chain(suffixes)
+            .find_map(|id| arms.get_key_value(id).map(|(k, _)| k.as_str()))
+    })
 }
 
 /// Each harness's requests after its first ledger entry (or `since`, when
@@ -322,6 +378,9 @@ struct Doc<'a> {
     scan: ScanDoc,
     /// Reading the history after setup.
     after_setup_scan: ScanDoc,
+    /// The experiment arms compared, by toggle (see `jouet::experiment`).
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    arms: &'a [stats::ArmComparison],
 }
 
 #[derive(Serialize)]
@@ -414,6 +473,7 @@ fn text(doc: &Doc<'_>) -> String {
             "  no Claude Code or Codex history found, so nothing is estimated"
         );
     }
+    arms_text(&mut s, doc.arms);
     if doc.measured.is_some() {
         costs_text(&mut s, doc.costs);
         let totals = format!(
@@ -615,6 +675,59 @@ fn measured_text(s: &mut String, m: &Measured) {
     }
 }
 
+/// The experiment arms: for each toggle, each arm's n and the median
+/// [IQR] of each metric per session, and the difference with its interval.
+fn arms_text(s: &mut String, arms: &[stats::ArmComparison]) {
+    if arms.is_empty() {
+        return;
+    }
+    let _ = writeln!(
+        s,
+        "\nexperiment arms, per session (control: the old behaviour; median [interquartile range]; difference: control less new, with a 95% bootstrap interval):"
+    );
+    for a in arms {
+        let _ = writeln!(
+            s,
+            "  {}: control n={}, new n={}",
+            a.toggle, a.control.sessions, a.new.sessions
+        );
+        if a.differences.is_empty() {
+            let _ = writeln!(s, "    nothing to compare until each arm has a session");
+        }
+        for ((c, n), d) in a
+            .control
+            .metrics
+            .iter()
+            .zip(&a.new.metrics)
+            .zip(&a.differences)
+        {
+            let num = |v: f64| {
+                if c.metric == "input_tokens" {
+                    format!("{:.2}M", v / 1e6)
+                } else {
+                    format!("{v:.1}")
+                }
+            };
+            let interval = match (d.ci_low, d.ci_high) {
+                (Some(low), Some(high)) => format!(" [{}, {}]", num(low), num(high)),
+                _ => " (too few sessions for an interval)".to_string(),
+            };
+            let _ = writeln!(
+                s,
+                "    {:<15} control {} [{}, {}]  new {} [{}, {}]  difference {}{interval}",
+                c.metric,
+                num(c.median),
+                num(c.p25),
+                num(c.p75),
+                num(n.median),
+                num(n.p25),
+                num(n.p75),
+                num(d.median),
+            );
+        }
+    }
+}
+
 fn estimate_text(s: &mut String, e: &Estimate, measured: bool) {
     let command = e.kind.command();
     if let Some(reason) = &e.refused {
@@ -718,5 +831,30 @@ fn duration(ms: u64) -> String {
         0..60 => format!("{secs}s"),
         60..3600 => format!("{}m", secs / 60),
         _ => format!("{:.1}h", secs as f64 / 3600.0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_arm_session_is_found_by_its_whole_id() {
+        let id = "019a1b2c-3d4e-7f00-8a9b-0c1d2e3f4a5b";
+        let arms = BTreeMap::from([(id.to_string(), BTreeMap::new())]);
+        for path in [
+            format!("/h/.claude/projects/-w/{id}.jsonl"),
+            format!("/h/.claude/projects/-w/{id}/subagents/agent-a1.jsonl"),
+            format!("/h/.codex/sessions/2026/11/09/rollout-2026-11-09T10-00-00-{id}.jsonl.zst"),
+        ] {
+            assert_eq!(arm_session(Path::new(&path), &arms), Some(id), "{path}");
+        }
+        for path in [
+            "/h/.claude/projects/-w/019a1b2c-3d4e.jsonl".to_string(),
+            format!("/h/.claude/projects/-w/{id}0.jsonl"),
+            format!("/h/.codex/sessions/rollout-x{id}.jsonl"),
+        ] {
+            assert_eq!(arm_session(Path::new(&path), &arms), None, "{path}");
+        }
     }
 }
