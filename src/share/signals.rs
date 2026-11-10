@@ -317,7 +317,7 @@ fn entry_for<'a>(gaps: &'a mut Gaps, kind: Kind, subject: &str) -> &'a mut GapEn
 /// start and stop, which wind.
 pub(crate) fn hook_budget(event: &str, budget: u64) -> u64 {
     match event {
-        "session-start" | "stop" => budget.saturating_mul(10),
+        "session-start" | "subagent-start" | "stop" => budget.saturating_mul(10),
         _ => budget,
     }
 }
