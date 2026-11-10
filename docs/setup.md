@@ -103,6 +103,8 @@ Cursor, Gemini CLI and Copilot get the same hooks under their own event names; [
 
 Every hook reads the harness's JSON on stdin and **fails open**: input it cannot read, a broken config file, a bad `JOUET_DISPLAY`, a rule that throws or runs out of its budget, or a crash all exit 0 with no decision, so a problem in jouet never blocks the agent. Rule errors are reported on stderr. A pre-tool-use hook takes about 2 ms in a release build, starting the process included.
 
+When jouet's hooks are installed twice with different commands, such as at user scope and in a project's committed settings written by an older `jouet setup`, the harness runs both. jouet then answers a session start or a tool call (by its `tool_use_id`) only once. The second run within 5 seconds prints nothing, so the agent does not read the primer or a warning twice. A stop has no such id, so it is still answered twice.
+
 ### The session-start primer
 
 The primer is four lines, about 490 tokens, and every request in a session pays for it. In the jouet repository, Claude Code's reads as follows; the last line is one of the notes described below:
