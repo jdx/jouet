@@ -65,6 +65,9 @@ struct World {
     run_status: &'static str,
     run_conclusion: Option<&'static str>,
     graphql_mergeable: &'static str,
+    /// The PR's review threads and conversation comments, as GraphQL nodes.
+    review_threads: Vec<Value>,
+    conversation: Vec<Value>,
 }
 
 impl Default for World {
@@ -87,6 +90,8 @@ impl Default for World {
             run_status: "in_progress",
             run_conclusion: None,
             graphql_mergeable: "UNKNOWN",
+            review_threads: Vec::new(),
+            conversation: Vec::new(),
         }
     }
 }
@@ -272,6 +277,21 @@ fn respond(
 /// names (its `$s`), and a PR for `wait pr`.
 fn graphql(world: &World, body: &[u8]) -> String {
     let request: Value = serde_json::from_slice(body).unwrap_or_default();
+    if request["variables"]["extra"].is_boolean() {
+        let page = json!({ "hasNextPage": false, "endCursor": null });
+        return json!({ "data": {
+            "viewer": { "login": "agent" },
+            "repository": { "pullRequest": {
+                "id": "PR_1", "number": 7, "url": "https://github.com/jdx/demo/pull/7",
+                "headRefName": "feat", "headRefOid": world.head, "baseRefOid": world.base_sha,
+                "headRepository": { "nameWithOwner": "jdx/demo" },
+                "reviewThreads": { "pageInfo": page, "nodes": world.review_threads },
+                "reviews": { "pageInfo": page, "nodes": [] },
+                "comments": { "pageInfo": page, "nodes": world.conversation }
+            } }
+        } })
+        .to_string();
+    }
     if let Some(ids) = request["variables"]["ids"].as_array() {
         let nodes: Vec<Value> = ids
             .iter()
@@ -1213,9 +1233,159 @@ fn bad_github_requests_are_usage_errors() {
             "5",
         ],
         &["wait", "run", "soon", "--repo", "jdx/demo"],
+        &[
+            "wait",
+            "pr",
+            "7",
+            "--repo",
+            "jdx/demo",
+            "--until",
+            "ready",
+            "--quiet-for",
+            "1m",
+        ],
+        &[
+            "wait",
+            "pr",
+            "7",
+            "--repo",
+            "jdx/demo",
+            "--until",
+            "needs-agent",
+            "--acks",
+            "some",
+        ],
     ] {
         let out = jouet(&fake, dir.path(), args);
         assert_eq!(out.status.code(), Some(2), "{args:?}: {}", stderr(&out));
     }
     assert_eq!(fake.total(), 0);
+}
+
+/// A GraphQL comment node posted at `at`.
+fn comment_node(id: u64, author: &str, at: &str, body: &str) -> Value {
+    json!({
+        "fullDatabaseId": id.to_string(), "url": format!("https://github.com/jdx/demo/pull/7#discussion_r{id}"),
+        "createdAt": at, "body": body, "author": { "__typename": "Bot", "login": author }
+    })
+}
+
+#[test]
+fn needs_agent_waits_for_quiet_then_digests_failures_and_findings_but_not_noise() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut world = World::default();
+    world.checks.insert(
+        SHA_A,
+        vec![check(101, "unit", "completed", Some("failure"))],
+    );
+    let page = json!({ "hasNextPage": false, "endCursor": null });
+    // Far in the future, so after the wait's start.
+    let later = "2099-01-01T00:00:00Z";
+    world.review_threads = vec![
+        json!({ "id": "T_1", "isResolved": false, "isOutdated": false, "path": "src/a.rs", "line": 3,
+            "startLine": null, "originalLine": 3, "originalStartLine": null, "diffSide": "RIGHT",
+            "startDiffSide": null, "comments": { "pageInfo": page, "nodes": [
+                comment_node(501, "cursor", later, "### Off by one\n**Medium Severity** the loop skips the last item")
+            ] } }),
+        json!({ "id": "T_2", "isResolved": false, "isOutdated": false, "path": "src/a.rs", "line": 9,
+            "startLine": null, "originalLine": 9, "originalStartLine": null, "diffSide": "RIGHT",
+            "startDiffSide": null, "comments": { "pageInfo": page, "nodes": [
+                comment_node(601, "coderabbitai", "2020-01-01T00:00:00Z", "_⚠️ Potential issue_ old"),
+                comment_node(602, "coderabbitai", later, "Thanks for the fix! Looks right now.")
+            ] } }),
+    ];
+    world.conversation = vec![comment_node(
+        701,
+        "coderabbitai",
+        later,
+        "> [!WARNING]\n> ## Review limit reached",
+    )];
+    let fake = serve(world);
+    let out = jouet(
+        &fake,
+        dir.path(),
+        &[
+            "wait",
+            "pr",
+            "7",
+            "--repo",
+            "jdx/demo",
+            "--until",
+            "needs-agent",
+            "--quiet-for",
+            "300ms",
+            "--interval",
+            "100ms",
+            "--timeout",
+            "20s",
+            "--json",
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
+    let doc = json_doc(&out);
+    assert_eq!(doc["result"], "needs_agent");
+    assert_eq!(doc["checks"][0]["name"], "unit");
+    assert_eq!(doc["checks"][0]["failed_step"], "cargo nextest");
+    let threads = doc["threads"].as_array().unwrap();
+    assert_eq!(threads.len(), 1, "{threads:?}");
+    assert_eq!(threads[0]["id"], 501);
+    assert_eq!(threads[0]["path"], "src/a.rs");
+    assert_eq!(doc["dropped"]["ack"], 1);
+    assert_eq!(doc["dropped"]["rate_limit"], 1);
+}
+
+#[test]
+fn needs_agent_timing_out_unsettled_keeps_since_for_the_next_wait() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut world = World::default();
+    world
+        .checks
+        .insert(SHA_A, vec![check(101, "unit", "in_progress", None)]);
+    let page = json!({ "hasNextPage": false, "endCursor": null });
+    world.review_threads = vec![
+        json!({ "id": "T_1", "isResolved": false, "isOutdated": false,
+        "path": "src/a.rs", "line": 3, "startLine": null, "originalLine": 3,
+        "originalStartLine": null, "diffSide": "RIGHT", "startDiffSide": null,
+        "comments": { "pageInfo": page, "nodes": [
+            comment_node(501, "cursor", "2099-01-01T00:00:00Z", "**Medium Severity** a finding")
+        ] } }),
+    ];
+    let fake = serve(world);
+    let since = "2026-01-01T00:00:00Z";
+    let out = jouet(
+        &fake,
+        dir.path(),
+        &[
+            "wait",
+            "pr",
+            "7",
+            "--repo",
+            "jdx/demo",
+            "--until",
+            "needs-agent",
+            "--since",
+            since,
+            "--interval",
+            "100ms",
+            "--timeout",
+            "1s",
+            "--json",
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(124),
+        "{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
+    let doc = json_doc(&out);
+    assert_eq!(doc["state"], "the PR had not settled");
+    assert_eq!(doc["next_since"], since);
 }

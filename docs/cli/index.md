@@ -70,7 +70,7 @@
 - [`jouet wait [FLAGS] <SUBCOMMAND>`](/cli/wait.md)
 - [`jouet wait ci [FLAGS] [PR]`](/cli/wait/ci.md)
 - [`jouet wait run [FLAGS] <RUN>`](/cli/wait/run.md)
-- [`jouet wait pr [--repo <OWNER/NAME>] <--until <CONDITION>> [PR]`](/cli/wait/pr.md)
+- [`jouet wait pr <FLAGS> [PR]`](/cli/wait/pr.md)
 - [`jouet wait file [--contains <REGEX>] [--gone] <PATH>`](/cli/wait/file.md)
 - [`jouet wait log <--match <REGEX>> [--from-start] <PATH>`](/cli/wait/log.md)
 - [`jouet wait port [--closed] <ADDR>`](/cli/wait/port.md)

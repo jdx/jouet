@@ -48,7 +48,7 @@ Every subject takes `--timeout` (default `30m`) and exits `124` when it runs out
 jouet wait ci [PR]       [--sha SHA] [--required] [--check GLOB]... [--ignore GLOB]...
                          [--all] [--log-lines N] [--no-logs] [--appear-timeout DUR]
 jouet wait run RUN       [--log-lines N] [--no-logs]
-jouet wait pr [PR]       --until mergeable|merged|closed|approved|checks-registered|ready|any-change
+jouet wait pr [PR]       --until mergeable|merged|closed|approved|checks-registered|ready|any-change|needs-agent
 jouet wait file PATH     [--contains REGEX] [--gone]
 jouet wait log PATH      --match REGEX [--from-start]
 jouet wait port ADDR     [--closed]
@@ -131,6 +131,24 @@ It exits `4` on Forgejo, whose Actions runs jouet reads only through the commit 
 Every condition except `closed` counts a merged PR as met and a PR closed without merging as failed. As with `wait ci`, a conflict fails `mergeable` and `ready` only once GitHub reports it again at least 10 seconds later.
 
 `any-change` prints the one change it saw, so `wait pr --until any-change --jsonl` under Claude Code's Monitor tool is a way to babysit a PR.
+
+### Waking only when the agent is needed: `--until needs-agent` {#needs-agent}
+
+After a push, CI results and review bots arrive over many minutes. Waking the agent on each one wastes a turn on every rate-limit notice, "review in progress" placeholder and bot "thanks". `--until needs-agent` waits until the PR has settled, then wakes once:
+
+```sh
+jouet wait pr 123 --until needs-agent
+```
+
+- **Settled** means no check is pending and nothing has changed for `--quiet-for` (default `20m`): not the head, a check, mergeability, nor a review comment or thread. A confirmed conflict counts as settled, since a conflicted PR gets no `pull_request` CI.
+- **Needs the agent** means a failed check, a conflict, or an unresolved review thread or top-level review comment whose newest comment was posted since `--since` (default: when the wait starts) by someone other than the token's user, and is not bot noise.
+- **Bot noise** is a bot's rate-limit notice, "review in progress" or "review skipped" notice, review summary with no findings, perf report with no regression, stale Bugbot notice, a summary that only counts findings it also posts as threads, or a reply on a thread that opens with thanks or agreement and carries no severity marker. `--acks strict` keeps such a reply when its opening also hedges or asks ("…but X remains", "could you add a test?"); the default is `loose`. A person's comment is never noise.
+
+When the PR needs the agent, the wait exits `0` with one digest: each failed check with its log excerpt (`--log-lines`, `--no-logs`), the conflict, and each thread or comment with its first comment and newest reply. It also counts what it left out as noise, and prints the `--since` for the next wait, so nothing posted in between is missed. A PR that settles with nothing for the agent is still watched. A merged or closed PR exits `1`. The timeout defaults to `2h` here; a timeout exits `124`.
+
+It reads review threads, so it works on GitHub only (exit `4` elsewhere). Run it in the background, as with any long wait: `run_in_background` in Claude Code, or a foreground call with a long timeout where the agent cannot be woken.
+
+The defaults were chosen from a replay of five weeks of Claude Code Auto-fix events, and are not final. With the loose rule and a 20-minute window, the replay dropped or merged 42% of wake-ups. 0.4–0.5% of the events an agent acted on would have been dropped wrongly, some of them requests for a code change. The strict rule with a 10-minute window drops fewer (35%), wrongly drops fewer (0.1–0.2%), and wakes the agent 10 minutes sooner.
 
 ## Local conditions {#local-subjects}
 
@@ -256,7 +274,7 @@ MET log app.log: matched (4s)
 ```
 
 - **Progress** goes to stderr. For a person at a terminal, one status line is redrawn every second. For agents, pipes and CI, each change of state is one line, so a backgrounded wait's log grows only when something happens.
-- **The result** goes to stdout. For the local subjects and `wait pr`, its first word is `MET` or `TIMEOUT`, and `wait pr`, `wait job` and `wait daemon` also have `FAILED`. A timeout says how many checks ran. `wait ci` and `wait run` start with the words [described above](#wait-ci).
+- **The result** goes to stdout. For the local subjects and `wait pr`, its first word is `MET` or `TIMEOUT`, and `wait pr`, `wait job` and `wait daemon` also have `FAILED`. `wait pr --until needs-agent` starts with `NEEDS_AGENT`, `CLOSED` or `TIMEOUT`. A timeout says how many checks ran. `wait ci` and `wait run` start with the words [described above](#wait-ci).
 - **`--json`** prints one document. For the local subjects, it holds `subject`, `target`, `result` (`met`, `failed` or `timeout`), the last `state`, `elapsed_s` and `checks`, plus the subject's own fields: `line`, `status`, `exit_code`, `output`, `output_truncated` and `log_path`. Empty fields are left out, as in `{"subject":"port","target":"localhost:3000","result":"timeout","state":"closed","elapsed_s":5,"checks":2}`.
 - **`--jsonl`** prints one `{"event":"state",...}` line for each change of state (and, for the GitHub subjects, their own events), then the result document tagged `"event":"result"`. Under Claude Code's Monitor tool, each line becomes a notification. `--json` and `--jsonl` cannot be given together.
 - **`--quiet`** prints no progress and no text result, only the exit code. JSON is still printed when it is asked for.

@@ -136,10 +136,19 @@ pub(crate) struct WaitRunArgs {
 /// closed, approved (exit 1 when changes are requested), checks-registered
 /// (any check on the head), ready (no `pr status` attention codes and no
 /// pending checks; exit 1 on conflict, checks_failing, changes_requested or
-/// unresolved_threads), or any-change (the next push, check result, review,
-/// thread or state change, printed as one event). A conflict counts once
-/// GitHub reports it again 10s later, since right after a push it can still
-/// answer for the old head.
+/// unresolved_threads), any-change (the next push, check result, review,
+/// thread or state change, printed as one event), or needs-agent (see
+/// below). A conflict counts once GitHub reports it again 10s later, since
+/// right after a push it can still answer for the old head.
+///
+/// needs-agent waits until no check is pending and nothing has changed for
+/// --quiet-for, then exits 0 with one digest if the PR has a failed check
+/// (with its log excerpt), a conflict, or a review thread or top-level
+/// review comment posted since the wait began (--since) that is not bot
+/// noise: rate-limit and "review in progress" notices, summaries with no
+/// findings, perf reports with no regression, and bot acknowledgements on
+/// threads (--acks). A PR that settles with none of these is still watched;
+/// a merged or closed one exits 1. GitHub only. Its timeout defaults to 2h.
 #[derive(Args)]
 pub(crate) struct WaitPrArgs {
     /// The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the
@@ -152,6 +161,26 @@ pub(crate) struct WaitPrArgs {
     /// The condition to wait for
     #[usage(long, value_name = "CONDITION")]
     pub(crate) until: String,
+    /// needs-agent: how long nothing may change before the PR counts as
+    /// settled (default 20m)
+    #[usage(long, value_name = "DUR")]
+    pub(crate) quiet_for: Option<String>,
+    /// needs-agent: loose counts any bot reply on a thread that opens with
+    /// thanks or agreement as noise; strict not when it also hedges or asks
+    /// (default loose)
+    #[usage(long, value_name = "loose|strict")]
+    pub(crate) acks: Option<String>,
+    /// needs-agent: comments posted from this time on are new: RFC 3339 or a
+    /// duration ago such as 30m (default: when the wait starts). The digest
+    /// prints the value for the next wait
+    #[usage(long, value_name = "TIME")]
+    pub(crate) since: Option<String>,
+    /// needs-agent: lines of each failure log to show (default 60)
+    #[usage(long, value_name = "N")]
+    pub(crate) log_lines: Option<usize>,
+    /// needs-agent: do not fetch failure logs
+    #[usage(long)]
+    pub(crate) no_logs: bool,
 }
 
 /// Wait for a file to exist, contain a match, or be gone

@@ -79,6 +79,13 @@ pub struct PrThreads {
     pub unreadable: usize,
 }
 
+impl PrThreads {
+    /// The token's user: the agent, when it reads its own PR.
+    pub fn viewer(&self) -> &str {
+        &self.viewer
+    }
+}
+
 /// Which side of the diff a thread's lines are on.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -533,7 +540,7 @@ pub(crate) fn is_bot(login: &str, bots: &[String]) -> bool {
 }
 
 /// Whether `login` names `author`, ignoring case and a missing `[bot]`.
-pub(crate) fn same_login(login: &str, author: &str) -> bool {
+pub fn same_login(login: &str, author: &str) -> bool {
     let bare = |s: &str| s.strip_suffix("[bot]").unwrap_or(s).to_ascii_lowercase();
     bare(login) == bare(author)
 }

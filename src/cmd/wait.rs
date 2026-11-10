@@ -18,6 +18,8 @@ use jouet_wait::local::{CmdWait, FileWait, HttpWait, LogWait, PidWait, PortWait}
 use jouet_wait::pr::{PrWait, Until};
 use jouet_wait::remote::{self, Halt, Watch};
 use jouet_wait::run::{self as run_wait, RunWait};
+use jouet_wait::settle::{self, SettleWait};
+use jouet_wait::triage::Acks;
 use jouet_wait::{self as wait, Reporter, Stop, Subject, Timing};
 use regex::Regex;
 use std::path::PathBuf;
@@ -27,6 +29,10 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(10);
 const DEFAULT_APPEAR_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 const DEFAULT_LOG_LINES: usize = 60;
+/// `--until needs-agent`'s quiet window and timeout: a PR's reviewers and CI
+/// take longer than one check run to settle.
+const DEFAULT_QUIET: Duration = Duration::from_secs(20 * 60);
+const SETTLE_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 
 pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
     if out.json && args.jsonl {
@@ -69,6 +75,22 @@ pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
                     }
                     Ok(RunWait::new(repo, id, lines)
                         .local_runner(crate::guide::on_path("jactionlint")))
+                }),
+                Err(message) => out.error(Exit::Usage, &message),
+            }
+        }
+        WaitCmd::Pr(a) if a.until == "needs-agent" => {
+            let timing = Timing {
+                timeout: if args.timeout.is_none() {
+                    SETTLE_TIMEOUT
+                } else {
+                    timing.timeout
+                },
+                ..timing
+            };
+            match settle_args(&a, confirm_conflict) {
+                Ok((t, options)) => watch(reporter, &timing, &t.repo().clone(), |_| {
+                    Ok(SettleWait::new(t, options))
                 }),
                 Err(message) => out.error(Exit::Usage, &message),
             }
@@ -298,13 +320,54 @@ fn run_args(a: &WaitRunArgs) -> Result<(Repo, u64, Option<usize>), String> {
 }
 
 fn pr_args(a: &WaitPrArgs) -> Result<(Target, Until), String> {
+    if a.quiet_for.is_some()
+        || a.acks.is_some()
+        || a.since.is_some()
+        || a.log_lines.is_some()
+        || a.no_logs
+    {
+        return Err(
+            "--quiet-for, --acks, --since, --log-lines and --no-logs go with --until needs-agent"
+                .into(),
+        );
+    }
     let until = Until::parse(&a.until).ok_or_else(|| {
         format!(
-            "--until must be mergeable, merged, closed, approved, checks-registered, ready or any-change, not `{}`",
+            "--until must be mergeable, merged, closed, approved, checks-registered, ready, any-change or needs-agent, not `{}`",
             a.until
         )
     })?;
     Ok((target(a.pr.as_deref(), a.repo.as_deref())?, until))
+}
+
+/// `wait pr --until needs-agent`.
+fn settle_args(
+    a: &WaitPrArgs,
+    confirm_conflict: Duration,
+) -> Result<(Target, settle::Options), String> {
+    let quiet = match a.quiet_for.as_deref() {
+        Some(d) => parse_duration(d).map_err(|e| format!("--quiet-for: {e}"))?,
+        None => DEFAULT_QUIET,
+    };
+    let acks = match a.acks.as_deref() {
+        Some(s) => {
+            Acks::parse(s).ok_or_else(|| format!("--acks must be loose or strict, not `{s}`"))?
+        }
+        None => Acks::Loose,
+    };
+    let now = jouet_output::time::now();
+    let since = match a.since.as_deref() {
+        Some(s) => jouet_output::time::parse_time(s, now).map_err(|e| format!("--since: {e}"))?,
+        None => now,
+    };
+    let options = settle::Options {
+        quiet,
+        acks,
+        since,
+        log_lines: log_lines(a.log_lines, a.no_logs)?,
+        confirm_conflict,
+    };
+    Ok((target(a.pr.as_deref(), a.repo.as_deref())?, options))
 }
 
 fn timing(args: &WaitArgs) -> Result<Timing, String> {
