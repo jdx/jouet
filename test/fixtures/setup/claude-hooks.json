@@ -11,6 +11,17 @@
         ]
       }
     ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude subagent-start'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit",

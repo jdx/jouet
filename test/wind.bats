@@ -257,3 +257,21 @@ TOML
 	run --separate-stderr jouet rule list
 	assert_line --regexp '^no-tags +enabled +warn'
 }
+
+@test "a subagent gets no winding note and adds no session start to the ledger" {
+	jouet wind >/dev/null
+	starts() { cat "$XDG_STATE_HOME"/jouet/ledger/*.jsonl | jq -s '[.[] | select(.event == "session-start")] | length'; }
+	before=$(starts)
+
+	run --separate-stderr jouet hook claude subagent-start <<<"{\"session_id\":\"sess-1\",\"agent_id\":\"a1\",\"cwd\":\"$PWD\"}"
+	assert_success
+	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
+	assert_output --partial 'jouet is installed'
+	refute_output --partial 'jouet wind noticed'
+	assert_equal "$(starts)" "$before"
+
+	# The lead session that started it still gets the notes, and is counted.
+	run primer sess-1
+	assert_output --partial 'jouet wind noticed'
+	assert_equal "$(starts)" "$((before + 1))"
+}
