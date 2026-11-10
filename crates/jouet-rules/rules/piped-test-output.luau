@@ -171,19 +171,37 @@ local function answers(command: JouetCommand): boolean
 	return false
 end
 
+-- A `!` among the operators and reserved words before `commands[i]`:
+-- rewritten, the status it turns around would be the run's rather than the
+-- cut's. Any `!` earlier in the call counts, since one before `{` or `(`
+-- turns around a group that ends with a later command.
+local function negated(script: string, commands: { JouetCommand }, i: number): boolean
+	local from = 1
+	for k = 1, i do
+		local span = commands[k].span
+		if span then
+			for word in string.gmatch(string.sub(script, from, span.first - 1), "[^%s;&|(){}]+") do
+				if word == "!" then
+					return true
+				end
+			end
+			from = math.max(from, span.last + 1)
+		end
+	end
+	return false
+end
+
 -- The last command of the pipeline that cuts `commands[i]`'s output, when
 -- the run can go under `jouet test --cmd` instead: it is piped straight
 -- into programs that only cut it, reads no input of its own and writes no
 -- file, and the pipeline ends the call or a step of it in the foreground.
--- nil when the call must be warned about or denied as written. A pipeline
--- negated with `!` is left as written: the status `!` turns around would
--- become the run's rather than the cut's.
+-- nil when the call must be warned about or denied as written.
 local function pipeline_end(script: string, commands: { JouetCommand }, i: number): JouetCommand?
 	local command = commands[i]
 	if not command.span or not command.words_at or command.stdout_to or command.stdin_redirected then
 		return nil
 	end
-	if string.find(string.sub(script, 1, command.span.first - 1), "!%s*$") then
+	if negated(script, commands, i) then
 		return nil
 	end
 	if i > 1 and commands[i - 1].op == "pipe" then

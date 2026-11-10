@@ -83,6 +83,11 @@ fires = [
   # A negated pipeline: `!` would turn around the run's status, not the cut's.
   { command = "! cargo test 2>&1 | grep FAIL && git push", rewrite = true, action = "warn" },
   { command = "if !  go test ./... | grep -v ok; then echo clean; fi", rewrite = true, action = "warn" },
+  { command = "! { cargo test 2>&1 | tail; } && git push", rewrite = true, action = "warn" },
+  { command = "! true; (cargo build | tail)", rewrite = true, action = "warn" },
+  # A command that only ends with `!` negates nothing.
+  { command = "echo done!\ncargo test 2>&1 | tail", rewritten = "echo done!\njouet test --cmd -- cargo test 2>&1" },
+  { command = "echo ! && cargo test 2>&1 | tail", rewritten = "echo ! && jouet test --cmd -- cargo test 2>&1" },
   # A cut written to a file partway through the pipeline.
   { command = "cargo test | grep FAILED > saved.txt | head", rewrite = true, action = "warn" },
   # One run it cannot rewrite keeps the whole call as written.
