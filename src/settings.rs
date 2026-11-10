@@ -59,13 +59,21 @@ pub(crate) struct ExperimentSettings {
     /// Percent of sessions, 0 to 100, that keep the old behaviour of each toggle under test: the stop gate blocking, and the python-edit rule denying; 0 turns the arms off
     #[usage(env = "JOUET_EXPERIMENT_CONTROL_SHARE", default = 25)]
     pub control_share: u64,
+    /// Percent of Claude Code sessions, 0 to 100, whose primer has the agent run `jouet wait pr --until needs-agent` in the background after each push, alongside the desktop app's Auto-fix; 0 turns this arm off
+    #[usage(env = "JOUET_EXPERIMENT_WATCHER_SHARE", default = 25)]
+    pub watcher_share: u64,
 }
 
 impl Settings {
-    /// The arm `session` is in, by `[experiment] control_share`.
+    /// The arm `session` is in, by `[experiment] control_share` and
+    /// `watcher_share`.
     pub(crate) fn arm(&self, session: Option<&str>) -> crate::experiment::Arm {
         session.map_or_else(Default::default, |s| {
-            crate::experiment::Arm::of(s, self.experiment.control_share)
+            crate::experiment::Arm::of(
+                s,
+                self.experiment.control_share,
+                self.experiment.watcher_share,
+            )
         })
     }
 }
