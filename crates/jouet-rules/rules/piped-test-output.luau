@@ -196,7 +196,7 @@ end
 local MATCHES = set({ "grep", "egrep", "fgrep", "rg" })
 -- Words after a pipeline that make the shell read its status: an `if` or
 -- loop condition, or the end of a block whose status is the pipeline's.
-local STATUS_WORDS = set({ "then", "do", "fi", "done", "esac" })
+local STATUS_WORDS = set({ "then", "do", "else", "elif", "fi", "done", "esac" })
 
 -- Whether the call reads the status of the pipeline that `last` ends: an
 -- `&&` or `||` after it, or a word after it that ends a condition or a
@@ -206,7 +206,11 @@ local function status_read(script: string, last: JouetCommand): boolean
 		return true
 	end
 	local span = last.span :: { first: number, last: number }
-	local after = string.match(string.sub(script, span.last + 1), "^[%s;]*(%S*)") or ""
+	local rest = string.sub(script, span.last + 1)
+	if string.find(rest, "^%s*;;") then
+		return true
+	end
+	local after = string.match(rest, "^[%s;]*(%S*)") or ""
 	local first = string.sub(after, 1, 1)
 	return first == "}" or first == ")" or STATUS_WORDS[string.match(after, "^%a+") or ""] == true
 end

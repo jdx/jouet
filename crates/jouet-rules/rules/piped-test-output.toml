@@ -98,6 +98,10 @@ fires = [
   { command = "(cargo test 2>&1 | fgrep FAILED) || true", rewrite = true, action = "warn" },
   { command = "if (cargo test 2>&1 | grep FAILED); then exit 1; fi", rewrite = true, action = "warn" },
   { command = "while { cargo test 2>&1 | grep -v ok; }; do :; done", rewrite = true, action = "warn" },
+  { command = "if [ -n \"$CI\" ]; then cargo test 2>&1 | grep FAILED; else true; fi && exit 1", rewrite = true, action = "warn" },
+  { command = "if [ -n \"$CI\" ]; then cargo test 2>&1 | grep FAILED; elif true; then :; fi || exit 1", rewrite = true, action = "warn" },
+  { command = "case $1 in t) cargo test 2>&1 | grep FAILED;; esac && exit 1", rewrite = true, action = "warn" },
+  { command = "case $1 in t) cargo test 2>&1 | grep FAILED;; *) :;; esac && exit 1", rewrite = true, action = "warn" },
   # Head, tail and sed -n always succeed, so their status can be read.
   { command = "cargo test 2>&1 | tail -5 && git push", rewritten = "jouet test --cmd -- cargo test 2>&1 && git push" },
   # A cut written to a file partway through the pipeline.
