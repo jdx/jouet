@@ -935,3 +935,38 @@ fn jouet_runs_own_exit_codes_decide_what_jouet_failed() {
     assert_eq!(m.overhead.len(), 1);
     assert_eq!(m.overhead[0].failed_runs, 1);
 }
+
+#[test]
+fn a_checks_answer_is_not_an_own_failure() {
+    let run = |shape: &str, code| LedgerEntry {
+        harness: "jouet".into(),
+        event: "jouet-run".into(),
+        ..post(shape, code)
+    };
+    let entries = [
+        post("jouet wait pr <arg>", 124),
+        // Still waiting at the timeout, and the PR closed: both answers.
+        run("jouet wait pr", 124),
+        run("jouet wait pr", 1),
+        // A real failure is the answer; nothing failed yet (4) is not.
+        run("jouet ci explain", 1),
+        run("jouet ci explain", 4),
+        // Findings are diag's answer.
+        run("jouet diag check", 1),
+        run("jouet test", 1),
+        run("jouet test", 2),
+        run("jouet commit", 1),
+    ];
+    let m = measure(&entries, &StatsFilter::default());
+    let own = |command: &str| {
+        let c = m.commands.iter().find(|c| c.command == command).unwrap();
+        (c.own_runs, c.own_failed)
+    };
+    assert_eq!(own("jouet wait pr"), (2, 0));
+    assert_eq!(own("jouet ci explain"), (2, 1));
+    assert_eq!(own("jouet diag check"), (1, 0));
+    assert_eq!(own("jouet test"), (2, 1));
+    assert_eq!(own("jouet commit"), (1, 1));
+    // The cost counts the same failures as the table.
+    assert_eq!(m.overhead[0].failed_runs, 3);
+}
