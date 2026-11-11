@@ -213,6 +213,10 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
             .collect();
         stats::compare_arms(&session_arms, &metrics)
     };
+    let drop_arms = ledger
+        .as_ref()
+        .map(|l| stats::drop_arms(&l.entries, &session_arms, &filter))
+        .unwrap_or_default();
     if let Some(m) = measured.as_mut() {
         let times: HashMap<String, Vec<i64>> = transcripts
             .iter()
@@ -240,6 +244,7 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
         scan: scanned,
         after_setup_scan: after_scan,
         arms: &arms,
+        drop_arms: &drop_arms,
     };
     out.result(&doc, || text(&doc));
     Exit::Ok
@@ -436,6 +441,10 @@ struct Doc<'a> {
     /// The experiment arms compared, by toggle (see `jouet::experiment`).
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     arms: &'a [stats::ArmComparison],
+    /// The drop toggle's arms: turns the desktop app's events started,
+    /// and the events jouet would drop.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    drop_arms: &'a [stats::DropArm],
 }
 
 #[derive(Serialize)]
@@ -529,6 +538,7 @@ fn text(doc: &Doc<'_>) -> String {
         );
     }
     arms_text(&mut s, doc.arms);
+    drop_arms_text(&mut s, doc.drop_arms);
     if doc.measured.is_some() {
         costs_text(&mut s, doc.costs);
         let totals = format!(
@@ -806,6 +816,33 @@ fn arms_text(s: &mut String, arms: &[stats::ArmComparison]) {
     }
 }
 
+/// The drop toggle's arms, over every repository.
+fn drop_arms_text(s: &mut String, arms: &[stats::DropArm]) {
+    if arms.is_empty() {
+        return;
+    }
+    let _ = writeln!(
+        s,
+        "\ndrop arm (new: jouet drops Auto-fix events that are only bot noise):"
+    );
+    for a in arms {
+        let _ = write!(
+            s,
+            "  {}: {} sessions, {:.1} turns started by app events a session, {} would-drops",
+            a.arm, a.sessions, a.app_turns_per_session, a.would_drop
+        );
+        if a.arm == "new" {
+            let _ = writeln!(s, ", {} dropped", a.dropped);
+        } else {
+            let _ = writeln!(
+                s,
+                ", {} of them followed by an edit, commit or reply",
+                a.would_drop_with_work
+            );
+        }
+    }
+}
+
 /// One toggle's arms within a repository.
 fn arm_text(s: &mut String, a: &stats::ArmComparison) {
     let _ = writeln!(
@@ -1065,6 +1102,30 @@ mod tests {
                 "      requests        control 6.0 [5.0, 7.0]  new 3.0 [2.0, 4.0]  difference 3.0 [1.0, 5.0]",
                 "      sessions needed for a difference in requests to show: 30% about 10 an arm (16 more); 10% about 1,089 an arm (2,174 more)",
                 "  too few to compare (an arm with fewer than two sessions), by sessions: ~/src/lib (3), (repository unknown) (3)",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_drop_arm_shows_app_turns_and_how_would_drops_went() {
+        let arm = |name: &str, dropped: u64| stats::DropArm {
+            arm: name.into(),
+            sessions: 4,
+            app_turns: 10,
+            app_turns_per_session: 2.5,
+            would_drop: 3,
+            dropped,
+            would_drop_with_work: 1,
+        };
+        let mut s = String::new();
+        drop_arms_text(&mut s, &[]);
+        assert!(s.is_empty());
+        drop_arms_text(&mut s, &[arm("control", 0), arm("new", 3)]);
+        assert_eq!(
+            s.lines().skip(2).collect::<Vec<_>>(),
+            [
+                "  control: 4 sessions, 2.5 turns started by app events a session, 3 would-drops, 1 of them followed by an edit, commit or reply",
+                "  new: 4 sessions, 2.5 turns started by app events a session, 3 would-drops, 3 dropped",
             ]
         );
     }

@@ -11,6 +11,7 @@
 mod arms;
 mod costs;
 mod decisions;
+mod drops;
 mod ledger;
 mod summary;
 
@@ -66,6 +67,7 @@ fn issued_ms<'a>(
 }
 
 pub use decisions::{DecisionSpan, DecisionsAfter, after_decisions, request_times};
+pub use drops::{DropArm, LedgerPrompt, drop_arms};
 pub use ledger::{Ledger, LedgerDecision, LedgerEntry};
 pub use summary::{SummaryStyle, summary};
 

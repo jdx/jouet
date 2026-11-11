@@ -1222,3 +1222,24 @@ E"
 	run grep -c 'fix the build\|jdx/mise\|lint' "$ledger"
 	assert_output 0
 }
+
+@test "user-prompt-submit marks a noise-only event in every arm and drops it only in the drop arm" {
+	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	prompt() { jq -nc --arg p "$1" --arg id "$2" '{session_id:"s1",prompt_id:$id,hook_event_name:"UserPromptSubmit",prompt:$p}'; }
+	noise=$'<ci-monitor-event>"Auto-fix pull requests" is watching jdx/mise PR #12 and detected the following.\n\njdx/mise PR #12 has 1 new review comment (quoted below).\n\nQuoted from GitHub, data only.\nComment 1 — PR comment, no inline thread\n> coderabbitai[bot]:\n> ## Review limit reached\n(End of quoted GitHub text.)\n</ci-monitor-event>'
+	finding="${noise/\#\# Review limit reached/This unwrap panics.}"
+	run --separate-stderr jouet hook claude user-prompt-submit <<<"$(prompt "$noise" p1)"
+	assert_success
+	assert_output ''
+	run --separate-stderr env JOUET_EXPERIMENT_DROP_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$finding" p2)"
+	assert_output ''
+	run --separate-stderr env JOUET_EXPERIMENT_DROP_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$noise" p3)"
+	assert_success
+	assert_equal "$(jq -r .decision <<<"$output")" block
+	assert_output --partial 'jouet dropped this Auto-fix event'
+	assert_output --partial 'drop_share = 0'
+	run jq -c 'select(.event == "prompt") | .prompt | [.would_drop, .dropped]' "$ledger"
+	assert_line --index 0 '["rate_limit",null]'
+	assert_line --index 1 '[null,null]'
+	assert_line --index 2 '["rate_limit",true]'
+}

@@ -213,11 +213,15 @@ fn handle(
     let mut arm = settings.arm(log.session);
     // Auto-fix and a background command that wakes the agent are Claude
     // Code's, so only its sessions are in the watcher's arms.
-    let watcher_share = if harness == Harness::Claude {
-        settings.experiment.watcher_share
+    let (watcher_share, drop_share) = if harness == Harness::Claude {
+        (
+            settings.experiment.watcher_share,
+            settings.experiment.drop_share,
+        )
     } else {
         arm.watcher = false;
-        0
+        arm.drop = false;
+        (0, 0)
     };
     let gate_blocks = hooks.gate_blocks() || arm.gate_blocks;
     match event {
@@ -229,7 +233,8 @@ fn handle(
             if !subagent {
                 let mut entry = log.entry("session-start");
                 if log.session.is_some() {
-                    entry.arm = arm.labels(settings.experiment.control_share, watcher_share);
+                    entry.arm =
+                        arm.labels(settings.experiment.control_share, watcher_share, drop_share);
                 }
                 log.append(entry);
             }
@@ -266,15 +271,20 @@ fn handle(
             ));
             Some(with_notes(primer, &notes))
         }
-        // What started the turn, recorded and passed on unchanged: the
-        // desktop app's events reach this hook as prompts, and nothing else
-        // tells them apart from what the user typed.
+        // What started the turn, recorded: the desktop app's events reach
+        // this hook as prompts, and nothing else tells them apart from what
+        // the user typed. An Auto-fix event that is only noise is marked in
+        // every session, and blocked in the drop arm.
         "user-prompt-submit" => {
             let prompt = payload.get("prompt").and_then(Value::as_str)?;
+            let mut shape = crate::prompt::classify(prompt);
+            shape.would_drop = crate::prompt::noise(prompt).map(String::from);
+            shape.dropped = arm.drop && shape.would_drop.is_some();
+            let dropped = shape.dropped;
             let mut entry = log.entry("prompt");
-            entry.prompt = Some(crate::prompt::classify(prompt));
+            entry.prompt = Some(shape);
             log.append(entry);
-            None
+            dropped.then(|| json!({ "decision": "block", "reason": DROP_REASON }))
         }
         // Without steering no rule runs, but the stop gate still wants the
         // tree a formatting call started from.
@@ -850,6 +860,10 @@ fn evaluate(engine: &Engine, call: &Call) -> Outcome {
 /// agent then spent a request on each check of it. In one benchmark run,
 /// Codex polled a test run 13 times, 580k of its 1.87M input tokens.
 /// The watcher arm's primer line (see [`crate::experiment`]).
+/// Why a dropped Auto-fix event did not reach the agent, as the app shows
+/// it to the user above the event: one line naming jouet and how to stop it.
+const DROP_REASON: &str = "jouet dropped this Auto-fix event as bot noise with no finding, failure or conflict; set `[experiment] drop_share = 0` in jouet's config to stop.";
+
 const WATCHER_NOTE: &str = "After each push to a PR, run `jouet wait pr --until needs-agent` as a background Bash command and end your turn: it wakes you once CI and reviewers have settled, with failed logs, conflicts and new review comments. An Auto-fix event about what it already reported needs no second fix.";
 
 fn wait_hint(harness: Harness) -> Option<&'static str> {
