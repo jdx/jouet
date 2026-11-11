@@ -226,6 +226,7 @@ jobs:
     permissions: {}
     needs:
       - test
+      - dependencies
       - test-macos
       - test-windows
       - msrv
@@ -239,6 +240,7 @@ jobs:
       - name: Check job results
         if: |
           needs.test.result != 'success' ||
+          needs.dependencies.result != 'success' ||
           needs.test-macos.result != 'success' ||
           needs.test-windows.result != 'success' ||
           needs.msrv.result != 'success' ||
