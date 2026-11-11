@@ -73,15 +73,10 @@ fn is_work(e: &LedgerEntry) -> bool {
         .map(str::trim)
         .any(|command| {
             WORK.iter().any(|w| command.starts_with(w))
+                // A `gh api` call does not count: its shape keeps neither
+                // the endpoint nor the method, so a reply and a read look
+                // the same, and jouet sends thread replies here instead.
                 || command.starts_with("jouet pr threads") && command.contains("--body")
-                // The shape drops the endpoint, so a `gh api` call that
-                // sends fields (a reply, or resolving a thread) counts,
-                // unless it says it only reads.
-                || command.starts_with("gh api")
-                    && [" -f ", " -F ", " --field ", " --raw-field ", " --input "]
-                        .iter()
-                        .any(|f| format!("{command} ").contains(f))
-                    && !command.contains("GET")
         })
 }
 
@@ -209,10 +204,14 @@ mod tests {
             // whose turn committed, left open at the end.
             prompt("c1", "user", false, false),
             prompt("c1", "ci-monitor", true, false),
-            command("c1", "cd <arg> && gh api <arg> -f <arg>"),
+            command(
+                "c1",
+                "cd <arg> && jouet pr threads reply <arg> <arg> --resolve --body <arg>",
+            ),
             prompt("c1", "ci-monitor", true, false),
             command("c1", "git status"),
-            command("c1", "gh api <arg> -X GET -f <arg>"),
+            command("c1", "jouet pr threads <arg>"),
+            command("c1", "gh api <arg> -X <arg> -f <arg>"),
             prompt("c1", "ci-monitor", false, false),
             entry("c1", "edit"),
             prompt("c1", "ci-monitor", true, false),
