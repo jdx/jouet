@@ -60,10 +60,50 @@ jobs:
       - run: mise run test
         env:
           GITHUB_TOKEN: ${{ github.token }}
-      - name: Check dependencies
+
+  # The RustSec advisory DB changes on its own, so a new advisory must not turn
+  # unrelated pull requests red. Bans, licenses and sources are deterministic
+  # and always block; advisories block only a PR that changes the dependency
+  # graph, and every push to main. The daily deny-advisories workflow reports
+  # new advisories against main otherwise.
+  dependencies:
+    runs-on: ${{ !inputs.trusted && 'ubuntu-latest' || 'namespace-profile-endev-linux-amd64;overrides.cache-tag=cache' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The merge base with the PR's base branch is needed to see what
+          # the PR changes.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect dependency changes
+        id: deps
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          deps_changed=true
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            deps_changed=false
+            # Capture first so a failed diff fails the step instead of reading
+            # as "no dependency changes".
+            changed_paths=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+            if grep -qE '(^|/)(Cargo\.lock|Cargo\.toml|deny\.toml)$' <<<"$changed_paths"; then
+              deps_changed=true
+            fi
+          fi
+          echo "deps-changed=$deps_changed" >> "$GITHUB_OUTPUT"
+      - name: Check bans, licenses and sources
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
-          command: check
+          command: check bans licenses sources
+      - name: Check advisories
+        if: steps.deps.outputs.deps-changed == 'true'
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories
 
   test-macos:
     runs-on: ${{ !inputs.trusted && 'macos-latest' || 'namespace-profile-endev-macos-arm64;overrides.cache-tag=cache' }}
