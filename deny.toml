@@ -1,5 +1,8 @@
-# cargo-deny configuration. CI runs `cargo deny check` (advisories, bans,
-# licenses and sources) through EmbarkStudios/cargo-deny-action.
+# cargo-deny configuration. CI runs `cargo deny check bans licenses sources`
+# on every PR through EmbarkStudios/cargo-deny-action, and `check advisories`
+# only on a PR that changes Cargo.lock, Cargo.toml or deny.toml, and on pushes
+# to main. deny-advisories.yml checks main daily, since the advisory DB moves
+# on its own.
 
 [advisories]
 yanked = "deny"
