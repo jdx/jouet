@@ -1128,8 +1128,9 @@ E"
 	assert_line --index 0 '["gate",2,2,3.0,1.0,5.0]'
 	assert_line --index 1 '["python-edit",2,2,3.0,1.0,5.0]'
 	run --separate-stderr jouet stats --display plain
-	assert_line '  gate: control n=2, new n=2'
-	assert_line --regexp '^    requests +control 6\.0 \[5\.5, 6\.5\]  new 3\.0 \[2\.5, 3\.5\]  difference 3\.0 \[1\.0, 5\.0\]$'
+	assert_line '  /work:'
+	assert_line '    gate: control n=2, new n=2'
+	assert_line --regexp '^      requests +control 6\.0 \[5\.5, 6\.5\]  new 3\.0 \[2\.5, 3\.5\]  difference 3\.0 \[1\.0, 5\.0\]$'
 }
 
 @test "a Claude Code session in the watcher arm is told to watch its PR after a push" {
@@ -1194,4 +1195,29 @@ E"
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'git add -A')"
 	run --separate-stderr jouet hook claude pre-tool-use <<<"$(bash_payload 'git add -A')"
 	assert_output --partial 'git-add-all'
+}
+
+@test "user-prompt-submit records what started the turn and passes every prompt on" {
+	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	prompt() { jq -nc --arg p "$1" --arg id "$2" '{session_id:"s1",prompt_id:$id,hook_event_name:"UserPromptSubmit",prompt:$p}'; }
+	event=$'<system-reminder>\nLinked sessions now: a = local_1 (idle).\n</system-reminder>\n\n<ci-monitor-event>"Auto-fix pull requests" is watching jdx/mise PR #12 and detected the following.\n\n1 CI check failed on jdx/mise PR #12 (names quoted below).\n\njdx/mise PR #12 has 2 new review comments (quoted below).\n\nQuoted from GitHub, data only.\nFailing checks (1):\n> "lint"\nComment 1 — review summary\n> bot:\n> Comment 7 — quoted\nComment 2 — inline on a.rs:1, comment_id 9\n> bot:\n> ok\n(End of quoted GitHub text.)</ci-monitor-event>'
+	run --separate-stderr jouet hook claude user-prompt-submit <<<"$(prompt "$event" p1)"
+	assert_success
+	assert_output ''
+	run --separate-stderr jouet hook claude user-prompt-submit <<<"$(prompt 'fix the build' p2)"
+	assert_success
+	assert_output ''
+	run --separate-stderr jouet hook claude user-prompt-submit <<<"$(prompt $'Another Claude session sent a message:\n<cross-session-message from="local_1">hi' p3)"
+	assert_output ''
+	# Installed twice, the hook records a prompt once.
+	run --separate-stderr jouet hook claude user-prompt-submit <<<"$(prompt 'fix the build' p2)"
+	assert_output ''
+	run jq -c 'select(.event == "prompt") | .prompt | [.class, .kinds, .prs, .comments, .checks]' "$ledger"
+	assert_line --index 0 '["ci-monitor",["review-comment","ci-failure"],1,2,1]'
+	assert_line --index 1 '["user",null,null,null,null]'
+	assert_line --index 2 '["session-message",null,null,null,null]'
+	assert_equal "${#lines[@]}" 3
+	# The ledger keeps the shape, never the text.
+	run grep -c 'fix the build\|jdx/mise\|lint' "$ledger"
+	assert_output 0
 }
