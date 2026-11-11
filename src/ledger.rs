@@ -99,7 +99,7 @@ pub(crate) struct Entry {
     pub decisions: Vec<Decision>,
     /// For a `session-start`: the session's experiment arm of each toggle
     /// under test, `control` (the old behaviour) or `new`, by toggle (see
-    /// `crate::experiment`). Empty with `[experiment] control_share = 0`.
+    /// `crate::experiment`). Empty when no toggle has a share.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub arm: std::collections::BTreeMap<String, String>,
     /// For a `prompt`: what started the turn, by its shape (see

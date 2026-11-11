@@ -1133,6 +1133,36 @@ E"
 	assert_line --regexp '^      requests +control 6\.0 \[5\.5, 6\.5\]  new 3\.0 \[2\.5, 3\.5\]  difference 3\.0 \[1\.0, 5\.0\]$'
 }
 
+@test "a Claude Code session in the watcher arm is told to watch its PR after a push" {
+	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	prime() { jq -cn --arg s "$2" '{session_id: $s, source: "startup"}' | env JOUET_EXPERIMENT_WATCHER_SHARE="$3" jouet hook "$1" session-start; }
+	run --separate-stderr prime claude w1 100
+	assert_success
+	run jq -r .hookSpecificOutput.additionalContext <<<"$output"
+	assert_output --partial 'After each push to a PR, run '
+	assert_output --partial 'jouet wait pr --until needs-agent'
+	assert_output --partial ' as a background Bash command and end your turn'
+	assert_output --partial 'An Auto-fix event about what it already reported needs no second fix.'
+	# The control arm keeps today's primer.
+	run --separate-stderr prime claude w2 0
+	refute_output --partial 'jouet wait pr --until needs-agent'
+	# Auto-fix and background wakes are Claude Code's: no other harness is in either arm.
+	run --separate-stderr prime codex w3 100
+	refute_output --partial 'jouet wait pr --until needs-agent'
+	# Nor is a subagent, which does not push.
+	run --separate-stderr env JOUET_EXPERIMENT_WATCHER_SHARE=100 jouet hook claude subagent-start <<<'{"session_id":"w1","agent_id":"a1","agent_type":"general-purpose"}'
+	refute_output --partial 'jouet wait pr --until needs-agent'
+	run jq -c 'select(.event == "session-start") | [.session, .arm]' "$ledger"
+	assert_line --index 0 '["w1",{"watcher":"new"}]'
+	assert_line --index 1 '["w2",null]'
+	assert_line --index 2 '["w3",null]'
+	# A share between 0 and 100 splits sessions by a hash of their id.
+	for n in $(seq 1 40); do prime claude "s$n" 50 >/dev/null; done
+	run jq -r 'select(.event == "session-start" and (.session | startswith("s"))) | .arm.watcher' "$ledger"
+	assert_line new
+	assert_line control
+}
+
 @test "subagent-start gives a subagent the primer in its own event" {
 	run --separate-stderr jouet hook claude subagent-start <<<'{"session_id":"s1","agent_id":"a1","agent_type":"general-purpose"}'
 

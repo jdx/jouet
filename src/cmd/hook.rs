@@ -210,7 +210,15 @@ fn handle(
             .and_then(|cwd| ledger::repo_key(cwd.as_ref())),
     };
     // The session's experiment arm: which toggles keep their old behaviour.
-    let arm = settings.arm(log.session);
+    let mut arm = settings.arm(log.session);
+    // Auto-fix and a background command that wakes the agent are Claude
+    // Code's, so only its sessions are in the watcher's arms.
+    let watcher_share = if harness == Harness::Claude {
+        settings.experiment.watcher_share
+    } else {
+        arm.watcher = false;
+        0
+    };
     let gate_blocks = hooks.gate_blocks() || arm.gate_blocks;
     match event {
         // Claude Code shows a subagent nothing of its session's context, so
@@ -220,8 +228,8 @@ fn handle(
             let subagent = event == "subagent-start";
             if !subagent {
                 let mut entry = log.entry("session-start");
-                if settings.experiment.control_share > 0 && log.session.is_some() {
-                    entry.arm = arm.labels();
+                if log.session.is_some() {
+                    entry.arm = arm.labels(settings.experiment.control_share, watcher_share);
                 }
                 log.append(entry);
             }
@@ -247,6 +255,9 @@ fn handle(
                 primer["hookSpecificOutput"]["hookEventName"] = json!("SubagentStart");
             } else {
                 notes.extend(wind_notes(settings, log.session, log.repo.as_deref(), cwd));
+                if arm.watcher {
+                    notes.push(WATCHER_NOTE.to_string());
+                }
             }
             notes.extend(untrusted_note(&loaded));
             notes.extend(fnox_note(
@@ -810,6 +821,9 @@ fn evaluate(engine: &Engine, call: &Call) -> Outcome {
 /// background, and Codex's exec returns after its yield time; either way the
 /// agent then spent a request on each check of it. In one benchmark run,
 /// Codex polled a test run 13 times, 580k of its 1.87M input tokens.
+/// The watcher arm's primer line (see [`crate::experiment`]).
+const WATCHER_NOTE: &str = "After each push to a PR, run `jouet wait pr --until needs-agent` as a background Bash command and end your turn: it wakes you once CI and reviewers have settled, with failed logs, conflicts and new review comments. An Auto-fix event about what it already reported needs no second fix.";
+
 fn wait_hint(harness: Harness) -> Option<&'static str> {
     match harness {
         Harness::Claude => Some(
