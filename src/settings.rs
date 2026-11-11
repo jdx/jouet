@@ -57,7 +57,7 @@ pub(crate) struct Settings {
 #[usage(prefix = "experiment")]
 pub(crate) struct ExperimentSettings {
     /// Percent of sessions, 0 to 100, that keep the old behaviour of each toggle under test: the stop gate blocking, and the python-edit rule denying; 0 turns the arms off
-    #[usage(env = "JOUET_EXPERIMENT_CONTROL_SHARE", default = 25)]
+    #[usage(env = "JOUET_EXPERIMENT_CONTROL_SHARE", default = 50)]
     pub control_share: u64,
 }
 
@@ -348,6 +348,16 @@ mod tests {
         assert!(s.rules.disabled(new).is_empty());
         let s = Settings::load_from(&env(&[("JOUET_RULES_DISABLE", "git-stash")]), None);
         assert_eq!(s.rules.disabled(new), ["git-stash", "python-edit"]);
+    }
+
+    #[test]
+    fn the_experiment_arms_split_sessions_evenly_by_default() {
+        let s = Settings::load_from(&env(&[]), None);
+        assert_eq!(s.experiment.control_share, 50);
+        let control = (0..2_000)
+            .filter(|n| s.arm(Some(&format!("session-{n}"))).gate_blocks)
+            .count();
+        assert!((900..1_100).contains(&control), "{control}");
     }
 
     #[test]
