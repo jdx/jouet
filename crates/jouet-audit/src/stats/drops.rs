@@ -56,7 +56,8 @@ const WORK: &[&str] = &[
     "gh pr review",
 ];
 
-/// Whether `e` is work a turn did: an edit, or a commit, push or reply.
+/// Whether `e` is work a turn did: an edit, or a call any of whose
+/// chained commands commits, pushes or replies.
 fn is_work(e: &LedgerEntry) -> bool {
     if e.event == "edit" {
         return true;
@@ -67,9 +68,21 @@ fn is_work(e: &LedgerEntry) -> bool {
     let Some(shape) = e.shape.as_deref() else {
         return false;
     };
-    WORK.iter().any(|w| shape.starts_with(w))
-        || shape.starts_with("jouet pr threads") && shape.contains("--body")
-        || shape.starts_with("gh api") && shape.contains("/replies")
+    shape
+        .split(['&', ';', '|', '\n'])
+        .map(str::trim)
+        .any(|command| {
+            WORK.iter().any(|w| command.starts_with(w))
+                || command.starts_with("jouet pr threads") && command.contains("--body")
+                // The shape drops the endpoint, so a `gh api` call that
+                // sends fields (a reply, or resolving a thread) counts,
+                // unless it says it only reads.
+                || command.starts_with("gh api")
+                    && [" -f ", " -F ", " --field ", " --raw-field ", " --input "]
+                        .iter()
+                        .any(|f| format!("{command} ").contains(f))
+                    && !command.contains("GET")
+        })
 }
 
 /// The drop toggle's arms over the sessions `arms` assigns one, from the
@@ -196,13 +209,17 @@ mod tests {
             // whose turn committed, left open at the end.
             prompt("c1", "user", false, false),
             prompt("c1", "ci-monitor", true, false),
-            command("c1", "jouet pr threads reply <arg> --body <arg>"),
+            command("c1", "cd <arg> && gh api <arg> -f <arg>"),
             prompt("c1", "ci-monitor", true, false),
             command("c1", "git status"),
+            command("c1", "gh api <arg> -X GET -f <arg>"),
             prompt("c1", "ci-monitor", false, false),
             entry("c1", "edit"),
             prompt("c1", "ci-monitor", true, false),
-            command("c1", "git commit --message <arg>"),
+            command(
+                "c1",
+                "cd <arg> && git add <arg> && git commit --message <arg>",
+            ),
             // c2: a would-drop, then the user's prompt starts the work.
             prompt("c2", "ci-monitor", true, false),
             prompt("c2", "user", false, false),

@@ -101,7 +101,8 @@ pub(crate) fn noise(prompt: &str) -> Option<&'static str> {
         return None;
     }
     let comments = comments(&body[body.find(QUOTED)?..])?;
-    if comments.is_empty() || comments.len() as u64 != shape.comments {
+    let read = comments.len() as u64;
+    if read == 0 || read != shape.comments || announced(&body[..body.find(QUOTED)?]) != Some(read) {
         return None;
     }
     let mut first = None;
@@ -125,6 +126,20 @@ pub(crate) fn noise(prompt: &str) -> Option<&'static str> {
 /// Each comment the app relays in `quoted`: whether it is on a review
 /// thread, its author, and its text with the app's escapes undone. `None`
 /// when a comment has no author line.
+/// The comments the app says an event holds, from its own lines ("PR #12
+/// has 2 new review comments", or "PR #12: 1 new review comment"), summed
+/// over its PRs; `None` when it gives no count.
+fn announced(own: &str) -> Option<u64> {
+    let counts = own.match_indices(" new review comment").map(|(at, _)| {
+        let before = own[..at].trim_end();
+        let start = before
+            .rfind(|c: char| !c.is_ascii_digit())
+            .map_or(0, |i| i + 1);
+        before[start..].parse::<u64>().ok()
+    });
+    counts.sum::<Option<u64>>().filter(|n| *n > 0)
+}
+
 fn comments(quoted: &str) -> Option<Vec<(bool, String, String)>> {
     let mut out = Vec::new();
     let mut lines = quoted.lines().peekable();
@@ -348,6 +363,14 @@ mod tests {
         );
         assert_eq!(noise(&format!("{event}\n{event}")), None);
         assert_eq!(noise(&event.replace("Comment 1 — ", "")), None);
+        // The app said two and one came: pass. Its older wording counts too.
+        assert_eq!(noise(&event.replace("has 1 new", "has 2 new")), None);
+        let older = event.replace("PR #13990 has 1 new", "PR #13990: 1 new");
+        assert_eq!(noise(&older), Some("rate_limit"));
+        assert_eq!(
+            noise(&event.replace("has 1 new review", "has new review")),
+            None
+        );
         assert_eq!(noise(&format!("{event}\nand also fix the build")), None);
         // An author line that is not a login is not trusted to be a bot.
         let odd = LIMIT.replace("coderabbitai[bot]:", "some bot:");
