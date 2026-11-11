@@ -34,6 +34,8 @@ pub struct LedgerEntry {
     /// For a `session-start`: the session's experiment arm of each toggle,
     /// `control` or `new`, by toggle.
     pub arm: std::collections::BTreeMap<String, String>,
+    /// For a `prompt`: what started the turn.
+    pub prompt: Option<super::LedgerPrompt>,
 }
 
 /// What a rule decided about a call.

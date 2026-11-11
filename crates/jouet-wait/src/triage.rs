@@ -40,7 +40,7 @@ impl Acks {
 
 /// Where a comment was posted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Place {
+pub enum Place {
     /// On a review thread.
     Thread,
     /// A review summary or a conversation comment.
@@ -121,7 +121,7 @@ fn is_bot(author: &str) -> bool {
 
 /// The class of a comment that needs no agent, or `None` when it should
 /// reach one.
-pub(crate) fn noise(author: &str, body: &str, place: Place, acks: Acks) -> Option<&'static str> {
+pub fn noise(author: &str, body: &str, place: Place, acks: Acks) -> Option<&'static str> {
     if !is_bot(author) {
         return None;
     }

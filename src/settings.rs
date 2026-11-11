@@ -62,17 +62,21 @@ pub(crate) struct ExperimentSettings {
     /// Percent of Claude Code sessions, 0 to 100, whose primer has the agent run `jouet wait pr --until needs-agent` in the background after each push, alongside the desktop app's Auto-fix; 0 turns this arm off
     #[usage(env = "JOUET_EXPERIMENT_WATCHER_SHARE", default = 25)]
     pub watcher_share: u64,
+    /// Percent of Claude Code sessions, 0 to 100, in which the desktop app's Auto-fix events that are only noise (the notice that Auto-fix was turned on, and bot comments that are only a rate-limit or review-in-progress notice, a review with no findings, a perf report with no regression, or thanks, by `jouet wait pr --until needs-agent`'s rules) are blocked before the agent sees them; 0, the default, turns this arm off, though every session still records which events it would drop
+    #[usage(env = "JOUET_EXPERIMENT_DROP_SHARE", default = 0)]
+    pub drop_share: u64,
 }
 
 impl Settings {
-    /// The arm `session` is in, by `[experiment] control_share` and
-    /// `watcher_share`.
+    /// The arm `session` is in, by `[experiment] control_share`,
+    /// `watcher_share` and `drop_share`.
     pub(crate) fn arm(&self, session: Option<&str>) -> crate::experiment::Arm {
         session.map_or_else(Default::default, |s| {
             crate::experiment::Arm::of(
                 s,
                 self.experiment.control_share,
                 self.experiment.watcher_share,
+                self.experiment.drop_share,
             )
         })
     }
@@ -363,6 +367,7 @@ mod tests {
         let s = Settings::load_from(&env(&[]), None);
         assert_eq!(s.experiment.control_share, 50);
         assert_eq!(s.experiment.watcher_share, 25);
+        assert_eq!(s.experiment.drop_share, 0);
         let control = (0..2_000)
             .filter(|n| s.arm(Some(&format!("session-{n}"))).gate_blocks)
             .count();
