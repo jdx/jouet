@@ -25,6 +25,8 @@ The table counts each rule only from its current revision: the ledger records wi
 
 `overridden` counts the same command run again soon after a deny or warning, and `then jouet`, `then other` and `then nothing` say what the agent ran next after a denial.
 
+A second table judges each decision on its own rather than each session: for every deny, warning and rewrite, the model requests from it until the session next ran a check (a test, lint or build, passing or failing) or edited a file. That is the work a decision sent the agent on before it got back to the task: a warned call that is itself a check costs 0, and a deny the agent answers with the jouet command it named costs about 1. The ledger says when each happened, to the second, and the session's transcripts say how many requests came in between. A request is counted when it began after the decision's second and before the check or edit was issued (its ledger time, the moment it ended, less how long it ran; a `jouet test` run takes both from the shell call that ran it), so the request that issued the check or edit counts and the one that issued the decided call does not. A check already running when the decision came does not end it. `counted` is the decisions a check or edit followed in a session whose transcripts were found, which the median and interquartile range are over; `open` is those that no check or edit followed. Rewrites are read from the ledger's `rewrite` action, once a rule rewrites calls. In `--json`, these are `after_decisions`, each with `rule`, `action`, `decisions`, `measured`, `median`, `p25`, `p75` and `open`.
+
 ## The stop gate
 
 The stop gate [observes by default](/setup#observing-or-blocking): where it would block, it records a `would-block`, one for each reason, and lets the agent finish. With `[hooks] gate = "block"` it records a `block` for each reason instead. `jouet stats` counts both by reason, and judges each by the first thing that followed it in the session, at any later turn:
@@ -43,23 +45,31 @@ The reasons are `failed-test`, `failed-lint` and `failed-build` (a failed run no
 
 ## Experiment arms
 
-Three defaults changed ahead of a controlled comparison: the [stop gate](#the-stop-gate) observes instead of blocking; the `python-edit` rule is off, with the primer's "never Python" line; and on Claude Code, `piped-test-output` runs a test or build run piped into `head`, `tail` or `grep` under [`jouet test --cmd`](/commands/test) instead of warning about it (the `piped-rewrite` toggle). To compare old and new on your own sessions, `[experiment] control_share` percent of sessions (25 by default; `JOUET_EXPERIMENT_CONTROL_SHARE`) keep the old behaviour of each, assigned independently: a session can keep the gate blocking and still have `python-edit` off.
+Three defaults changed ahead of a controlled comparison: the [stop gate](#the-stop-gate) observes instead of blocking; the `python-edit` rule is off, with the primer's "never Python" line; and on Claude Code, `piped-test-output` runs a test or build run piped into `head`, `tail` or `grep` under [`jouet test --cmd`](/commands/test) instead of warning about it (the `piped-rewrite` toggle). To compare old and new on your own sessions, `[experiment] control_share` percent of sessions (50 by default, an even split; `JOUET_EXPERIMENT_CONTROL_SHARE`) keep the old behaviour of each, assigned independently: a session can keep the gate blocking and still have `python-edit` off.
 
 - **Assignment.** A session's arm comes from a hash of its id and the toggle's name, so every hook of the session agrees without keeping any state, and the same id always gets the same arm. The `session-start` ledger entry records it, as `arm: {"gate": "control", "piped-rewrite": "new", "python-edit": "new"}`. With `control_share = 0`, no arm is assigned or recorded.
 - **What the control arm does.** The stop gate blocks as `[hooks] gate = "block"` would, and the primer says so. `python-edit` denies as `[rules] enable = ["python-edit"]` would, and the primer says "never Python". `piped-test-output` warns about a cut run and then denies it, and never rewrites it. A setting that already turns the old behaviour on applies to every session, so both arms then behave alike.
-- **The report.** For each toggle, `jouet stats` reads the transcripts of the sessions with an arm and shows each arm's n, and the median and interquartile range per session of four measures. The difference of the medians (control less new) comes with a 95% bootstrap interval, or none while an arm has fewer than two sessions. The measures are:
+- **The watcher.** This toggle trials new behaviour rather than keeping an old default. `[experiment] watcher_share` percent of Claude Code sessions (25 by default; `JOUET_EXPERIMENT_WATCHER_SHARE`) are in its `new` arm: their primer tells the agent to run `jouet wait pr --until needs-agent` as a background command after each push, and to end its turn until that wakes it. The desktop app's Auto-fix still runs in those sessions. jouet does not block its events, and an Auto-fix event about something the wait already reported needs no second fix. The other sessions are its `control` arm, with today's primer. Subagents, and harnesses other than Claude Code, are in neither arm. The ledger records `arm: {"watcher": "new"}`.
+- **The report.** `jouet stats` compares the arms within each repository, so that a repository with long sessions in one arm does not pass for a difference between arms. A session's repository is the main checkout of the directory its transcript started in: every worktree of a repository counts as that repository, including a Claude Code worktree under `.claude/worktrees/` that has since been removed. For each toggle, it reads the transcripts of the sessions with an arm and shows each arm's n, and the median and interquartile range per session of four measures. The difference of the medians (control less new) comes with a 95% bootstrap interval, or none while an arm has fewer than two sessions. The measures are:
   - **requests:** model requests, each counted once even where a resumed session repeats them.
   - **input tokens:** over those requests, cached or not.
   - **active minutes:** tool time plus model time, as wall time. Every request of every transcript of the session goes on one timeline, from the model's wait before it (since whatever came before, at most 15 minutes, so time away from the keyboard is not counted) to the end of its calls. Time any of them covers counts once, so a resumed copy or a subagent working alongside the lead adds nothing twice.
   - **CI failures:** the desktop app's Auto-fix events that report failing checks.
 
 ```text
-experiment arms, per session (control: the old behaviour; median [interquartile range]; difference: control less new, with a 95% bootstrap interval):
-  gate: control n=2, new n=2
-    requests        control 6.0 [5.5, 6.5]  new 3.0 [2.5, 3.5]  difference 3.0 [1.0, 5.0]
+experiment arms, per session, within each repository (control: the old behaviour; median [interquartile range]; difference: control less new, with a 95% bootstrap interval):
+  ~/src/app:
+    gate: control n=2, new n=2
+      requests        control 6.0 [5.5, 6.5]  new 3.0 [2.5, 3.5]  difference 3.0 [1.0, 5.0]
+      sessions needed for a difference in requests to show: 30% about 10 an arm (16 more); 10% about 89 an arm (174 more)
+  too few to compare (an arm with fewer than two sessions), by sessions: ~/src/lib (3)
 ```
 
-There are only tens of comparable sessions a week, so read the interval, not the difference alone. The arms are not matched on task, effort or Claude Code version; they are random by session id, which balances those only over enough sessions. In `--json`, these are `arms`.
+A repository is shown once some toggle has two sessions in each arm; the rest are named on the last line with their session count, and sessions whose transcript gave no directory are `(repository unknown)`.
+
+**Sessions needed.** For each toggle, the report says how many sessions an arm would need for a difference in requests of 30%, and of 10%, of the new arm's median to show. The interval's half-width shrinks with the square root of 1/control + 1/new sessions, so from the current half-width h and a target difference d, two equal arms of n sessions give an interval of half-width d when n = 2 × (h / d)² / (1/control + 1/new). "More" is what both arms together still lack. At that size a true difference of d has about even odds of an interval that leaves out zero; for a 4-in-5 chance, double it. It is an estimate from the spread seen so far, so it moves as sessions come in.
+
+There are only tens of comparable sessions a week, so read the interval, not the difference alone. The arms are not matched on task, effort or Claude Code version; they are random by session id, which balances those only over enough sessions. In `--json`, these are `arms`: one entry per repository and toggle, with `repository`, and `needed` (`percent`, `per_arm`, `more`) on each difference.
 
 ## How the estimates work
 
@@ -84,7 +94,7 @@ Each harness is priced by its own history, which ends at that harness's first le
 
 The hooks see the exit code of the whole call, so a call such as `jouet edit replace ... && cargo test` that fails on its tests looks like a failed edit. To tell the two apart, every jouet command run in an agent's session (one with `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID` or `JOUET_SESSION_ID` set) appends a `jouet-run` line to the [ledger](/setup#the-ledger) with the command's name and its own exit code, never its arguments. Its harness is its session's, from the hooks' lines; a run in a session the hooks never saw is left out. Turning the ledger off (`[hooks] ledger`) turns this off too.
 
-In the table of commands, `calls failed` counts the calls that ran a command and failed, on it or on whatever else they ran, and `own runs` and `own failed` count its runs that recorded their own exit code, and its own failures among them.
+In the table of commands, `calls failed` counts the calls that ran a command and failed, on it or on whatever else they ran, and `own runs` and `own failed` count its runs that recorded their own exit code, and its own failures among them. A check's answer, such as `jouet test` exit 1 for failing tests or `jouet wait pr` exit 124 for still waiting, is not an own failure (see [how the costs work](#how-the-costs-work)). Own runs can exceed runs: they include the jouet commands a call started itself, as a script, a test suite or another jouet command does, which the hooks never see.
 
 ## How the costs work
 
@@ -101,7 +111,7 @@ Each cost is priced the way the savings are, at the harness's average request be
 | requests carrying the session-start primer | every request in your history after setup, read each time | the [primer](/setup#the-session-start-primer)'s size, at four characters a token, on every request |
 | rule warnings | warnings in the ledger | not priced: a warning adds no request, but its text stays in the context |
 
-One request per event is an assumption, not a measured minimum: an agent may recover from several failures in one request, or spend several requests on one failure. The ledger alone does not show how many requests an event added. A failed run whose exit code is a check's answer is not a cost, since it fails without jouet too: exit 1 (or 124, or `pr next`'s 10 and 20) from `jouet test`, `wait`, `ci`, `secrets`, `http`, `pr status` or `pr next`. A `jouet search` exit 1 means no matches and is not priced as a failure; search usage, missing-path and other errors still are. Older hook records that did not retain the search subcommand cannot be identified as searches. A search chained with another jouet command in a record without command-specific exits also remains ambiguous and is counted as a failed call. When a call ran a check and another jouet command, as in `jouet edit replace ... && jouet test`, and exited with the check's answer, `calls failed` counts it as the check's. `jouet edit`'s failures are counted against the old rate instead, in their own line. The extra test output cost assumes the old average is comparable to these checks; it is not a measurement of what the same checks would have printed without jouet. The primer's requests include subagents', which may not read it, so that line can count high; its notes, such as the slow checks, are left out of its size.
+One request per event is an assumption, not a measured minimum: an agent may recover from several failures in one request, or spend several requests on one failure. The ledger alone does not show how many requests an event added. A failed run whose exit code is a check's answer is not a cost, since it fails without jouet too: exit 1 (or 124, or `pr next`'s 10 and 20) from `jouet test`, `wait`, `ci`, `diag`, `secrets`, `http`, `pr status` or `pr next`. A `jouet search` exit 1 means no matches and is not priced as a failure; search usage, missing-path and other errors still are. Older hook records that did not retain the search subcommand cannot be identified as searches. A search chained with another jouet command in a record without command-specific exits also remains ambiguous and is counted as a failed call. When a call ran a check and another jouet command, as in `jouet edit replace ... && jouet test`, and exited with the check's answer, `calls failed` counts it as the check's. `jouet edit`'s failures are counted against the old rate instead, in their own line. The extra test output cost assumes the old average is comparable to these checks; it is not a measurement of what the same checks would have printed without jouet. The primer's requests include subagents', which may not read it, so that line can count high; its notes, such as the slow checks, are left out of its size.
 
 The net is the savings less the costs, and may be negative. Extra test output is priced only when the baseline and recorded output sizes needed for the comparison are available. If a test run's output size or that baseline is missing, the net is unavailable because the output cost is unknown. When another cost cannot be priced, as when the history after setup was not read or, with `--session`, none of that session's transcripts was found, there is no net rather than one that leaves the cost out. The net is also unavailable when CI waits were used but their savings cannot be estimated. A harness with no history before setup at all, such as Cursor, can have neither its savings nor its costs priced: its costs are listed, left out of the net, and named under it. Other savings that cannot be estimated count as nothing.
 
@@ -123,13 +133,19 @@ measured, from the ledger:
   jouet wait ci     claude      1             1         0           0    4m
   jouet edit        codex       1             0         0           0    0s
   jouet pr threads  codex       1             0         0           0    0s
-  (calls failed: calls that ran it and failed, on it or on whatever else they ran; own: runs that recorded their own exit code)
+  (calls failed: calls that ran it and failed, on it or on whatever else they ran; own: runs that recorded their own exit code, a check's answer not counted as failed; own runs include jouet runs a call started itself, as a script or a test does, so they can exceed runs)
 
   rule            deny  warn  sessions  again  overridden  then jouet  then other  then nothing
   python-edit        1     0         1      0           1           0           1             0
   review-threads     0     1         1      0           0           0           0             0
   sleep-poll         1     0         1      0           0           1           0             0
   (sessions: the sessions it denied or warned in; again: those in which it did so more than once)
+
+  rule            after  decisions  requests until checked or edited  counted  open
+  python-edit     deny           1                                 -        0     1
+  review-threads  warn           1                                 -        0     0
+  sleep-poll      deny           1                                 -        0     0
+  (each decision on its own: the model requests from it until its session next ran a check or edited a file, median [interquartile range]; counted: the decisions a check or edit followed, in sessions whose transcripts were found; open: those none followed)
 
   checks recorded: test 1 (1 failed)
   finishing blocked after a failed check: 1
@@ -181,7 +197,7 @@ When the net is unknown, the line names no tokens.
 
 ## JSON
 
-`--json` prints one document: `ledger` (where it is, whether it is there), `measured` (each command with `runs`, `failed` for the calls that failed, and `own_runs` and `own_failed`; and `overhead`, the per-harness counts the costs come from), `baselines` (one per harness, with its runs, requests and tokens per kind of work, and `input_tokens` over all its requests), `estimates` for the measured runs (or `per_run` without a ledger), `estimated_input_tokens`, `after_setup` (each harness's `requests` after setup and its `primer_tokens`), `costs` (each with `kind`, `count`, `input_tokens` and `basis`, and `outside_net` for a harness the net leaves out), `estimated_cost_tokens`, `net_input_tokens` (savings less costs, negative when jouet cost more, absent when a cost could not be priced), `scan` (reading the history before setup) and `after_setup_scan`. An estimate or cost that was refused has `refused` with the reason and no `input_tokens`. Fields that are zero or empty are left out.
+`--json` prints one document: `ledger` (where it is, whether it is there), `measured` (each command with `runs`, `failed` for the calls that failed, and `own_runs` and `own_failed`; and `overhead`, the per-harness counts the costs come from; and `after_decisions`), `baselines` (one per harness, with its runs, requests and tokens per kind of work, and `input_tokens` over all its requests), `estimates` for the measured runs (or `per_run` without a ledger), `estimated_input_tokens`, `after_setup` (each harness's `requests` after setup and its `primer_tokens`), `costs` (each with `kind`, `count`, `input_tokens` and `basis`, and `outside_net` for a harness the net leaves out), `estimated_cost_tokens`, `net_input_tokens` (savings less costs, negative when jouet cost more, absent when a cost could not be priced), `scan` (reading the history before setup) and `after_setup_scan`. An estimate or cost that was refused has `refused` with the reason and no `input_tokens`. Fields that are zero or empty are left out.
 
 ## Exit codes
 

@@ -1203,7 +1203,7 @@ hint: jouet test --budget BYTES --cmd -- mise run test:e2e test_a"
 	assert_output --partial '[jouet rule: piped-test-output]'
 	# Its scope is the new command's shape.
 	run jq -c 'select(.event == "pre-tool-use") | .decisions | map(del(.revision))' "$ledger"
-	assert_output '[{"rule":"piped-test-output","action":"rewrite","scope":"cd <arg> && jouet <arg> --cmd -- <arg> <arg> -q -p <arg>; echo <arg>"}]'
+	assert_output '[{"rule":"piped-test-output","action":"rewrite","scope":"cd <arg> && jouet test --cmd -- <arg> <arg> -q -p <arg>; echo <arg>"}]'
 
 	# Running the cut command again is a miss, and so is reading a test
 	# log back; each rewrite is missed once.

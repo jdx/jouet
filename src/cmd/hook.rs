@@ -141,7 +141,7 @@ const RUN_ONCE: Duration = Duration::from_secs(5);
 /// same payload: the agent then reads the primer, and every warning and
 /// denial, twice, and the ledger counts everything twice. Only the first
 /// answers. A payload counts only with what makes it one call: a tool call's
-/// `tool_use_id`, a subagent's `agent_id`, or a session start's transcript, which cannot start twice
+/// `tool_use_id`, a subagent's `agent_id`, a prompt's `prompt_id`, or a session start's transcript, which cannot start twice
 /// within [`RUN_ONCE`] otherwise. A stop has no such id, and two stops of a
 /// short turn can look the same, so each is answered.
 fn first_run(harness: Harness, event: &str, payload: &Value) -> bool {
@@ -149,6 +149,7 @@ fn first_run(harness: Harness, event: &str, payload: &Value) -> bool {
     let key = match event {
         "session-start" => "transcript_path",
         "subagent-start" => "agent_id",
+        "user-prompt-submit" => "prompt_id",
         _ => "tool_use_id",
     };
     let id = payload.get(key).and_then(Value::as_str).is_some();
@@ -209,7 +210,15 @@ fn handle(
             .and_then(|cwd| ledger::repo_key(cwd.as_ref())),
     };
     // The session's experiment arm: which toggles keep their old behaviour.
-    let arm = settings.arm(log.session);
+    let mut arm = settings.arm(log.session);
+    // Auto-fix and a background command that wakes the agent are Claude
+    // Code's, so only its sessions are in the watcher's arms.
+    let watcher_share = if harness == Harness::Claude {
+        settings.experiment.watcher_share
+    } else {
+        arm.watcher = false;
+        0
+    };
     let gate_blocks = hooks.gate_blocks() || arm.gate_blocks;
     match event {
         // Claude Code shows a subagent nothing of its session's context, so
@@ -219,8 +228,8 @@ fn handle(
             let subagent = event == "subagent-start";
             if !subagent {
                 let mut entry = log.entry("session-start");
-                if settings.experiment.control_share > 0 && log.session.is_some() {
-                    entry.arm = arm.labels();
+                if log.session.is_some() {
+                    entry.arm = arm.labels(settings.experiment.control_share, watcher_share);
                 }
                 log.append(entry);
             }
@@ -246,6 +255,9 @@ fn handle(
                 primer["hookSpecificOutput"]["hookEventName"] = json!("SubagentStart");
             } else {
                 notes.extend(wind_notes(settings, log.session, log.repo.as_deref(), cwd));
+                if arm.watcher {
+                    notes.push(WATCHER_NOTE.to_string());
+                }
             }
             notes.extend(untrusted_note(&loaded));
             notes.extend(fnox_note(
@@ -253,6 +265,16 @@ fn handle(
                 fnox::under_proxy(),
             ));
             Some(with_notes(primer, &notes))
+        }
+        // What started the turn, recorded and passed on unchanged: the
+        // desktop app's events reach this hook as prompts, and nothing else
+        // tells them apart from what the user typed.
+        "user-prompt-submit" => {
+            let prompt = payload.get("prompt").and_then(Value::as_str)?;
+            let mut entry = log.entry("prompt");
+            entry.prompt = Some(crate::prompt::classify(prompt));
+            log.append(entry);
+            None
         }
         // Without steering no rule runs, but the stop gate still wants the
         // tree a formatting call started from.
@@ -827,6 +849,9 @@ fn evaluate(engine: &Engine, call: &Call) -> Outcome {
 /// background, and Codex's exec returns after its yield time; either way the
 /// agent then spent a request on each check of it. In one benchmark run,
 /// Codex polled a test run 13 times, 580k of its 1.87M input tokens.
+/// The watcher arm's primer line (see [`crate::experiment`]).
+const WATCHER_NOTE: &str = "After each push to a PR, run `jouet wait pr --until needs-agent` as a background Bash command and end your turn: it wakes you once CI and reviewers have settled, with failed logs, conflicts and new review comments. An Auto-fix event about what it already reported needs no second fix.";
+
 fn wait_hint(harness: Harness) -> Option<&'static str> {
     match harness {
         Harness::Claude => Some(

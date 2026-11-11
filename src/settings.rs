@@ -57,15 +57,23 @@ pub(crate) struct Settings {
 #[usage(prefix = "experiment")]
 pub(crate) struct ExperimentSettings {
     /// Percent of sessions, 0 to 100, that keep the old behaviour of each toggle under test: the stop gate blocking, the python-edit rule denying, and the piped-test-output rule warning about and then denying a cut test run rather than running it under `jouet test --cmd`; 0 turns the arms off
-    #[usage(env = "JOUET_EXPERIMENT_CONTROL_SHARE", default = 25)]
+    #[usage(env = "JOUET_EXPERIMENT_CONTROL_SHARE", default = 50)]
     pub control_share: u64,
+    /// Percent of Claude Code sessions, 0 to 100, whose primer has the agent run `jouet wait pr --until needs-agent` in the background after each push, alongside the desktop app's Auto-fix; 0 turns this arm off
+    #[usage(env = "JOUET_EXPERIMENT_WATCHER_SHARE", default = 25)]
+    pub watcher_share: u64,
 }
 
 impl Settings {
-    /// The arm `session` is in, by `[experiment] control_share`.
+    /// The arm `session` is in, by `[experiment] control_share` and
+    /// `watcher_share`.
     pub(crate) fn arm(&self, session: Option<&str>) -> crate::experiment::Arm {
         session.map_or_else(Default::default, |s| {
-            crate::experiment::Arm::of(s, self.experiment.control_share)
+            crate::experiment::Arm::of(
+                s,
+                self.experiment.control_share,
+                self.experiment.watcher_share,
+            )
         })
     }
 }
@@ -348,6 +356,17 @@ mod tests {
         assert!(s.rules.disabled(new).is_empty());
         let s = Settings::load_from(&env(&[("JOUET_RULES_DISABLE", "git-stash")]), None);
         assert_eq!(s.rules.disabled(new), ["git-stash", "python-edit"]);
+    }
+
+    #[test]
+    fn the_experiment_arms_split_sessions_evenly_by_default() {
+        let s = Settings::load_from(&env(&[]), None);
+        assert_eq!(s.experiment.control_share, 50);
+        assert_eq!(s.experiment.watcher_share, 25);
+        let control = (0..2_000)
+            .filter(|n| s.arm(Some(&format!("session-{n}"))).gate_blocks)
+            .count();
+        assert!((900..1_100).contains(&control), "{control}");
     }
 
     #[test]

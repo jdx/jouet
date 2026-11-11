@@ -11,7 +11,7 @@ use jouet_audit::{Analyzer, ClaudeCode, Codex, Filter, Reader};
 use jouet_output::exit::Exit;
 use jouet_output::{paths, time};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -67,7 +67,7 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
             return out.error(Exit::Failed, &format!("reading {}: {e}", dir.display()));
         }
     };
-    let measured = ledger.as_ref().map(|l| stats::measure(&l.entries, &filter));
+    let mut measured = ledger.as_ref().map(|l| stats::measure(&l.entries, &filter));
     let cache = paths::state_dir().map(|d| d.join("stats").join("baselines.json"));
     // The history before setup is each harness's history before its first
     // ledger entry, whatever --since says.
@@ -180,15 +180,46 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
     let net = measured
         .as_ref()
         .and_then(|_| stats::net(&estimates, &costs));
-    let arms = ledger
+    let session_arms = ledger
         .as_ref()
         .map(|l| stats::session_arms(&l.entries, &filter))
-        .filter(|arms| !arms.is_empty())
-        .map(|arms| {
-            let metrics = arm_metrics(&readers, &arms);
-            stats::compare_arms(&arms, &metrics)
-        })
         .unwrap_or_default();
+    // The transcripts of the sessions with an arm or a rule decision that a
+    // check or edit followed (an open one counts no requests), each file
+    // read once.
+    let wanted: BTreeSet<String> = session_arms
+        .keys()
+        .cloned()
+        .chain(
+            measured
+                .iter()
+                .flat_map(|m| &m.decision_spans)
+                .filter(|s| s.until_ms.is_some())
+                .map(|s| s.session.clone()),
+        )
+        .collect();
+    let transcripts = session_transcripts(&readers, &wanted);
+    let arms = if session_arms.is_empty() {
+        Vec::new()
+    } else {
+        let metrics: Vec<stats::SessionMetrics> = transcripts
+            .iter()
+            .filter(|(session, _)| session_arms.contains_key(*session))
+            .map(|(session, ts)| {
+                let mut m = stats::SessionMetrics::of(session, ts);
+                m.repository = m.cwd.as_deref().map(repository);
+                m
+            })
+            .collect();
+        stats::compare_arms(&session_arms, &metrics)
+    };
+    if let Some(m) = measured.as_mut() {
+        let times: HashMap<String, Vec<i64>> = transcripts
+            .iter()
+            .map(|(session, ts)| (session.clone(), stats::request_times(ts)))
+            .collect();
+        m.after_decisions = stats::after_decisions(&m.decision_spans, &times);
+    }
     let doc = Doc {
         ledger: LedgerDoc {
             dir: dir.map(|d| d.display().to_string()),
@@ -214,41 +245,65 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
     Exit::Ok
 }
 
-/// What each session with an arm cost, from its transcripts, read one by
-/// one: every file whose path names an arm's session ([`arm_session`]),
-/// however old, since a resumed session can add to an older one.
-fn arm_metrics(
+/// The transcripts of the `wanted` sessions, read one by one: every file
+/// whose path names one of them ([`wanted_session`]), however old, since a
+/// resumed session can add to an older one.
+fn session_transcripts(
     readers: &[&dyn Reader],
-    arms: &BTreeMap<String, BTreeMap<String, String>>,
-) -> Vec<stats::SessionMetrics> {
-    let mut transcripts: BTreeMap<&str, Vec<jouet_audit::Transcript>> = BTreeMap::new();
+    wanted: &BTreeSet<String>,
+) -> BTreeMap<String, Vec<jouet_audit::Transcript>> {
+    let mut transcripts: BTreeMap<String, Vec<jouet_audit::Transcript>> = BTreeMap::new();
+    if wanted.is_empty() {
+        return transcripts;
+    }
     for &reader in readers {
         for source in reader.discover(&Filter::default()).unwrap_or_default() {
-            let Some(session) = arm_session(&source.path, arms) else {
+            let Some(session) = wanted_session(&source.path, wanted) else {
                 continue;
             };
             let read = jouet_audit::open(&source.path)
                 .and_then(|mut input| reader.read(&source, &mut input, &Filter::default()));
             if let Ok(Some(t)) = read {
-                transcripts.entry(session).or_default().push(t);
+                transcripts.entry(session.to_string()).or_default().push(t);
             }
         }
     }
     transcripts
-        .into_iter()
-        .map(|(session, ts)| stats::SessionMetrics::of(session, &ts))
-        .collect()
 }
 
-/// The arm session a transcript's path names by its whole id, as
+/// The repository a session ran in, from its directory: the main checkout
+/// of the work tree that holds it, so every worktree of one repository is
+/// that repository. A worktree an agent made inside a checkout
+/// (`.claude/worktrees/NAME`) and has since removed counts as that
+/// checkout's; any other directory that is gone counts as itself.
+fn repository(cwd: &str) -> String {
+    let mut path = std::path::PathBuf::from(cwd);
+    let gone = ["/.claude/worktrees/", "\\.claude\\worktrees\\"]
+        .into_iter()
+        .find_map(|dir| cwd.split_once(dir));
+    if let Some((checkout, _)) = gone
+        && !path.exists()
+    {
+        path = checkout.into();
+    }
+    let root = paths::work_tree(&path);
+    let main = root.as_deref().and_then(|root| {
+        let common = jouet_git::claim::common_dir(root)?;
+        // A bare repository's worktrees have no main checkout.
+        match common.file_name()? == ".git" {
+            true => common.parent().map(Path::to_path_buf),
+            false => Some(root.to_path_buf()),
+        }
+    });
+    crate::wind::memories::tilde(&main.or(root).unwrap_or(path))
+}
+
+/// The wanted session a transcript's path names by its whole id, as
 /// `--session` matches it: a directory or file named by it (Claude Code's
 /// `<id>.jsonl` and `<id>/subagents/`), or a file whose name ends in `-<id>`
 /// (Codex's `rollout-<time>-<id>.jsonl`). Each name is looked up, not
 /// compared with every session.
-fn arm_session<'a>(
-    path: &Path,
-    arms: &'a BTreeMap<String, BTreeMap<String, String>>,
-) -> Option<&'a str> {
+fn wanted_session<'a>(path: &Path, wanted: &'a BTreeSet<String>) -> Option<&'a str> {
     path.components().find_map(|c| {
         let name = c.as_os_str().to_str()?;
         let file = name.strip_suffix(".zst").unwrap_or(name);
@@ -256,7 +311,7 @@ fn arm_session<'a>(
         let suffixes = stem.match_indices('-').map(|(i, _)| &stem[i + 1..]);
         std::iter::once(stem)
             .chain(suffixes)
-            .find_map(|id| arms.get_key_value(id).map(|(k, _)| k.as_str()))
+            .find_map(|id| wanted.get(id).map(String::as_str))
     })
 }
 
@@ -575,7 +630,7 @@ fn measured_text(s: &mut String, m: &Measured) {
         table(s, &rows, 2);
         let _ = writeln!(
             s,
-            "  (calls failed: calls that ran it and failed, on it or on whatever else they ran; own: runs that recorded their own exit code)"
+            "  (calls failed: calls that ran it and failed, on it or on whatever else they ran; own: runs that recorded their own exit code, a check's answer not counted as failed; own runs include jouet runs a call started itself, as a script or a test does, so they can exceed runs)"
         );
     }
     if !m.rules.is_empty() {
@@ -638,6 +693,38 @@ fn measured_text(s: &mut String, m: &Measured) {
             left.join("; and ")
         );
     }
+    if !m.after_decisions.is_empty() {
+        s.push('\n');
+        let mut rows = vec![[
+            "rule".to_string(),
+            "after".into(),
+            "decisions".into(),
+            "requests until checked or edited".into(),
+            "counted".into(),
+            "open".into(),
+        ]];
+        for a in &m.after_decisions {
+            let requests = match (a.median, a.p25, a.p75) {
+                (Some(median), Some(p25), Some(p75)) => {
+                    format!("{median:.1} [{p25:.1}, {p75:.1}]")
+                }
+                _ => "-".into(),
+            };
+            rows.push([
+                a.rule.clone(),
+                a.action.clone(),
+                a.decisions.to_string(),
+                requests,
+                a.measured.to_string(),
+                a.open.to_string(),
+            ]);
+        }
+        table(s, &rows, 2);
+        let _ = writeln!(
+            s,
+            "  (each decision on its own: the model requests from it until its session next ran a check or edited a file, median [interquartile range]; counted: the decisions a check or edit followed, in sessions whose transcripts were found; open: those none followed)"
+        );
+    }
     if !m.checks.is_empty() {
         let checks: Vec<String> = m
             .checks
@@ -675,56 +762,111 @@ fn measured_text(s: &mut String, m: &Measured) {
     }
 }
 
-/// The experiment arms: for each toggle, each arm's n and the median
-/// [IQR] of each metric per session, and the difference with its interval.
+/// The experiment arms, within each repository that has two sessions in
+/// each arm of a toggle: for each toggle, each arm's n and the median [IQR]
+/// of each metric per session, the difference with its interval, and the
+/// sessions a 30% and a 10% difference in requests need. The other
+/// repositories are named on one line.
 fn arms_text(s: &mut String, arms: &[stats::ArmComparison]) {
     if arms.is_empty() {
         return;
     }
     let _ = writeln!(
         s,
-        "\nexperiment arms, per session (control: the old behaviour; median [interquartile range]; difference: control less new, with a 95% bootstrap interval):"
+        "\nexperiment arms, per session, within each repository (control: the old behaviour; median [interquartile range]; difference: control less new, with a 95% bootstrap interval):"
     );
-    for a in arms {
+    let mut too_few: Vec<String> = Vec::new();
+    for group in arms.chunk_by(|a, b| a.repository == b.repository) {
+        let name = group[0]
+            .repository
+            .as_deref()
+            .unwrap_or("(repository unknown)");
+        let comparable = group
+            .iter()
+            .any(|a| a.control.sessions >= 2 && a.new.sessions >= 2);
+        if !comparable {
+            let sessions = group
+                .iter()
+                .map(|a| a.control.sessions + a.new.sessions)
+                .max();
+            too_few.push(format!("{name} ({})", sessions.unwrap_or(0)));
+            continue;
+        }
+        let _ = writeln!(s, "  {name}:");
+        for a in group {
+            arm_text(s, a);
+        }
+    }
+    if !too_few.is_empty() {
         let _ = writeln!(
             s,
-            "  {}: control n={}, new n={}",
-            a.toggle, a.control.sessions, a.new.sessions
+            "  too few to compare (an arm with fewer than two sessions), by sessions: {}",
+            too_few.join(", ")
         );
-        if a.differences.is_empty() {
-            let _ = writeln!(s, "    nothing to compare until each arm has a session");
-        }
-        for ((c, n), d) in a
-            .control
-            .metrics
-            .iter()
-            .zip(&a.new.metrics)
-            .zip(&a.differences)
-        {
-            let num = |v: f64| {
-                if c.metric == "input_tokens" {
-                    format!("{:.2}M", v / 1e6)
-                } else {
-                    format!("{v:.1}")
-                }
-            };
-            let interval = match (d.ci_low, d.ci_high) {
-                (Some(low), Some(high)) => format!(" [{}, {}]", num(low), num(high)),
-                _ => " (too few sessions for an interval)".to_string(),
-            };
-            let _ = writeln!(
-                s,
-                "    {:<15} control {} [{}, {}]  new {} [{}, {}]  difference {}{interval}",
-                c.metric,
-                num(c.median),
-                num(c.p25),
-                num(c.p75),
-                num(n.median),
-                num(n.p25),
-                num(n.p75),
-                num(d.median),
-            );
-        }
+    }
+}
+
+/// One toggle's arms within a repository.
+fn arm_text(s: &mut String, a: &stats::ArmComparison) {
+    let _ = writeln!(
+        s,
+        "    {}: control n={}, new n={}",
+        a.toggle, a.control.sessions, a.new.sessions
+    );
+    if a.differences.is_empty() {
+        let _ = writeln!(s, "      nothing to compare until each arm has a session");
+    }
+    for ((c, n), d) in a
+        .control
+        .metrics
+        .iter()
+        .zip(&a.new.metrics)
+        .zip(&a.differences)
+    {
+        let num = |v: f64| {
+            if c.metric == "input_tokens" {
+                format!("{:.2}M", v / 1e6)
+            } else {
+                format!("{v:.1}")
+            }
+        };
+        let interval = match (d.ci_low, d.ci_high) {
+            (Some(low), Some(high)) => format!(" [{}, {}]", num(low), num(high)),
+            _ => " (too few sessions for an interval)".to_string(),
+        };
+        let _ = writeln!(
+            s,
+            "      {:<15} control {} [{}, {}]  new {} [{}, {}]  difference {}{interval}",
+            c.metric,
+            num(c.median),
+            num(c.p25),
+            num(c.p75),
+            num(n.median),
+            num(n.p25),
+            num(n.p75),
+            num(d.median),
+        );
+    }
+    let requests = a.differences.iter().find(|d| d.metric == "requests");
+    let needed: Vec<String> = requests
+        .map(|d| d.needed.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .map(|n| {
+            format!(
+                "{}% about {} an arm ({} more)",
+                n.percent,
+                stats::count_text(n.per_arm),
+                stats::count_text(n.more)
+            )
+        })
+        .collect();
+    if !needed.is_empty() {
+        let _ = writeln!(
+            s,
+            "      sessions needed for a difference in requests to show: {}",
+            needed.join("; ")
+        );
     }
 }
 
@@ -839,22 +981,91 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_arm_session_is_found_by_its_whole_id() {
+    fn a_wanted_session_is_found_by_its_whole_id() {
         let id = "019a1b2c-3d4e-7f00-8a9b-0c1d2e3f4a5b";
-        let arms = BTreeMap::from([(id.to_string(), BTreeMap::new())]);
+        let arms = BTreeSet::from([id.to_string()]);
         for path in [
             format!("/h/.claude/projects/-w/{id}.jsonl"),
             format!("/h/.claude/projects/-w/{id}/subagents/agent-a1.jsonl"),
             format!("/h/.codex/sessions/2026/11/09/rollout-2026-11-09T10-00-00-{id}.jsonl.zst"),
         ] {
-            assert_eq!(arm_session(Path::new(&path), &arms), Some(id), "{path}");
+            assert_eq!(wanted_session(Path::new(&path), &arms), Some(id), "{path}");
         }
         for path in [
             "/h/.claude/projects/-w/019a1b2c-3d4e.jsonl".to_string(),
             format!("/h/.claude/projects/-w/{id}0.jsonl"),
             format!("/h/.codex/sessions/rollout-x{id}.jsonl"),
         ] {
-            assert_eq!(arm_session(Path::new(&path), &arms), None, "{path}");
+            assert_eq!(wanted_session(Path::new(&path), &arms), None, "{path}");
         }
+    }
+
+    #[test]
+    fn a_removed_agent_worktree_is_its_checkout_on_either_separator() {
+        assert_eq!(
+            repository("/nonexistent/w/.claude/worktrees/gone"),
+            "/nonexistent/w"
+        );
+        assert_eq!(
+            repository(r"C:\nonexistent\w\.claude\worktrees\gone"),
+            r"C:\nonexistent\w"
+        );
+        assert_eq!(repository("/nonexistent/w/gone"), "/nonexistent/w/gone");
+    }
+
+    #[test]
+    fn arms_are_shown_by_repository_with_the_sessions_a_difference_needs() {
+        let spread = |sessions: u64, median: f64| stats::ArmSpread {
+            sessions,
+            metrics: vec![stats::Spread {
+                metric: "requests".into(),
+                median,
+                p25: median - 1.0,
+                p75: median + 1.0,
+            }],
+        };
+        let comparison = |repository: Option<&str>, control: u64, new: u64| stats::ArmComparison {
+            repository: repository.map(str::to_string),
+            toggle: "gate".into(),
+            control: spread(control, 6.0),
+            new: spread(new, 3.0),
+            differences: vec![stats::Difference {
+                metric: "requests".into(),
+                median: 3.0,
+                ci_low: Some(1.0),
+                ci_high: Some(5.0),
+                needed: vec![
+                    stats::Needed {
+                        percent: 30,
+                        per_arm: 10,
+                        more: 16,
+                    },
+                    stats::Needed {
+                        percent: 10,
+                        per_arm: 1089,
+                        more: 2174,
+                    },
+                ],
+            }],
+        };
+        let mut s = String::new();
+        arms_text(
+            &mut s,
+            &[
+                comparison(Some("~/src/app"), 2, 2),
+                comparison(Some("~/src/lib"), 1, 2),
+                comparison(None, 2, 1),
+            ],
+        );
+        assert_eq!(
+            s.lines().skip(2).collect::<Vec<_>>(),
+            [
+                "  ~/src/app:",
+                "    gate: control n=2, new n=2",
+                "      requests        control 6.0 [5.0, 7.0]  new 3.0 [2.0, 4.0]  difference 3.0 [1.0, 5.0]",
+                "      sessions needed for a difference in requests to show: 30% about 10 an arm (16 more); 10% about 1,089 an arm (2,174 more)",
+                "  too few to compare (an arm with fewer than two sessions), by sessions: ~/src/lib (3), (repository unknown) (3)",
+            ]
+        );
     }
 }

@@ -136,6 +136,9 @@ impl Harness {
                 ("SessionStart", None, "session-start"),
                 // A subagent sees none of its session's context.
                 ("SubagentStart", None, "subagent-start"),
+                // Records what started each turn, such as the desktop app's
+                // Auto-fix events; it never changes or blocks a prompt.
+                ("UserPromptSubmit", None, "user-prompt-submit"),
                 (
                     "PreToolUse",
                     Some("Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit"),
@@ -908,6 +911,17 @@ mod tests {
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude user-prompt-submit'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Bash|Read",
@@ -1133,6 +1147,17 @@ mod tests {
           {
             "type": "command",
             "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude subagent-start'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude user-prompt-submit'",
             "timeout": 10
           }
         ]

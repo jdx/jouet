@@ -10,13 +10,62 @@
 
 mod arms;
 mod costs;
+mod decisions;
 mod ledger;
 mod summary;
 
+use arms::quantile;
 pub use arms::{
-    ArmComparison, ArmSpread, Difference, SessionMetrics, Spread, compare_arms, session_arms,
+    ArmComparison, ArmSpread, Difference, NEEDED_FOR, Needed, SessionMetrics, Spread, compare_arms,
+    session_arms,
 };
 pub use costs::{AfterSetup, Cost, CostKind, costs, net};
+/// When a check or edit was issued, in milliseconds: the end of the ledger
+/// second it ended in, less how long it ran. A `jouet-run` line has no
+/// duration, so the shell call that ran it gives both: one of the session's
+/// `post-tool-use` lines of a `jouet` command in the next two seconds,
+/// the one whose shape names the run. Older ledgers wrote every subcommand
+/// as `<arg>`, so there it is the first `jouet` call that began at or after
+/// `not_before`, the decision (an earlier one was another, already
+/// running); with none, the run is dated by its own line.
+fn issued_ms<'a>(
+    closer: &'a LedgerEntry,
+    after: impl Iterator<Item = &'a LedgerEntry>,
+    not_before: u64,
+) -> u64 {
+    let issued = |e: &LedgerEntry| {
+        e.ts.saturating_add(1)
+            .saturating_mul(1000)
+            .saturating_sub(e.duration_ms.unwrap_or(0))
+    };
+    // `jouet test` writes two lines without a duration, its `test-run`
+    // record and its `jouet-run`; the shell call that ran it has one.
+    if closer.duration_ms.is_none() && matches!(closer.event.as_str(), "jouet-run" | "test-run") {
+        let within = closer.ts.saturating_add(2);
+        let calls: Vec<&LedgerEntry> = after
+            .take_while(|e| e.ts <= within)
+            .filter(|e| {
+                e.event == "post-tool-use"
+                    && e.duration_ms.is_some()
+                    && e.shape.as_deref().is_some_and(|s| s.contains("jouet"))
+            })
+            .collect();
+        // The call that names the run is its own, whenever it began: one
+        // begun before the decision is skipped by the caller.
+        let named = closer.shape.as_deref().and_then(|run| {
+            calls
+                .iter()
+                .find(|e| e.shape.as_deref().is_some_and(|s| s.contains(run)))
+        });
+        let unnamed = || calls.iter().find(|e| issued(e) >= not_before);
+        if let Some(call) = named.or_else(unnamed) {
+            return issued(call);
+        }
+    }
+    issued(closer)
+}
+
+pub use decisions::{DecisionSpan, DecisionsAfter, after_decisions, request_times};
 pub use ledger::{Ledger, LedgerDecision, LedgerEntry};
 pub use summary::{SummaryStyle, summary};
 
@@ -101,6 +150,15 @@ pub struct Measured {
     /// [`costs`] prices.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub overhead: Vec<Overhead>,
+    /// Each deny, warning and rewrite, and when its session next ran a
+    /// check or edited a file: what [`after_decisions`] counts the requests
+    /// over.
+    #[serde(skip)]
+    pub decision_spans: Vec<DecisionSpan>,
+    /// Each rule's decisions by action, with the requests until the next
+    /// check or edit, once the caller has read the transcripts.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub after_decisions: Vec<DecisionsAfter>,
 }
 
 /// One harness's requests jouet added, as the ledger recorded them.
@@ -143,6 +201,7 @@ const ANSWERS: &[&str] = &[
     "jouet pr status",
     "jouet pr next",
     "jouet http",
+    "jouet diag",
 ];
 
 /// Whether a command line that ran `commands` and exited with `code` only
@@ -175,7 +234,8 @@ pub struct CommandRuns {
     /// this jouet on.
     #[serde(skip_serializing_if = "is_zero")]
     pub own_runs: u64,
-    /// Of those, the ones that failed: its own failures.
+    /// Of those, the ones that failed: its own failures, a check's answer
+    /// left out (see [`is_answer`]).
     #[serde(skip_serializing_if = "is_zero")]
     pub own_failed: u64,
     #[serde(skip_serializing_if = "is_zero")]
@@ -449,7 +509,9 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
             for command in &ran {
                 let c = command_runs(&mut commands, &e.harness, command);
                 c.own_runs += 1;
-                c.own_failed += u64::from(code != 0);
+                // Exit 1 from `jouet test` is the tests failing, not jouet.
+                c.own_failed +=
+                    u64::from(code != 0 && !is_answer(std::slice::from_ref(command), code));
             }
             continue;
         }
@@ -513,6 +575,39 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
                     _ => r.then_other += 1,
                 }
             }
+        }
+    }
+    // Each deny, warning and rewrite, until the next check or edit.
+    for (i, e) in kept.iter().enumerate() {
+        let Some(session) = e.session.as_deref() else {
+            continue;
+        };
+        for d in &e.decisions {
+            let ruled = matches!(d.action.as_str(), "deny" | "warn" | "override");
+            if !decisions::JUDGED.contains(&d.action.as_str()) || ruled && !filter.current(d) {
+                continue;
+            }
+            let until_ms = whole_session.get(session).and_then(|entries| {
+                let later = &entries[entries.iter().position(|&j| j == i)? + 1..];
+                later
+                    .iter()
+                    .enumerate()
+                    .filter(|&(_, &j)| judge(std::iter::once(kept[j])).is_some())
+                    .map(|(k, &j)| {
+                        let after = later[k + 1..].iter().map(|&j| kept[j]);
+                        issued_ms(kept[j], after, e.ts.saturating_mul(1000))
+                    })
+                    // A check or edit begun before the decision, and still
+                    // running when it came, does not end it.
+                    .find(|&ms| ms >= e.ts.saturating_mul(1000))
+            });
+            m.decision_spans.push(DecisionSpan {
+                rule: d.rule.clone(),
+                action: d.action.clone(),
+                session: session.to_string(),
+                at: e.ts,
+                until_ms,
+            });
         }
     }
     for &i in &blocks {
@@ -1086,7 +1181,8 @@ pub fn per_run(baselines: &[Baseline]) -> Vec<Estimate> {
 }
 
 /// `987` or `12,345`.
-pub(crate) fn count_text(n: u64) -> String {
+/// A count with thousands separators.
+pub fn count_text(n: u64) -> String {
     let digits = n.to_string();
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {

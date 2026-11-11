@@ -935,3 +935,261 @@ fn jouet_runs_own_exit_codes_decide_what_jouet_failed() {
     assert_eq!(m.overhead.len(), 1);
     assert_eq!(m.overhead[0].failed_runs, 1);
 }
+
+#[test]
+fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
+    let at = |ts: u64, e: LedgerEntry| LedgerEntry { ts, ..e };
+    let decided = |ts: u64, session: &str, action: &str, revision: Option<&str>| {
+        let mut e = warned_by(session, "piped-test-output", revision);
+        e.decisions[0].action = action.into();
+        at(ts, e)
+    };
+    let edit = |ts: u64, session: &str| LedgerEntry {
+        ts,
+        session: Some(session.into()),
+        event: "edit".into(),
+        ..LedgerEntry::default()
+    };
+    let check = |ts: u64, session: &str, exit_code: i32| LedgerEntry {
+        ts,
+        duration_ms: Some(3_000),
+        session: Some(session.into()),
+        decisions: vec![LedgerDecision {
+            rule: "checks".into(),
+            action: "record:test".into(),
+            revision: None,
+            scope: None,
+        }],
+        ..post("cargo test", exit_code)
+    };
+    let entries = [
+        decided(10, "a", "deny", Some("r1")),
+        // Neither a check nor an edit.
+        at(
+            12,
+            LedgerEntry {
+                session: Some("a".into()),
+                ..post("git status", 0)
+            },
+        ),
+        // A failing check counts as much as a passing one.
+        check(15, "a", 1),
+        decided(20, "a", "warn", Some("r1")),
+        // Another session's edit is not this one's.
+        edit(21, "b"),
+        edit(25, "a"),
+        decided(30, "a", "rewrite", None),
+        // An older revision's deny is left out.
+        decided(31, "a", "deny", Some("r0")),
+        check(32, "a", 0),
+        // Nothing follows this one.
+        decided(40, "b", "deny", Some("r1")),
+        decided(50, "c", "deny", Some("r1")),
+        // Issued at 49s, before the deny: it does not end it.
+        check(51, "c", 0),
+        // A jouet test run is dated by the shell call that ran it, which
+        // the ledger writes after it: issued at 62s less 4.
+        LedgerEntry {
+            ts: 60,
+            harness: "jouet".into(),
+            session: Some("c".into()),
+            event: "jouet-run".into(),
+            shape: Some("jouet test".into()),
+            exit_code: Some(0),
+            ..LedgerEntry::default()
+        },
+        // A call of something else in between is not the run's.
+        at(
+            60,
+            LedgerEntry {
+                session: Some("c".into()),
+                duration_ms: Some(9_000),
+                ..post("git status", 0)
+            },
+        ),
+        // Nor is a jouet call begun before the deny, or one that does not
+        // name the run when another does.
+        at(
+            61,
+            LedgerEntry {
+                session: Some("c".into()),
+                duration_ms: Some(30_000),
+                ..post("jouet wait ci", 0)
+            },
+        ),
+        at(
+            61,
+            LedgerEntry {
+                session: Some("c".into()),
+                duration_ms: Some(500),
+                ..post("jouet read src/main.rs", 0)
+            },
+        ),
+        at(
+            61,
+            LedgerEntry {
+                session: Some("c".into()),
+                duration_ms: Some(4_000),
+                ..post("jouet test --cmd -- cargo test", 0)
+            },
+        ),
+        // A run whose call was not found within two seconds is dated by
+        // its own line, not by a later jouet call.
+        decided(70, "d", "deny", Some("r1")),
+        LedgerEntry {
+            ts: 72,
+            harness: "jouet".into(),
+            session: Some("d".into()),
+            event: "jouet-run".into(),
+            shape: Some("jouet test".into()),
+            exit_code: Some(0),
+            ..LedgerEntry::default()
+        },
+        at(
+            80,
+            LedgerEntry {
+                session: Some("d".into()),
+                duration_ms: Some(1_000),
+                ..post("jouet read src/main.rs", 0)
+            },
+        ),
+        // An older ledger wrote the subcommand as <arg>: then the first
+        // jouet call that began after the deny ran it.
+        decided(90, "e", "deny", Some("r1")),
+        LedgerEntry {
+            ts: 92,
+            harness: "jouet".into(),
+            session: Some("e".into()),
+            event: "jouet-run".into(),
+            shape: Some("jouet test".into()),
+            exit_code: Some(0),
+            ..LedgerEntry::default()
+        },
+        at(
+            92,
+            LedgerEntry {
+                session: Some("e".into()),
+                duration_ms: Some(500),
+                ..post("git status", 0)
+            },
+        ),
+        at(
+            92,
+            LedgerEntry {
+                session: Some("e".into()),
+                duration_ms: Some(20_000),
+                ..post("jouet <arg> ci", 0)
+            },
+        ),
+        at(
+            93,
+            LedgerEntry {
+                session: Some("e".into()),
+                duration_ms: Some(3_000),
+                ..post("jouet <arg> --cmd -- cargo test", 0)
+            },
+        ),
+        // A jouet test already running when the deny came does not end it:
+        // the edit after it does.
+        decided(110, "f", "deny", Some("r1")),
+        LedgerEntry {
+            ts: 112,
+            harness: "jouet".into(),
+            session: Some("f".into()),
+            event: "jouet-run".into(),
+            shape: Some("jouet test".into()),
+            exit_code: Some(0),
+            ..LedgerEntry::default()
+        },
+        at(
+            112,
+            LedgerEntry {
+                session: Some("f".into()),
+                duration_ms: Some(5_000),
+                ..post("jouet test --cmd -- cargo test", 0)
+            },
+        ),
+        edit(115, "f"),
+        // The record a jouet test writes is dated by its shell call too.
+        decided(130, "g", "deny", Some("r1")),
+        LedgerEntry {
+            ts: 132,
+            harness: "jouet".into(),
+            session: Some("g".into()),
+            event: "test-run".into(),
+            duration_ms: None,
+            ..check(132, "g", 0)
+        },
+        at(
+            132,
+            LedgerEntry {
+                session: Some("g".into()),
+                duration_ms: Some(2_000),
+                ..post("jouet test --cmd -- cargo test", 0)
+            },
+        ),
+    ];
+    let filter = StatsFilter {
+        revisions: Some(BTreeMap::from([(
+            "piped-test-output".to_string(),
+            "r1".to_string(),
+        )])),
+        ..StatsFilter::default()
+    };
+    let m = measure(&entries, &filter);
+    let spans: Vec<_> = m
+        .decision_spans
+        .iter()
+        .map(|s| (s.action.as_str(), s.session.as_str(), s.at, s.until_ms))
+        .collect();
+    // A check is dated when it ended, 3 seconds after it was issued.
+    assert_eq!(
+        spans,
+        [
+            ("deny", "a", 10, Some(13_000)),
+            ("warn", "a", 20, Some(26_000)),
+            ("rewrite", "a", 30, Some(30_000)),
+            ("deny", "b", 40, None),
+            ("deny", "c", 50, Some(58_000)),
+            ("deny", "d", 70, Some(73_000)),
+            ("deny", "e", 90, Some(91_000)),
+            ("deny", "f", 110, Some(116_000)),
+            ("deny", "g", 130, Some(131_000)),
+        ]
+    );
+}
+
+#[test]
+fn a_checks_answer_is_not_an_own_failure() {
+    let run = |shape: &str, code| LedgerEntry {
+        harness: "jouet".into(),
+        event: "jouet-run".into(),
+        ..post(shape, code)
+    };
+    let entries = [
+        post("jouet wait pr <arg>", 124),
+        // Still waiting at the timeout, and the PR closed: both answers.
+        run("jouet wait pr", 124),
+        run("jouet wait pr", 1),
+        // A real failure is the answer; nothing failed yet (4) is not.
+        run("jouet ci explain", 1),
+        run("jouet ci explain", 4),
+        // Findings are diag's answer.
+        run("jouet diag check", 1),
+        run("jouet test", 1),
+        run("jouet test", 2),
+        run("jouet commit", 1),
+    ];
+    let m = measure(&entries, &StatsFilter::default());
+    let own = |command: &str| {
+        let c = m.commands.iter().find(|c| c.command == command).unwrap();
+        (c.own_runs, c.own_failed)
+    };
+    assert_eq!(own("jouet wait pr"), (2, 0));
+    assert_eq!(own("jouet ci explain"), (2, 1));
+    assert_eq!(own("jouet diag check"), (1, 0));
+    assert_eq!(own("jouet test"), (2, 1));
+    assert_eq!(own("jouet commit"), (1, 1));
+    // The cost counts the same failures as the table.
+    assert_eq!(m.overhead[0].failed_runs, 3);
+}

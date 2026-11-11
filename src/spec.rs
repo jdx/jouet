@@ -19,6 +19,19 @@ pub(crate) fn has_command(path: &[&str]) -> bool {
     true
 }
 
+/// The name of the command at `path` (its last word, an alias resolved to
+/// the name), or `None` when this binary has no such command.
+pub(crate) fn command_name(path: &[&str]) -> Option<String> {
+    let mut meta = Jouet::spec().root;
+    for name in path {
+        meta = meta
+            .subcommands
+            .iter()
+            .find(|c| c.cmd.name == *name || c.cmd.aliases.contains(name))?;
+    }
+    (!path.is_empty()).then(|| meta.cmd.name.to_string())
+}
+
 /// What this binary lacks of a `jouet` command line, such as a memory
 /// names: its first word that is not a subcommand where one is expected,
 /// or a long flag no command on its path has. `words` follow `jouet`.
