@@ -66,7 +66,7 @@ fires = [
   { command = "cargo build -q 2>&1 | tail -40", rewritten = "jouet test --cmd -- cargo build -q 2>&1" },
   { command = "cargo test | tail", session = "s1", fired = 3, rewritten = "jouet test --cmd -- cargo test" },
   { command = "cd é && RUST_LOG=1 cargo test -p a 2>&1 | grep -E 'FAILED|panicked' -A4 | head -6; echo done", rewritten = "cd é && RUST_LOG=1 jouet test --cmd -- cargo test -p a 2>&1; echo done" },
-  { command = "cargo build 2>&1 | tail -3 && go test ./... | grep -v '^ok' && git push", rewritten = "jouet test --cmd -- cargo build 2>&1 && jouet test --cmd -- go test ./... && git push" },
+  { command = "cargo build 2>&1 | tail -3 && go test ./... | grep -v '^ok'; git push", rewritten = "jouet test --cmd -- cargo build 2>&1 && jouet test --cmd -- go test ./...; git push" },
   { command = "if timeout 60 make 2>&1 | tail; then echo ok; fi", rewritten = "if jouet test --cmd -- timeout 60 make 2>&1; then echo ok; fi" },
   # Shapes it cannot rewrite keep the warning, and the denial after it.
   { command = "cargo nextest run 2>&1 | tee out.log | tail -5", rewrite = true, session = "s1", fired = 1, action = "deny" },
@@ -88,6 +88,18 @@ fires = [
   # A command that only ends with `!` negates nothing.
   { command = "echo done!\ncargo test 2>&1 | tail", rewritten = "echo done!\njouet test --cmd -- cargo test 2>&1" },
   { command = "echo ! && cargo test 2>&1 | tail", rewritten = "echo ! && jouet test --cmd -- cargo test 2>&1" },
+  # A grep or rg whose status the call reads: rewritten, "it matched" would
+  # become "the run passed".
+  { command = "cargo test 2>&1 | grep FAILED && echo bad", rewrite = true, action = "warn" },
+  { command = "cargo test 2>&1 | rg panicked || echo clean", rewrite = true, action = "warn" },
+  { command = "if cargo test 2>&1 | grep -v ok; then echo listed; fi", rewrite = true, action = "warn" },
+  { command = "while cargo test 2>&1 | grep -v x\ndo :; done", rewrite = true, action = "warn" },
+  { command = "{ cargo test 2>&1 | grep FAILED; } && exit 1", rewrite = true, action = "warn" },
+  { command = "(cargo test 2>&1 | fgrep FAILED) || true", rewrite = true, action = "warn" },
+  { command = "if (cargo test 2>&1 | grep FAILED); then exit 1; fi", rewrite = true, action = "warn" },
+  { command = "while { cargo test 2>&1 | grep -v ok; }; do :; done", rewrite = true, action = "warn" },
+  # Head, tail and sed -n always succeed, so their status can be read.
+  { command = "cargo test 2>&1 | tail -5 && git push", rewritten = "jouet test --cmd -- cargo test 2>&1 && git push" },
   # A cut written to a file partway through the pipeline.
   { command = "cargo test | grep FAILED > saved.txt | head", rewrite = true, action = "warn" },
   # One run it cannot rewrite keeps the whole call as written.

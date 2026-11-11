@@ -142,7 +142,7 @@ A note follows the primer only when it applies:
 
 The rules are TOML. They come from five places: built in; your organisation's in `/etc/jouet/rules`, which your settings cannot turn off; yours in `~/.config/jouet/rules`; the [plugins](/plugins) you pin by commit; and a repository's `.jouet/rules` once you trust it with `jouet trust`. Yours only warn unless they say `mode = "deny"`, and no rule of yours can replace or overrule a built-in one. Rules from outside run only once they pass their examples. [Rules](/rules) covers writing, testing and disabling them; `jouet rule list` shows which run.
 
-A rule only advises. jouet denies the command or warns about it and tells the agent what to do instead, and never rewrites the command. The agent sees the advice and the rule's name:
+A rule only advises. jouet denies the command or warns about it and tells the agent what to do instead. The one exception is `piped-test-output` on Claude Code, which runs a cut test or build run under `jouet test --cmd` instead. The agent sees the advice and the rule's name:
 
 ```text
 Run `git add path/to/file ...` instead. `git add -A` and `git add .` sweep in caches, scratch files and other sessions' work. [jouet rule: git-add-all]

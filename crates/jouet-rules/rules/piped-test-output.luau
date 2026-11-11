@@ -191,6 +191,26 @@ local function negated(script: string, commands: { JouetCommand }, i: number): b
 	return false
 end
 
+-- Programs whose exit status says whether they matched, where `head`,
+-- `tail` and `sed -n` always succeed.
+local MATCHES = set({ "grep", "egrep", "fgrep", "rg" })
+-- Words after a pipeline that make the shell read its status: an `if` or
+-- loop condition, or the end of a block whose status is the pipeline's.
+local STATUS_WORDS = set({ "then", "do", "fi", "done", "esac" })
+
+-- Whether the call reads the status of the pipeline that `last` ends: an
+-- `&&` or `||` after it, or a word after it that ends a condition or a
+-- group. Rewritten, a grep's "it matched" would become the run's status.
+local function status_read(script: string, last: JouetCommand): boolean
+	if last.op == "and" or last.op == "or" then
+		return true
+	end
+	local span = last.span :: { first: number, last: number }
+	local after = string.match(string.sub(script, span.last + 1), "^[%s;]*(%S*)") or ""
+	local first = string.sub(after, 1, 1)
+	return first == "}" or first == ")" or STATUS_WORDS[string.match(after, "^%a+") or ""] == true
+end
+
 -- The last command of the pipeline that cuts `commands[i]`'s output, when
 -- the run can go under `jouet test --cmd` instead: it is piped straight
 -- into programs that only cut it, reads no input of its own and writes no
@@ -217,6 +237,9 @@ local function pipeline_end(script: string, commands: { JouetCommand }, i: numbe
 	end
 	local last = commands[j]
 	if j == i or last.op == "background" then
+		return nil
+	end
+	if MATCHES[last.program or ""] and status_read(script, last) then
 		return nil
 	end
 	return last
