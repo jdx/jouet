@@ -14,7 +14,8 @@ mod ledger;
 mod summary;
 
 pub use arms::{
-    ArmComparison, ArmSpread, Difference, SessionMetrics, Spread, compare_arms, session_arms,
+    ArmComparison, ArmSpread, Difference, NEEDED_FOR, Needed, SessionMetrics, Spread, compare_arms,
+    session_arms,
 };
 pub use costs::{AfterSetup, Cost, CostKind, costs, net};
 pub use ledger::{Ledger, LedgerDecision, LedgerEntry};
@@ -1090,7 +1091,8 @@ pub fn per_run(baselines: &[Baseline]) -> Vec<Estimate> {
 }
 
 /// `987` or `12,345`.
-pub(crate) fn count_text(n: u64) -> String {
+/// A count with thousands separators.
+pub fn count_text(n: u64) -> String {
     let digits = n.to_string();
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {
