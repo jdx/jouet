@@ -207,7 +207,7 @@ local function status_read(script: string, last: JouetCommand): boolean
 	end
 	local span = last.span :: { first: number, last: number }
 	local rest = string.sub(script, span.last + 1)
-	if string.find(rest, "^%s*;;") then
+	if string.find(string.match(rest, "^[%s;]*") or "", ";;", 1, true) then
 		return true
 	end
 	local after = string.match(rest, "^[%s;]*(%S*)") or ""
