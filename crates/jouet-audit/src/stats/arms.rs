@@ -368,7 +368,7 @@ fn spread(group: &[&SessionMetrics]) -> ArmSpread {
 
 /// The `q` quantile of `values`, interpolated between the two nearest; 0
 /// for none.
-fn quantile(values: &[f64], q: f64) -> f64 {
+pub(super) fn quantile(values: &[f64], q: f64) -> f64 {
     if values.is_empty() {
         return 0.0;
     }

@@ -25,6 +25,8 @@ The table counts each rule only from its current revision: the ledger records wi
 
 `overridden` counts the same command run again soon after a deny or warning, and `then jouet`, `then other` and `then nothing` say what the agent ran next after a denial.
 
+A second table judges each decision on its own rather than each session: for every deny, warning and rewrite, the model requests from it until the session next ran a check (a test, lint or build, passing or failing) or edited a file. That is the work a decision sent the agent on before it got back to the task: a warned call that is itself a check costs 0, and a deny the agent answers with the jouet command it named costs about 1. The ledger says when each happened, to the second, and the session's transcripts say how many requests came in between. A request is counted when it began after the decision's second and before the check or edit was issued (its ledger time, the moment it ended, less how long it ran; a `jouet test` run takes both from the shell call that ran it), so the request that issued the check or edit counts and the one that issued the decided call does not. A check already running when the decision came does not end it. `counted` is the decisions a check or edit followed in a session whose transcripts were found, which the median and interquartile range are over; `open` is those that no check or edit followed. Rewrites are read from the ledger's `rewrite` action, once a rule rewrites calls. In `--json`, these are `after_decisions`, each with `rule`, `action`, `decisions`, `measured`, `median`, `p25`, `p75` and `open`.
+
 ## The stop gate
 
 The stop gate [observes by default](/setup#observing-or-blocking): where it would block, it records a `would-block`, one for each reason, and lets the agent finish. With `[hooks] gate = "block"` it records a `block` for each reason instead. `jouet stats` counts both by reason, and judges each by the first thing that followed it in the session, at any later turn:
@@ -138,6 +140,12 @@ measured, from the ledger:
   sleep-poll         1     0         1      0           0           1           0             0
   (sessions: the sessions it denied or warned in; again: those in which it did so more than once)
 
+  rule            after  decisions  requests until checked or edited  counted  open
+  python-edit     deny           1                                 -        0     1
+  review-threads  warn           1                                 -        0     0
+  sleep-poll      deny           1                                 -        0     0
+  (each decision on its own: the model requests from it until its session next ran a check or edited a file, median [interquartile range]; counted: the decisions a check or edit followed, in sessions whose transcripts were found; open: those none followed)
+
   checks recorded: test 1 (1 failed)
   finishing blocked after a failed check: 1
   failing CI logs returned as the failing step's excerpt: 1
@@ -188,7 +196,7 @@ When the net is unknown, the line names no tokens.
 
 ## JSON
 
-`--json` prints one document: `ledger` (where it is, whether it is there), `measured` (each command with `runs`, `failed` for the calls that failed, and `own_runs` and `own_failed`; and `overhead`, the per-harness counts the costs come from), `baselines` (one per harness, with its runs, requests and tokens per kind of work, and `input_tokens` over all its requests), `estimates` for the measured runs (or `per_run` without a ledger), `estimated_input_tokens`, `after_setup` (each harness's `requests` after setup and its `primer_tokens`), `costs` (each with `kind`, `count`, `input_tokens` and `basis`, and `outside_net` for a harness the net leaves out), `estimated_cost_tokens`, `net_input_tokens` (savings less costs, negative when jouet cost more, absent when a cost could not be priced), `scan` (reading the history before setup) and `after_setup_scan`. An estimate or cost that was refused has `refused` with the reason and no `input_tokens`. Fields that are zero or empty are left out.
+`--json` prints one document: `ledger` (where it is, whether it is there), `measured` (each command with `runs`, `failed` for the calls that failed, and `own_runs` and `own_failed`; and `overhead`, the per-harness counts the costs come from; and `after_decisions`), `baselines` (one per harness, with its runs, requests and tokens per kind of work, and `input_tokens` over all its requests), `estimates` for the measured runs (or `per_run` without a ledger), `estimated_input_tokens`, `after_setup` (each harness's `requests` after setup and its `primer_tokens`), `costs` (each with `kind`, `count`, `input_tokens` and `basis`, and `outside_net` for a harness the net leaves out), `estimated_cost_tokens`, `net_input_tokens` (savings less costs, negative when jouet cost more, absent when a cost could not be priced), `scan` (reading the history before setup) and `after_setup_scan`. An estimate or cost that was refused has `refused` with the reason and no `input_tokens`. Fields that are zero or empty are left out.
 
 ## Exit codes
 
