@@ -157,7 +157,7 @@ pub struct ArmComparison {
     /// repository is unknown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
-    /// `gate` or `python-edit`.
+    /// `gate`, `python-edit`, `piped-rewrite` or `watcher`.
     pub toggle: String,
     /// The old behaviour.
     pub control: ArmSpread,

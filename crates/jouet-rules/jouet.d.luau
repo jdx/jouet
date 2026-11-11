@@ -99,6 +99,10 @@ export type JouetCall = {
 	agent: string?,
 	-- The command's exit code (post-tool-use only).
 	exit_code: number?,
+	-- Whether this rule may return `jouet.rewrite(...)` for the call: only a
+	-- built-in deny-mode rule, before a Claude Code Bash call, in a session
+	-- the experiment does not keep on the old behaviour.
+	rewrite: boolean,
 	-- Every command the script runs: top-level ones first, then those inside
 	-- `$(...)` and `sh -c '...'`. Quoted text, here-documents and comments are
 	-- never commands.
@@ -106,8 +110,10 @@ export type JouetCall = {
 }
 
 export type JouetDecision = {
-	action: "deny" | "warn" | "allow",
+	action: "deny" | "warn" | "allow" | "rewrite",
 	message: string?,
+	-- For a rewrite: the command that runs in the call's place.
+	command: string?,
 }
 
 -- A tool call in compact form: a shell command, or a table that also names
@@ -370,6 +376,10 @@ declare jouet: {
 	warn: (message: string) -> JouetDecision,
 	-- Say explicitly that the call is fine; the same as returning nil.
 	allow: () -> JouetDecision,
+	-- Run `command` in the call's place, and show the agent the message,
+	-- which should name the swap. Only when `call.rewrite` is true; at any
+	-- other time it is an error.
+	rewrite: (command: string, message: string) -> JouetDecision,
 	-- Record a run of kind "test", "lint" or "build" with the command's
 	-- `status`, for the check before the agent stops. Ignored when `status`
 	-- is nil; any other kind is an error. `scope` is "full" when the run

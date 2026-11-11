@@ -25,8 +25,8 @@ const TAIL: u64 = 256 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Decision {
     pub rule: String,
-    /// `deny`, `warn`, `record:<kind>`, `block`, `would-block` or
-    /// `override`.
+    /// `deny`, `warn`, `rewrite`, `record:<kind>`, `block`, `would-block`,
+    /// `override` or `miss`.
     pub action: String,
     /// For a `record:<kind>`: `full` when the run covered the whole
     /// project, else `partial`. Never what a partial run selected, which is
@@ -34,7 +34,10 @@ pub(crate) struct Decision {
     /// gate's `block` or `would-block`: what the reason is about, one
     /// decision per reason (`failed-test`, `changed-after-pass`, ...; see
     /// `verify::Block::about`), or `hk-stop` for hk's merged stop hook.
-    /// Blocks recorded before reasons were named lack it.
+    /// Blocks recorded before reasons were named lack it. For a `rewrite`:
+    /// the shape of the command that ran instead. For a `miss`: `rerun`
+    /// when the agent ran the cut command again, `log-read` when it read a
+    /// test log.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
     /// For a `deny`, `warn` or `override`: the revision of the rule that
@@ -341,6 +344,44 @@ pub(crate) fn overrides(recent: &[Entry], shape: &str, now: u64) -> Vec<Decision
         }
     }
     rules
+}
+
+/// Whether this call shows the session's last rewrite missed what the
+/// agent wanted: within [`OVERRIDE_WINDOW`] of it, the call runs the cut
+/// command again (the same shape as the call that was rewritten), or reads
+/// a test log, which the run under `jouet test` points at but which it
+/// should seldom need. Each rewrite is missed once at most.
+pub(crate) fn miss(
+    recent: &[Entry],
+    shape: Option<&str>,
+    reads_log: bool,
+    now: u64,
+) -> Option<Decision> {
+    let since = now.saturating_sub(OVERRIDE_WINDOW.as_secs());
+    for entry in recent.iter().rev() {
+        if entry.ts < since || entry.event == "miss" {
+            return None;
+        }
+        if entry.event != "pre-tool-use" {
+            continue;
+        }
+        let Some(rewrite) = entry.decisions.iter().find(|d| d.action == "rewrite") else {
+            continue;
+        };
+        let scope = if reads_log {
+            "log-read"
+        } else if shape.is_some() && entry.shape.as_deref() == shape {
+            "rerun"
+        } else {
+            return None;
+        };
+        return Some(Decision {
+            action: "miss".into(),
+            scope: Some(scope.into()),
+            ..rewrite.clone()
+        });
+    }
+    None
 }
 
 /// A command's shape: each top-level command's program, subcommand words and
@@ -1106,6 +1147,65 @@ mod tests {
         let text = std::fs::read_to_string(dir.path().join("ledger.jsonl")).unwrap();
         assert_eq!(text.matches(r#""deprecation":"old-flag""#).count(), 4);
         assert_eq!(text.matches(r#""event":"deprecated""#).count(), 5);
+    }
+
+    #[test]
+    fn a_rerun_or_log_read_after_a_rewrite_is_a_miss() {
+        let entry = |ts: u64, event: &str, shape: &str, action: &str| Entry {
+            ts,
+            event: event.into(),
+            shape: Some(shape.into()),
+            decisions: vec![Decision {
+                rule: "piped-test-output".into(),
+                action: action.into(),
+                scope: Some("jouet test --cmd -- cargo test".into()),
+                revision: Some("0ld".into()),
+            }],
+            ..Entry::default()
+        };
+        let now = 10_000;
+        let shape = "jouet test --cmd -- cargo test";
+        let recent = [entry(now - 60, "pre-tool-use", shape, "rewrite")];
+        let missed = |scope: &str| Decision {
+            rule: "piped-test-output".into(),
+            action: "miss".into(),
+            scope: Some(scope.into()),
+            revision: Some("0ld".into()),
+        };
+        assert_eq!(
+            miss(&recent, Some(shape), false, now),
+            Some(missed("rerun"))
+        );
+        assert_eq!(
+            miss(&recent, Some("ls"), true, now),
+            Some(missed("log-read"))
+        );
+        assert_eq!(miss(&recent, None, true, now), Some(missed("log-read")));
+        // Another command, a denial or warning, or a rewrite out of the
+        // window is no miss.
+        assert_eq!(miss(&recent, Some("cargo build"), false, now), None);
+        assert_eq!(miss(&recent, None, false, now), None);
+        let warned = [entry(now - 60, "pre-tool-use", shape, "warn")];
+        assert_eq!(miss(&warned, Some(shape), true, now), None);
+        assert_eq!(miss(&recent, Some(shape), true, now + 3600), None);
+        // Calls in between do not hide it; one miss logged already ends it.
+        let between = [
+            recent[0].clone(),
+            entry(now - 30, "pre-tool-use", "git status", "warn"),
+        ];
+        assert_eq!(
+            miss(&between, Some(shape), false, now),
+            Some(missed("rerun"))
+        );
+        let counted = [
+            recent[0].clone(),
+            Entry {
+                ts: now - 30,
+                event: "miss".into(),
+                ..Entry::default()
+            },
+        ];
+        assert_eq!(miss(&counted, Some(shape), true, now), None);
     }
 
     #[test]

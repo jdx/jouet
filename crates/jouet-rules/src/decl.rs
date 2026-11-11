@@ -392,8 +392,15 @@ pub(crate) struct CaseTable {
     pub harness: Option<String>,
     /// For a post-tool-use rule; `0` if omitted.
     pub exit_code: Option<i32>,
-    /// For a `fires` example: `deny` or `warn`, when it matters which.
+    /// For a `fires` example: `deny`, `warn` or `rewrite`, when it matters
+    /// which.
     pub action: Option<ExpectAction>,
+    /// Whether the rule may rewrite the call, as `call.rewrite` says;
+    /// `false` if omitted.
+    pub rewrite: Option<bool>,
+    /// For a `fires` example: the command the rule must run in the call's
+    /// place. It implies `action = "rewrite"` and `rewrite = true`.
+    pub rewritten: Option<String>,
     /// For a `fires` example of a post-tool-use rule: the kind it must
     /// record.
     pub kind: Option<Kind>,
@@ -529,6 +536,7 @@ pub(crate) struct FnoxCase {
 pub(crate) enum ExpectAction {
     Deny,
     Warn,
+    Rewrite,
 }
 
 impl<'de> Deserialize<'de> for CaseDecl {
@@ -537,7 +545,7 @@ impl<'de> Deserialize<'de> for CaseDecl {
         impl<'de> Visitor<'de> for V {
             type Value = CaseDecl;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `kind`, `scope`, `input`, `seen`, `read_lines`, `code_lines`, `tracked_files`, `fnox`, `git`, `session`, `claims`, `stack`, `secrets` or `files`")
+                f.write_str("a shell command, or a table with `command`, `tool`, `path`, `harness`, `exit_code`, `action`, `rewrite`, `rewritten`, `kind`, `scope`, `input`, `seen`, `read_lines`, `code_lines`, `tracked_files`, `fnox`, `git`, `session`, `claims`, `stack`, `secrets` or `files`")
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<CaseDecl, E> {
                 Ok(CaseDecl::Command(v.to_string()))

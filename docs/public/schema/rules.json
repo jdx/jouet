@@ -420,8 +420,16 @@
           "format": "int32"
         },
         "action": {
-          "description": "For a `fires` example: `deny` or `warn`, when it matters which.",
+          "description": "For a `fires` example: `deny`, `warn` or `rewrite`, when it matters\nwhich.",
           "$ref": "#/$defs/ExpectAction"
+        },
+        "rewrite": {
+          "description": "Whether the rule may rewrite the call, as `call.rewrite` says;\n`false` if omitted.",
+          "type": "boolean"
+        },
+        "rewritten": {
+          "description": "For a `fires` example: the command the rule must run in the call's\nplace. It implies `action = \"rewrite\"` and `rewrite = true`.",
+          "type": "string"
         },
         "kind": {
           "description": "For a `fires` example of a post-tool-use rule: the kind it must\nrecord.",
@@ -515,7 +523,8 @@
       "type": "string",
       "enum": [
         "deny",
-        "warn"
+        "warn",
+        "rewrite"
       ]
     },
     "Kind": {

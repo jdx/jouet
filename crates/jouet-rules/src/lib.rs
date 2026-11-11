@@ -455,6 +455,10 @@ pub struct Call {
     /// The project's fnox config, when the call runs in a project that uses
     /// fnox; worked out by the caller.
     pub fnox: Option<Fnox>,
+    /// Whether a built-in deny-mode rule may rewrite the call's command
+    /// rather than deny it: the caller says, for a harness that runs the
+    /// rewritten call through the user's own permission check.
+    pub rewrite: bool,
 }
 
 /// What a project's fnox config defines, for the matchers that ask: names
@@ -510,6 +514,7 @@ impl Call {
             code_lines: None,
             tracked_files: None,
             fnox: None,
+            rewrite: false,
         }
     }
 }
@@ -520,6 +525,8 @@ pub enum Action {
     Deny,
     Warn,
     Allow,
+    /// Run another command in the call's place: [`Decision::rewrite`].
+    Rewrite,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -532,6 +539,9 @@ pub struct Decision {
     /// The command a matcher rule suggests running instead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suggest: Option<String>,
+    /// For a rewrite: the command that runs in the call's place.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rewrite: Option<String>,
     /// The revision of the rule that decided (see [`Rule::revision`]).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub revision: String,
@@ -629,6 +639,10 @@ pub struct Outcome {
     /// The first rule that denied the call; later rules do not run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deny: Option<Decision>,
+    /// The first rule that rewrote the call's command. A later rule's
+    /// denial still wins over it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rewrite: Option<Decision>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<Decision>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -1423,6 +1437,9 @@ impl Engine {
                             break;
                         }
                         Some(d) if d.action == Action::Warn => outcome.warnings.push(d),
+                        Some(d) if d.action == Action::Rewrite && outcome.rewrite.is_none() => {
+                            outcome.rewrite = Some(d);
+                        }
                         _ => {}
                     }
                 }
@@ -1471,7 +1488,7 @@ impl Engine {
                 }
                 suggest.clone_from(suggested);
                 (
-                    Some(Ok(("deny".to_string(), Some(message.clone())))),
+                    Some(Ok(("deny".to_string(), Some(message.clone()), None))),
                     Vec::new(),
                 )
             }
@@ -1489,13 +1506,13 @@ impl Engine {
                 }
                 let table = self.script(&rule.name, code, table)?;
                 let matched = matcher::matched(matchers, call, commands);
-                self.run_luau(rule, table, call, &matched)?
+                self.run_luau(rule, table, call, &matched, enforce)?
             }
-            Body::Luau(table) => self.run_luau(rule, table, call, &[])?,
+            Body::Luau(table) => self.run_luau(rule, table, call, &[], enforce)?,
         };
         let decision = match returned {
             None => None,
-            Some(Ok((action, message))) => {
+            Some(Ok((action, message, command))) => {
                 let action = match action.as_str() {
                     // After a tool, there is nothing left to deny.
                     "deny" if rule.event == Event::PostToolUse => Action::Warn,
@@ -1511,19 +1528,39 @@ impl Engine {
                     "deny" => Action::Deny,
                     "warn" => Action::Warn,
                     "allow" => Action::Allow,
+                    "rewrite" if !may_rewrite(rule, call, enforce) => {
+                        return Err(
+                            "check returned a rewrite for a call it may not rewrite (`call.rewrite` is false)"
+                                .into(),
+                        );
+                    }
+                    "rewrite" => Action::Rewrite,
                     other => return Err(format!("check returned an unknown action `{other}`")),
+                };
+                let rewrite = match (action, command) {
+                    (Action::Rewrite, Some(command))
+                        if !command.trim().is_empty()
+                            && Some(command.as_str()) != call.command.as_deref() =>
+                    {
+                        Some(command)
+                    }
+                    (Action::Rewrite, _) => {
+                        return Err("check returned a rewrite without a new command to run".into());
+                    }
+                    _ => None,
                 };
                 Some(Decision {
                     rule: rule.name.clone(),
                     action,
                     message,
                     suggest,
+                    rewrite,
                     revision: rule.revision.clone(),
                 })
             }
             Some(Err(type_name)) => {
                 return Err(format!(
-                    "check must return jouet.deny(...), jouet.warn(...), jouet.allow() or nil, not {type_name}"
+                    "check must return jouet.deny(...), jouet.warn(...), jouet.rewrite(...), jouet.allow() or nil, not {type_name}"
                 ));
             }
         };
@@ -1567,13 +1604,15 @@ impl Engine {
         table: &Table,
         call: &Call,
         matched: &[bool],
+        enforce: bool,
     ) -> Result<(LuauVerdict, Vec<Record>), String> {
         let vm = self.vm()?;
         vm.shared.current.replace(rule.name.clone());
         // Raw reads throughout: a rule's tables can carry metamethods, which
         // must never run outside the budget.
         let check: mlua::Function = table.raw_get("check").map_err(|e| e.to_string())?;
-        let call_table = call_table(&vm.lua, call, matched).map_err(|e| e.to_string())?;
+        let call_table = call_table(&vm.lua, call, matched, may_rewrite(rule, call, enforce))
+            .map_err(|e| e.to_string())?;
         vm.shared.records.borrow_mut().clear();
         let returned = vm.guarded(|| {
             Ok(match check.call::<Value>(call_table)? {
@@ -1581,6 +1620,7 @@ impl Engine {
                 Value::Table(t) => Some(Ok((
                     t.raw_get::<Option<String>>("action")?.unwrap_or_default(),
                     t.raw_get::<Option<String>>("message")?,
+                    t.raw_get::<Option<String>>("command")?,
                 ))),
                 other => Some(Err(other.type_name())),
             })
@@ -1599,9 +1639,20 @@ impl Engine {
     }
 }
 
-/// What a Luau `check` returned: nothing, an action and message, or the
-/// type of something else.
-type LuauVerdict = Option<Result<(String, Option<String>), &'static str>>;
+/// What a Luau `check` returned: nothing, an action, message and the
+/// command a rewrite runs, or the type of something else.
+type LuauVerdict = Option<Result<(String, Option<String>, Option<String>), &'static str>>;
+
+/// Whether `rule` may rewrite `call`: the caller allows it, and the rule is
+/// a built-in one that denies before a tool runs. A warn-mode rule only
+/// warns, so it never rewrites. Examples run without the mode, as for a
+/// denial.
+fn may_rewrite(rule: &Rule, call: &Call, enforce: bool) -> bool {
+    call.rewrite
+        && rule.scope == Scope::Builtin
+        && rule.event == Event::PreToolUse
+        && (!enforce || rule.mode == Mode::Deny)
+}
 
 /// A matcher rule's message, with the command it suggests in front.
 fn compose(message: &str, suggest: Option<&str>) -> String {
@@ -1712,6 +1763,7 @@ pub fn summarize(decision: Option<&Decision>, records: &[Record]) -> String {
     match decision.map(|d| d.action) {
         Some(Action::Deny) => "deny".into(),
         Some(Action::Warn) => "warn".into(),
+        Some(Action::Rewrite) => "rewrite".into(),
         _ => "allow".into(),
     }
 }
@@ -1908,8 +1960,9 @@ fn install_module(
 
 /// `matched` says, in the order of `call_commands`, which commands the
 /// rule's matchers matched.
-fn call_table(lua: &Lua, call: &Call, matched: &[bool]) -> mlua::Result<Table> {
+fn call_table(lua: &Lua, call: &Call, matched: &[bool], rewrite: bool) -> mlua::Result<Table> {
     let t = lua.create_table()?;
+    t.set("rewrite", rewrite)?;
     t.set("event", call.event.unwrap_or(Event::PreToolUse).name())?;
     t.set("harness", call.harness.as_str())?;
     t.set("tool", call.tool.as_str())?;

@@ -15,7 +15,7 @@
 //! broken and does not run.
 
 use crate::decl::{CaseDecl, CaseTable, ExamplesDecl, ExpectAction};
-use crate::{Action, Body, Call, Engine, Event, Kind, Record, Rule, State};
+use crate::{Action, Body, Call, Decision, Engine, Event, Kind, Record, Rule, State};
 use mlua::{Table, Value};
 use serde::Serialize;
 
@@ -54,6 +54,10 @@ impl Expect {
                 action: Some(Action::Warn),
                 ..
             } => "fires warn".into(),
+            Self::Fires {
+                action: Some(Action::Rewrite),
+                ..
+            } => "fires rewrite".into(),
             Self::Fires {
                 kind: Some(kind), ..
             } => format!("fires record {}", kind.name()),
@@ -117,6 +121,10 @@ pub struct Case {
     pub files: Option<std::collections::BTreeMap<String, String>>,
     /// What `jouet.session.fired()` answers, for any rule and session.
     pub fired: Option<u32>,
+    /// Whether the rule may rewrite the call.
+    pub rewrite: bool,
+    /// For a `fires` example: the command the rule must run instead.
+    pub rewritten: Option<String>,
 }
 
 /// One example's result, as `jouet rule test` reports it.
@@ -305,6 +313,8 @@ fn case(item: Value, fires: bool) -> Result<Case, String> {
         node_scripts: None,
         files: None,
         fired: None,
+        rewrite: false,
+        rewritten: None,
         expect: if fires {
             Expect::Fires {
                 action: None,
@@ -421,16 +431,26 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
     if command.is_none() && tool == "Bash" {
         return Err("a shell example needs a `command`".into());
     }
-    if !fires && (t.action.is_some() || t.kind.is_some()) {
-        return Err("a `quiet` example takes no `action` or `kind`".into());
+    if !fires && (t.action.is_some() || t.kind.is_some() || t.rewritten.is_some()) {
+        return Err("a `quiet` example takes no `action`, `kind` or `rewritten`".into());
+    }
+    if t.rewritten.is_some() && t.action.is_some_and(|a| a != ExpectAction::Rewrite) {
+        return Err("`rewritten` is for a rewrite: it takes no other `action`".into());
+    }
+    if t.rewritten.is_some() && t.rewrite == Some(false) {
+        return Err("`rewritten` needs a call the rule may rewrite, not `rewrite = false`".into());
     }
     if t.scope.is_some() && t.kind.is_none() {
         return Err("`scope` needs a `kind`: it is the scope of the record".into());
     }
-    let action = t.action.map(|a| match a {
-        ExpectAction::Deny => Action::Deny,
-        ExpectAction::Warn => Action::Warn,
-    });
+    let action = t
+        .action
+        .map(|a| match a {
+            ExpectAction::Deny => Action::Deny,
+            ExpectAction::Warn => Action::Warn,
+            ExpectAction::Rewrite => Action::Rewrite,
+        })
+        .or(t.rewritten.as_ref().map(|_| Action::Rewrite));
     Ok(Case {
         command,
         tool,
@@ -501,6 +521,8 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
         files: t.files.clone(),
         node_scripts: t.node_scripts.clone(),
         fired: t.fired,
+        rewrite: t.rewrite.unwrap_or(t.rewritten.is_some()),
+        rewritten: t.rewritten.clone(),
         expect: if fires {
             Expect::Fires {
                 action,
@@ -513,13 +535,18 @@ fn case_from_decl(item: &CaseDecl, fires: bool) -> Result<Case, String> {
 }
 
 /// Whether what the rule did is what the example expects.
-fn met(case: &Case, action: Option<Action>, records: &[Record]) -> bool {
-    let spoke = matches!(action, Some(Action::Deny | Action::Warn));
+fn met(case: &Case, decision: Option<&Decision>, records: &[Record]) -> bool {
+    let action = decision.map(|d| d.action);
+    let spoke = matches!(action, Some(Action::Deny | Action::Warn | Action::Rewrite));
     match case.expect {
         Expect::Quiet => !spoke && records.is_empty(),
         Expect::Fires { action: want, kind } => {
             (spoke || !records.is_empty())
                 && want.is_none_or(|want| action == Some(want))
+                && case
+                    .rewritten
+                    .as_ref()
+                    .is_none_or(|want| decision.and_then(|d| d.rewrite.as_ref()) == Some(want))
                 && kind.is_none_or(|kind| {
                     records.iter().any(|r| {
                         r.kind == kind && case.scope.as_ref().is_none_or(|s| *s == r.scope())
@@ -578,6 +605,7 @@ impl Engine {
                 code_lines: case.code_lines,
                 tracked_files: case.tracked_files,
                 fnox: case.fnox.clone(),
+                rewrite: case.rewrite,
             };
             // Each example is a call of its own: probes are asked afresh.
             self.new_call();
@@ -613,9 +641,15 @@ impl Engine {
             let commands = crate::call_commands(&call);
             let (ok, actual, message) = match self.run_check(rule, &call, &commands, false) {
                 Ok((decision, records)) => {
-                    let action = decision.as_ref().map(|d| d.action);
+                    let ok = met(case, decision.as_ref(), &records);
                     let actual = match crate::summarize(decision.as_ref(), &records) {
                         word if word == "allow" => "quiet".to_string(),
+                        // An example that names the new command shows the
+                        // one the rule ran.
+                        word if word == "rewrite" && case.rewritten.is_some() => {
+                            let new = decision.as_ref().and_then(|d| d.rewrite.as_deref());
+                            format!("rewrite to `{}`", new.unwrap_or_default())
+                        }
                         // An example that names a scope shows the one recorded.
                         word if case.scope.is_some() && !records.is_empty() => {
                             format!("{word} {}", records[0].scope())
@@ -625,7 +659,7 @@ impl Engine {
                     let message = decision
                         .filter(|d| d.action != Action::Allow)
                         .and_then(|d| d.message);
-                    (met(case, action, &records), actual, message)
+                    (ok, actual, message)
                 }
                 Err(e) => (false, format!("error: {e}"), None),
             };
@@ -641,9 +675,10 @@ impl Engine {
                 tracked_files: case.tracked_files,
                 fnox: case.fnox.is_some(),
                 tree: case.git_dirty.map(|d| if d { "dirty" } else { "clean" }),
-                expected: match &case.scope {
-                    Some(scope) => format!("{} {scope}", case.expect.text()),
-                    None => case.expect.text(),
+                expected: match (&case.scope, &case.rewritten) {
+                    (Some(scope), _) => format!("{} {scope}", case.expect.text()),
+                    (None, Some(new)) => format!("rewrite to `{new}`"),
+                    (None, None) => case.expect.text(),
                 },
                 actual,
                 message,
