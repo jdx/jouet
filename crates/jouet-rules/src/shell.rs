@@ -44,6 +44,16 @@ pub struct Command {
     /// It starts a pipeline negated with `!`, whose status is the opposite
     /// of its last command's.
     pub negated: bool,
+    /// Where the command is in the script, as byte offsets: from its first
+    /// assignment, word or redirection after any reserved word (`if`, `do`,
+    /// `!`) to the end of its last, so in `if RUST_LOG=1 cargo test 2>&1;
+    /// then` it is `RUST_LOG=1 cargo test 2>&1`. Here-document bodies are
+    /// not part of it. None for a command whose text is not in the script
+    /// at hand, such as one built by hand or one from a `sh -c` script.
+    pub span: Option<std::ops::Range<usize>>,
+    /// The byte offset of its first word after the assignments: where its
+    /// program, or its first wrapper (`timeout`, `env`), starts.
+    pub words_at: Option<usize>,
 }
 
 /// A parsed script: its top-level commands, and the commands inside command
@@ -189,10 +199,24 @@ pub fn parse(script: &str) -> Script {
         nested: Vec::new(),
         assigned: Vec::new(),
     };
-    let commands = parser.list(false);
+    let mut commands = parser.list(false);
+    let mut nested = parser.nested;
+    // The parser counts characters; a span is in bytes, to slice the script.
+    let mut bytes = Vec::with_capacity(parser.chars.len() + 1);
+    let mut at = 0;
+    for c in &parser.chars {
+        bytes.push(at);
+        at += c.len_utf8();
+    }
+    bytes.push(at);
+    let byte = |i: usize| bytes[i.min(bytes.len() - 1)];
+    for command in commands.iter_mut().chain(nested.iter_mut()) {
+        command.span = command.span.take().map(|r| byte(r.start)..byte(r.end));
+        command.words_at = command.words_at.map(byte);
+    }
     Script {
         commands,
-        nested: parser.nested,
+        nested,
         assigned: parser.assigned,
     }
 }
@@ -364,11 +388,24 @@ struct Builder {
     chained: bool,
     /// The assignments that stood alone, in order.
     assigned: Vec<String>,
+    /// Where the word being read started, in characters.
+    word_start: Option<usize>,
+    /// Where it ends so far.
+    word_end: usize,
+    /// Where each of `current.words` starts.
+    starts: Vec<usize>,
+    /// Where each of the current command's redirections starts.
+    redirects: Vec<usize>,
+    /// Where the current command's last word or redirection ends, once it
+    /// has one.
+    last_end: Option<usize>,
 }
 
 impl Builder {
     fn end_word(&mut self) {
         let Some(word) = self.word.take() else { return };
+        let start = self.word_start.take().unwrap_or(self.word_end);
+        self.last_end = Some(self.word_end);
         if let Some(strip_tabs) = self.heredoc.take() {
             self.pending.push(Pending {
                 delimiter: word,
@@ -382,21 +419,58 @@ impl Builder {
             }
         } else {
             self.current.words.push(word);
+            self.starts.push(start);
         }
+    }
+
+    /// A redirection operator from `at` to `end`.
+    fn redirection(&mut self, at: usize, end: usize) {
+        self.redirects.push(at);
+        self.last_end = Some(end);
+    }
+
+    /// Forgets the command being read, its positions too.
+    fn reset_current(&mut self) {
+        self.word = None;
+        self.word_start = None;
+        self.current = Command::default();
+        self.starts.clear();
+        self.redirects.clear();
+        self.last_end = None;
     }
 
     fn end_command(&mut self, op: Option<Op>) {
         self.end_word();
         let mut command = std::mem::take(&mut self.current);
+        let mut starts = std::mem::take(&mut self.starts);
+        let redirects = std::mem::take(&mut self.redirects);
+        let last_end = self.last_end.take();
         // `function name { ...`: neither word is a command.
         if command.words.first().is_some_and(|w| w == "function") {
-            command.words.drain(..2.min(command.words.len()));
+            let n = 2.min(command.words.len());
+            command.words.drain(..n);
+            starts.drain(..n);
         }
         let keep = command
             .words
             .iter()
             .position(|w| !RESERVED.contains(&w.as_str()) && !is_assignment(w))
             .unwrap_or(command.words.len());
+        // The span starts past the reserved words: at the first assignment
+        // or word, or at a redirection before it.
+        let first = command
+            .words
+            .iter()
+            .position(|w| !RESERVED.contains(&w.as_str()))
+            .unwrap_or(command.words.len());
+        let start = starts
+            .get(first)
+            .copied()
+            .into_iter()
+            .chain(redirects)
+            .min();
+        command.span = start.zip(last_end).map(|(s, e)| s..e);
+        command.words_at = starts.get(keep).copied();
         command.negated = command.words[..keep].iter().any(|w| w == "!");
         command.env = command
             .words
@@ -480,8 +554,15 @@ impl Parser {
             pending: Vec::new(),
             chained: false,
             assigned: Vec::new(),
+            word_start: None,
+            word_end: 0,
+            starts: Vec::new(),
+            redirects: Vec::new(),
+            last_end: None,
         };
         while let Some(c) = self.peek() {
+            let at = self.pos;
+            let had_word = b.word.is_some();
             self.pos += 1;
             match c {
                 ' ' | '\t' | '\r' => b.end_word(),
@@ -535,8 +616,7 @@ impl Parser {
                 }
                 '(' if self.peek() == Some(')') && b.names_function() => {
                     self.pos += 1;
-                    b.word = None;
-                    b.current = Command::default();
+                    b.reset_current();
                 }
                 '(' | ')' => {
                     b.end_command(Some(Op::Seq));
@@ -555,6 +635,7 @@ impl Parser {
                     Some('>') => {
                         b.end_word();
                         self.redirect(&mut b);
+                        b.redirection(at, self.pos);
                         b.stdout_target = true;
                     }
                     _ => b.end_command(Some(Op::Background)),
@@ -579,9 +660,16 @@ impl Parser {
                     let fd = b
                         .word
                         .take_if(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit()));
+                    // `2>` starts at its descriptor.
+                    let from = if fd.is_some() {
+                        b.word_start.take().unwrap_or(at)
+                    } else {
+                        at
+                    };
                     b.end_word();
                     self.pos -= 1;
                     let op = self.redirect(&mut b);
+                    b.redirection(from, self.pos);
                     let stdout = fd.as_deref().is_none_or(|fd| fd == "1");
                     if stdout && op.starts_with('>') && !op.ends_with('&') {
                         b.stdout_target = true;
@@ -596,6 +684,12 @@ impl Parser {
                     b.word().push_str(&text);
                 }
                 c => b.word().push(c),
+            }
+            if b.word.is_some() {
+                if !had_word {
+                    b.word_start = Some(at);
+                }
+                b.word_end = self.pos;
             }
         }
         b.end_word();
@@ -875,6 +969,98 @@ mod tests {
                 Some(Op::Background),
                 Some(Op::Seq),
                 None
+            ]
+        );
+    }
+
+    /// Each command's text by its span, and from where its words start.
+    fn spans(script: &str, nested: bool) -> Vec<(&str, &str)> {
+        let parsed = parse(script);
+        let commands = if nested {
+            parsed.nested
+        } else {
+            parsed.commands
+        };
+        commands
+            .iter()
+            .map(|c| {
+                let span = c.span.clone().expect("a parsed command has a span");
+                let words = c.words_at.expect("and its words a start");
+                (&script[span.clone()], &script[words..span.end])
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_command_knows_where_it_is_in_the_script() {
+        assert_eq!(
+            spans(
+                "cd 'a b' && RUST_LOG=1 cargo test -- --nocapture 2>&1 | tail -5; echo \"d\"",
+                false
+            ),
+            [
+                ("cd 'a b'", "cd 'a b'"),
+                (
+                    "RUST_LOG=1 cargo test -- --nocapture 2>&1",
+                    "cargo test -- --nocapture 2>&1"
+                ),
+                ("tail -5", "tail -5"),
+                ("echo \"d\"", "echo \"d\""),
+            ]
+        );
+        // Reserved words stay outside, and offsets are bytes.
+        assert_eq!(
+            spans(
+                "if ! cargo test |& grep -q é; then make >out 2>&1; fi",
+                false
+            ),
+            [
+                ("cargo test", "cargo test"),
+                ("grep -q é", "grep -q é"),
+                ("make >out 2>&1", "make >out 2>&1"),
+            ]
+        );
+        // Every offset after a multibyte character is in bytes too.
+        assert_eq!(
+            spans("cd é && A=1 cargo test 2>&1 | tail -3", false),
+            [
+                ("cd é", "cd é"),
+                ("A=1 cargo test 2>&1", "cargo test 2>&1"),
+                ("tail -3", "tail -3"),
+            ]
+        );
+        // A redirection can come first; a continued line is one command.
+        assert_eq!(
+            spans("2>/dev/null A=1 cargo build \\\n  --all | tail", false),
+            [
+                (
+                    "2>/dev/null A=1 cargo build \\\n  --all",
+                    "cargo build \\\n  --all"
+                ),
+                ("tail", "tail"),
+            ]
+        );
+        // A here-document's body is not part of its command.
+        assert_eq!(
+            spans(
+                "cat <<'EOF' | tail\nbody\nEOF\nf() { cargo test | head; }\nfunction g { make; }\nfunction h() { &>log go test; }",
+                false
+            ),
+            [
+                ("cat <<'EOF'", "cat <<'EOF'"),
+                ("tail", "tail"),
+                ("cargo test", "cargo test"),
+                ("head", "head"),
+                ("make", "make"),
+                ("&>log go test", "go test"),
+            ]
+        );
+        // A substituted command's span is in the same script.
+        assert_eq!(
+            spans("echo \"$(cargo test 2>&1 | tail -1)\" `x`", true),
+            [
+                ("cargo test 2>&1", "cargo test 2>&1"),
+                ("tail -1", "tail -1")
             ]
         );
     }

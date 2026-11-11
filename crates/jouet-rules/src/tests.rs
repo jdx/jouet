@@ -215,6 +215,41 @@ fn a_user_rule_can_warn_and_use_the_whole_api() {
 }
 
 #[test]
+fn a_rule_reads_each_commands_text_by_its_span() {
+    let rule = user(
+        "spans",
+        r#"
+        return {
+            check = function(call)
+                local out = {}
+                for _, c in call.commands do
+                    if c.span then
+                        local text = string.sub(call.command, c.span.first, c.span.last)
+                        local words = string.sub(call.command, c.words_at, c.span.last)
+                        table.insert(out, text .. "/" .. words)
+                    else
+                        table.insert(out, "-")
+                    end
+                end
+                return jouet.warn(table.concat(out, ","))
+            end,
+        }
+        "#,
+    );
+    let engine = engine(vec![rule]);
+    let outcome = engine.evaluate(&bash(
+        "cd é && A=1 cargo test 2>&1 | tail -3; sh -c 'make | head'",
+    ));
+    // The `sh -c` script's commands have no span in the call's command.
+    assert_eq!(
+        outcome.warnings[0].message.as_deref(),
+        Some(
+            "cd é/cd é,A=1 cargo test 2>&1/cargo test 2>&1,tail -3/tail -3,sh -c 'make | head'/sh -c 'make | head',-,-"
+        )
+    );
+}
+
+#[test]
 fn broken_rules_are_kept_and_explained() {
     let engine = engine(vec![
         user("syntax", "return {"),
