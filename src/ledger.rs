@@ -65,7 +65,8 @@ pub(crate) struct Entry {
     /// `slow-hook` (a hook over its time budget; `tool` names its event),
     /// `fix` (hk's fixers run on edited files; `tool` names the edit tool),
     /// `edit` (the harness edited a file; `tool` names the edit tool),
-    /// or `deprecated` (a command used something on its way out).
+    /// `prompt` (a turn started; `prompt` says by what), or `deprecated`
+    /// (a command used something on its way out).
     pub event: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
@@ -101,6 +102,10 @@ pub(crate) struct Entry {
     /// `crate::experiment`). Empty with `[experiment] control_share = 0`.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub arm: std::collections::BTreeMap<String, String>,
+    /// For a `prompt`: what started the turn, by its shape (see
+    /// `crate::prompt`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<crate::prompt::Shape>,
 }
 
 impl Entry {
@@ -434,7 +439,7 @@ fn compound_shape(parts: &[jouet_audit::Part]) -> String {
 struct ArgState<'a> {
     program: &'a str,
     /// The first subcommand kept, which decides the second.
-    first: Option<&'static str>,
+    first: Option<String>,
     /// Subcommand words kept so far.
     subcommands: usize,
     /// Positionals have started, so no more words are kept.
@@ -493,22 +498,31 @@ fn shape_arg(arg: &str, state: &mut ArgState<'_>) -> String {
     if after_flag {
         return "<arg>".into();
     }
-    let known = match (state.done, state.first) {
+    let known = match (state.done, state.first.as_deref()) {
         (true, _) => None,
-        (false, None) => subcommand(FIRST, state.program, arg),
+        // jouet's own commands come from its declaration, so a new one is
+        // never left out of the shape.
+        (false, first) if state.program == "jouet" => {
+            let path: Vec<&str> = first.into_iter().chain([arg]).collect();
+            crate::spec::command_name(&path)
+        }
+        (false, None) => subcommand(FIRST, state.program, arg).map(String::from),
         (false, Some(first)) => SECOND
             .iter()
             .find(|(p, f, _)| programs(p).contains(&state.program) && *f == first)
-            .and_then(|(_, _, words)| words.iter().copied().find(|w| *w == arg)),
+            .and_then(|(_, _, words)| words.iter().copied().find(|w| *w == arg))
+            .map(String::from),
     };
     match known {
         Some(word) => {
             state.subcommands += 1;
-            state.first = state.first.or(Some(word));
+            if state.first.is_none() {
+                state.first = Some(word.clone());
+            }
             if state.subcommands == 2 {
                 state.done = true;
             }
-            redact(word)
+            redact(&word)
         }
         None => {
             state.done = true;
@@ -697,22 +711,6 @@ const FIRST: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "jouet",
-        &[
-            "agent-help",
-            "audit",
-            "edit",
-            "hook",
-            "pr",
-            "rule",
-            "search",
-            "setup",
-            "skill",
-            "stats",
-            "wait",
-        ],
-    ),
-    (
         "hk",
         &[
             "check", "config", "fix", "init", "install", "run", "validate",
@@ -862,20 +860,6 @@ const SECOND: &[(&str, &str, &[&str])] = &[
         "rollout",
         &["history", "restart", "status", "undo"],
     ),
-    ("jouet", "edit", &["hash", "replace"]),
-    (
-        "jouet",
-        "wait",
-        &[
-            "ci", "cmd", "file", "http", "log", "pid", "port", "pr", "run",
-        ],
-    ),
-    ("jouet", "pr", &["land", "next", "status", "threads"]),
-    (
-        "jouet",
-        "rule",
-        &["list", "test", "trust", "types", "untrust"],
-    ),
     (
         "uv|pip|pip3",
         "pip",
@@ -999,6 +983,18 @@ mod tests {
             ("jouet rule test git-stash", "jouet rule test <arg>"),
             ("jouet audit --since 7d", "jouet audit --since <arg>"),
             ("jouet stats --session s1", "jouet stats --session <arg>"),
+            // Every jouet command, from its declaration: none is left out.
+            (
+                "jouet test --cmd -- cargo test -q",
+                "jouet test --cmd -- <arg> <arg> -q",
+            ),
+            ("jouet ci explain 123", "jouet ci explain <arg>"),
+            (
+                "jouet commit src/a.rs --message m",
+                "jouet commit <arg> --message <arg>",
+            ),
+            ("jouet read src/a.rs", "jouet read <arg>"),
+            ("jouet secret-word explain", "jouet <arg> <arg>"),
             (
                 "curl -H 'Authorization: token ghp_abcdefghijklmnopqrstuvwxyz0123' https://x",
                 "curl -H <arg> <arg>",

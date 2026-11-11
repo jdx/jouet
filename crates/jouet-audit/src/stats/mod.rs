@@ -16,7 +16,8 @@ mod summary;
 
 use arms::quantile;
 pub use arms::{
-    ArmComparison, ArmSpread, Difference, SessionMetrics, Spread, compare_arms, session_arms,
+    ArmComparison, ArmSpread, Difference, NEEDED_FOR, Needed, SessionMetrics, Spread, compare_arms,
+    session_arms,
 };
 pub use costs::{AfterSetup, Cost, CostKind, costs, net};
 /// When a check or edit was issued, in milliseconds: the end of the ledger
@@ -198,6 +199,7 @@ const ANSWERS: &[&str] = &[
     "jouet pr status",
     "jouet pr next",
     "jouet http",
+    "jouet diag",
 ];
 
 /// Whether a command line that ran `commands` and exited with `code` only
@@ -230,7 +232,8 @@ pub struct CommandRuns {
     /// this jouet on.
     #[serde(skip_serializing_if = "is_zero")]
     pub own_runs: u64,
-    /// Of those, the ones that failed: its own failures.
+    /// Of those, the ones that failed: its own failures, a check's answer
+    /// left out (see [`is_answer`]).
     #[serde(skip_serializing_if = "is_zero")]
     pub own_failed: u64,
     #[serde(skip_serializing_if = "is_zero")]
@@ -504,7 +507,9 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
             for command in &ran {
                 let c = command_runs(&mut commands, &e.harness, command);
                 c.own_runs += 1;
-                c.own_failed += u64::from(code != 0);
+                // Exit 1 from `jouet test` is the tests failing, not jouet.
+                c.own_failed +=
+                    u64::from(code != 0 && !is_answer(std::slice::from_ref(command), code));
             }
             continue;
         }
@@ -1174,7 +1179,8 @@ pub fn per_run(baselines: &[Baseline]) -> Vec<Estimate> {
 }
 
 /// `987` or `12,345`.
-pub(crate) fn count_text(n: u64) -> String {
+/// A count with thousands separators.
+pub fn count_text(n: u64) -> String {
     let digits = n.to_string();
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {
