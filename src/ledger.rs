@@ -65,7 +65,8 @@ pub(crate) struct Entry {
     /// `slow-hook` (a hook over its time budget; `tool` names its event),
     /// `fix` (hk's fixers run on edited files; `tool` names the edit tool),
     /// `edit` (the harness edited a file; `tool` names the edit tool),
-    /// or `deprecated` (a command used something on its way out).
+    /// `prompt` (a turn started; `prompt` says by what), or `deprecated`
+    /// (a command used something on its way out).
     pub event: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
@@ -101,6 +102,10 @@ pub(crate) struct Entry {
     /// `crate::experiment`). Empty with `[experiment] control_share = 0`.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub arm: std::collections::BTreeMap<String, String>,
+    /// For a `prompt`: what started the turn, by its shape (see
+    /// `crate::prompt`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<crate::prompt::Shape>,
 }
 
 impl Entry {

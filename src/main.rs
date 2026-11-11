@@ -25,6 +25,7 @@ mod ledger;
 mod mise;
 mod plugins;
 mod project;
+mod prompt;
 mod reads;
 mod redact;
 mod rules;
