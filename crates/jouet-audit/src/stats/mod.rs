@@ -38,7 +38,9 @@ fn issued_ms<'a>(
             .saturating_mul(1000)
             .saturating_sub(e.duration_ms.unwrap_or(0))
     };
-    if closer.duration_ms.is_none() && closer.event == "jouet-run" {
+    // `jouet test` writes two lines without a duration, its `test-run`
+    // record and its `jouet-run`; the shell call that ran it has one.
+    if closer.duration_ms.is_none() && matches!(closer.event.as_str(), "jouet-run" | "test-run") {
         let within = closer.ts.saturating_add(2);
         let calls: Vec<&LedgerEntry> = after
             .take_while(|e| e.ts <= within)

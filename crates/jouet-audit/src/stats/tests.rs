@@ -1110,6 +1110,24 @@ fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
             },
         ),
         edit(115, "f"),
+        // The record a jouet test writes is dated by its shell call too.
+        decided(130, "g", "deny", Some("r1")),
+        LedgerEntry {
+            ts: 132,
+            harness: "jouet".into(),
+            session: Some("g".into()),
+            event: "test-run".into(),
+            duration_ms: None,
+            ..check(132, "g", 0)
+        },
+        at(
+            132,
+            LedgerEntry {
+                session: Some("g".into()),
+                duration_ms: Some(2_000),
+                ..post("jouet test --cmd -- cargo test", 0)
+            },
+        ),
     ];
     let filter = StatsFilter {
         revisions: Some(BTreeMap::from([(
@@ -1136,6 +1154,7 @@ fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
             ("deny", "d", 70, Some(73_000)),
             ("deny", "e", 90, Some(91_000)),
             ("deny", "f", 110, Some(116_000)),
+            ("deny", "g", 130, Some(131_000)),
         ]
     );
 }
