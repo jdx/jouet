@@ -652,19 +652,23 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 }
 
 # Writes N Claude Code sessions under $HOME/.claude/projects that carried the
-# Bash and Workflow tools, the visualize MCP server and the docx skill, and
-# called only Bash, each reaching CONTEXT tokens.
+# Bash and Workflow tools, the linear MCP server the person configured, the
+# app's visualize server, a plugin's docx skill, the bundled loop skill and
+# the person's own update-aube skill, and called only Bash, each reaching
+# CONTEXT tokens. Only linear and the docx skill are the person's to deny.
 claude_sessions() {
 	local n=$1 context=${2:-50000} dir="$HOME/.claude/projects/-src-app" i
 	mkdir -p "$dir"
+	jq -n '{mcpServers: {linear: {command: "linear-mcp"}}}' >"$HOME/.claude.json"
 	for ((i = 0; i < n; i++)); do
 		{
 			jq -nc '{type: "attachment", isSidechain: false, attachment: {type: "prompt_snapshot", tools: [
 				{name: "Bash", description: "Runs a command", input_schema: {}},
 				{name: "Workflow", description: ("x" * 4600), input_schema: {}},
+				{name: "mcp__linear__list_issues", description: ("z" * 2300), input_schema: {}},
 				{name: "mcp__visualize__show_widget", description: ("y" * 2300), input_schema: {}}]}}'
 			jq -nc '{type: "attachment", isSidechain: false, attachment: {type: "skill_listing",
-				content: "- docx: Word documents\n- loop: run a prompt on an interval"}}'
+				content: "- anthropic-skills:docx: Word documents\n- loop: run a prompt on an interval\n- update-aube: update the embedded aube crates"}}'
 			jq -nc --argjson c "$context" '{type: "assistant", message: {usage: {input_tokens: 0, cache_read_input_tokens: $c},
 				content: [{type: "tool_use", name: "Bash", input: {command: "ls"}}]}}'
 		} >"$dir/session-$i.jsonl"
@@ -676,13 +680,13 @@ claude_sessions() {
 	claude_sessions 20 640000
 	run --separate-stderr jouet setup claude
 	assert_success
-	assert_output --partial "note: setup can also cut what each request carries, changing nothing unless asked: \`jouet setup claude --compact-window 200k\` (20 of your last 20 sessions went past 200k tokens of context, up to 640k); and \`jouet setup claude --deny-unused\` (3 definitions none of your last 20 sessions used"
-	assert_output --partial 'tools Workflow; MCP servers visualize; 1 skills;'
+	assert_output --partial "note: setup can also cut what each request carries, changing nothing unless asked: \`jouet setup claude --compact-window 200k\` (20 of your last 20 sessions went past 200k tokens of context, up to 640k); and \`jouet setup claude --deny-unused\` (2 definitions none of your last 20 sessions used"
+	assert_output --partial 'MCP servers linear; 1 skills;'
 	run jq -c '[.autoCompactWindow, .permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
 	assert_output '[null,["Artifact","ArtifactComments","ArtifactData"],null]'
 	run --separate-stderr jouet setup claude --dry-run --json
 	run jq -c '.context_budget | [.compact_window, .past_window, [.unused[] | [.kind, .name]]]' <<<"$output"
-	assert_output '[200000,20,[["tool","Workflow"],["mcp","visualize"],["skill","docx"]]]'
+	assert_output '[200000,20,[["mcp","linear"],["skill","anthropic-skills:docx"]]]'
 }
 
 @test "setup asked at a terminal writes nothing without a yes" {
@@ -711,9 +715,9 @@ claude_sessions() {
 	run --separate-stderr jouet setup claude --compact-window 300k --deny-unused
 	assert_success
 	assert_output --partial "note: set autoCompactWindow to 300000; \`jouet setup claude --undo window\` takes it back"
-	assert_output --partial 'note: denied 2 unused tools and MCP servers and hid 1 unused skills from the model'
+	assert_output --partial 'note: denied 1 unused MCP servers and hid 1 unused skills from the model'
 	run jq -c '[.autoCompactWindow, .permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
-	assert_output '[300000,["Bash(rm:*)","Artifact","ArtifactComments","ArtifactData","Workflow","mcp__visualize"],{"loop":"off","docx":"user-invocable-only"}]'
+	assert_output '[300000,["Bash(rm:*)","Artifact","ArtifactComments","ArtifactData","mcp__linear"],{"loop":"off","anthropic-skills:docx":"user-invocable-only"}]'
 
 	run --separate-stderr jouet setup claude --undo window --dry-run
 	assert_success
@@ -725,7 +729,7 @@ claude_sessions() {
 	assert_success
 	assert_line "note: removed the autoCompactWindow of 300000 that setup set"
 	run jq -c '[.autoCompactWindow, (.permissions.deny | length)]' "$HOME/.claude/settings.json"
-	assert_output '[null,6]'
+	assert_output '[null,5]'
 
 	run --separate-stderr jouet setup claude --undo unused
 	assert_success
@@ -737,6 +741,27 @@ claude_sessions() {
 	assert_success
 	run jq -c . "$HOME/.claude/settings.json"
 	assert_output '{"permissions":{"deny":["Bash(rm:*)"]},"skillOverrides":{"loop":"off"}}'
+}
+
+@test "setup puts back what an earlier run took for unused but the app or the person depends on" {
+	claude_sessions 20
+	jq -n '{permissions: {deny: ["ReportFindings", "mcp__visualize", "mcp__linear"]},
+		skillOverrides: {"update-aube": "user-invocable-only", "loop": "user-invocable-only"}}' >"$HOME/.claude/settings.json"
+	mkdir -p "$XDG_STATE_HOME/jouet"
+	jq -n --arg s "$HOME/.claude/settings.json" '{($s): {deny: ["ReportFindings", "mcp__visualize", "mcp__linear"],
+		skills: ["update-aube", "loop"]}}' >"$XDG_STATE_HOME/jouet/setup-budget.json"
+
+	run --separate-stderr jouet setup claude --deny-unused
+	assert_success
+	assert_output --partial "note: put back ReportFindings, mcp__visualize, update-aube, loop: setup took them for unused, but they are Claude Code's, the app's or your own"
+	assert_output --partial 'note: denied 0 unused MCP servers and hid 1 unused skills from the model'
+	run jq -c '[.permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
+	assert_output '[["mcp__linear","Artifact","ArtifactComments","ArtifactData"],{"anthropic-skills:docx":"user-invocable-only"}]'
+
+	# What it keeps is still setup's to undo.
+	run --separate-stderr jouet setup claude --undo unused
+	run jq -c '[.permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
+	assert_output '[["Artifact","ArtifactComments","ArtifactData"],null]'
 }
 
 @test "the context budget flags are for Claude Code's own settings" {
