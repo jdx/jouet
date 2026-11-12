@@ -3,11 +3,8 @@
 //! compare the two on the user's own sessions.
 //!
 //! The toggles are the stop gate (blocking, the old behaviour, or observing,
-//! the new default), the `python-edit` rule (denying, the old behaviour, or
-//! off, the new default) and the `piped-test-output` rewrite (a test or
-//! build run piped into head, tail or grep warned about and then denied, the
-//! old behaviour, or run under `jouet test --cmd` instead, the new default,
-//! on Claude Code). `[experiment] control_share` percent of
+//! the new default) and the `python-edit` rule (denying, the old behaviour,
+//! or off, the new default). `[experiment] control_share` percent of
 //! sessions keep the old behaviour of each toggle, assigned independently,
 //! so one session can be in the control arm of one toggle and not the
 //! other. The assignment needs no state: every hook of a session computes
@@ -36,7 +33,6 @@ use std::collections::BTreeMap;
 /// The toggles under test, as the ledger names them.
 pub(crate) const GATE: &str = "gate";
 pub(crate) const PYTHON_EDIT: &str = "python-edit";
-pub(crate) const PIPED_REWRITE: &str = "piped-rewrite";
 pub(crate) const WATCHER: &str = "watcher";
 pub(crate) const DROP: &str = "drop";
 
@@ -47,9 +43,6 @@ pub(crate) struct Arm {
     pub gate_blocks: bool,
     /// The python-edit rule denies, as before it was off by default.
     pub python_edit: bool,
-    /// No rule rewrites a call: the piped-test-output rule warns about a
-    /// cut run and then denies it, as before it rewrote one.
-    pub no_rewrite: bool,
     /// The primer has the agent watch its PR with `jouet wait pr --until
     /// needs-agent` after a push.
     pub watcher: bool,
@@ -67,7 +60,6 @@ impl Arm {
         Self {
             gate_blocks: within(GATE, control),
             python_edit: within(PYTHON_EDIT, control),
-            no_rewrite: within(PIPED_REWRITE, control),
             watcher: within(WATCHER, watcher),
             drop: within(DROP, drop),
         }
@@ -81,7 +73,6 @@ impl Arm {
         if control > 0 {
             labels.insert(GATE.to_string(), label(self.gate_blocks));
             labels.insert(PYTHON_EDIT.to_string(), label(self.python_edit));
-            labels.insert(PIPED_REWRITE.to_string(), label(self.no_rewrite));
         }
         if watcher > 0 {
             labels.insert(WATCHER.to_string(), label(!self.watcher));
@@ -122,7 +113,6 @@ mod tests {
             Arm {
                 gate_blocks: true,
                 python_edit: true,
-                no_rewrite: true,
                 watcher: false,
                 drop: false,
             }
@@ -139,14 +129,12 @@ mod tests {
             .collect();
         let gate = arms.iter().filter(|a| a.gate_blocks).count();
         let python = arms.iter().filter(|a| a.python_edit).count();
-        let rewrite = arms.iter().filter(|a| a.no_rewrite).count();
         let both = arms
             .iter()
             .filter(|a| a.gate_blocks && a.python_edit)
             .count();
         assert!((2_300..2_700).contains(&gate), "{gate}");
         assert!((2_300..2_700).contains(&python), "{python}");
-        assert!((2_300..2_700).contains(&rewrite), "{rewrite}");
         // Assigned independently: about a quarter of a quarter.
         assert!((450..800).contains(&both), "{both}");
         let watcher = arms.iter().filter(|a| a.watcher).count();
@@ -162,7 +150,6 @@ mod tests {
         // The hash is fixed, so a session keeps its arm across releases.
         assert_eq!(bucket(GATE, "s1"), bucket(GATE, "s1"));
         assert_ne!(bucket(GATE, "s1"), bucket(PYTHON_EDIT, "s1"));
-        assert_ne!(bucket(GATE, "s1"), bucket(PIPED_REWRITE, "s1"));
     }
 
     #[test]
@@ -170,7 +157,6 @@ mod tests {
         let arm = Arm {
             gate_blocks: true,
             python_edit: false,
-            no_rewrite: true,
             watcher: true,
             drop: false,
         };
@@ -179,7 +165,6 @@ mod tests {
             BTreeMap::from([
                 ("drop".to_string(), "control".to_string()),
                 ("gate".to_string(), "control".to_string()),
-                ("piped-rewrite".to_string(), "control".to_string()),
                 ("python-edit".to_string(), "new".to_string()),
                 ("watcher".to_string(), "new".to_string()),
             ])

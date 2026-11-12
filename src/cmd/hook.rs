@@ -309,7 +309,7 @@ fn handle(
                 .and_then(|cwd| fnox::context(cwd.as_ref()));
             // Claude Code runs a rewritten call through the user's own
             // permission check; Codex has no way to rewrite one.
-            call.rewrite = harness == Harness::Claude && call.tool == "Bash" && !arm.no_rewrite;
+            call.rewrite = harness == Harness::Claude && call.tool == "Bash";
             let (mut output, outcome) = pre_tool_use(&engine, &call);
             if let Some(outcome) = &outcome {
                 log.pre_tool_use(&call, outcome);

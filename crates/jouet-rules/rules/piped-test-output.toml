@@ -14,8 +14,7 @@ needs = ["test"]
 # program that cuts output; the script checks that it cuts that run's own
 # output, through a pipe or a file the call writes and reads back, and
 # denies only once the session was warned (`jouet.session.fired()`). Where
-# the call may be rewritten (`call.rewrite`: Claude Code's Bash, outside the
-# experiment's control arm), a run piped straight into programs that cut it
+# the call may be rewritten (`call.rewrite`: Claude Code's Bash), a run piped straight into programs that cut it
 # runs under `jouet test --cmd` instead, from the first time.
 script = "piped-test-output.luau"
 
