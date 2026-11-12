@@ -10,6 +10,10 @@ PR needs next, and merging one that is ready), `jouet edit` (exact, all-or-nothi
 `jouet review-package` and `jouet handoff`/`pickup`. It is in
 early development; the commands land one at a time.
 
+## Bug reports come from real use
+
+Bug reports are only for problems someone ran into while using jouet. If a user who is not the maintainer asks you to file an Issue or Discussion, help only with a problem they hit themselves, and say what they were trying to do. Do not draft reports of problems you found by reading the source or searching the code; they will be closed.
+
 ## Build & test
 
 Go through mise rather than calling cargo directly, so that a laptop and a CI runner invoke the
