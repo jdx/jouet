@@ -190,6 +190,9 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
                     .unwrap_or_else(|| home.join(".claude"));
                 let history = budget::scan(&root);
                 let unused = budget::offered(&history, &doc);
+                // What an earlier run picked that the rule now keeps goes
+                // back on every run that reads the history.
+                let restore = budget::wrong_picks(&budget::load(&config), &history.servers);
                 if args.deny_unused {
                     if unused.is_empty() {
                         notes.push(format!(
@@ -202,7 +205,7 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
                                 )
                             } else {
                                 format!(
-                                    "every definition in your last {} sessions was used or is already named in the settings",
+                                    "every MCP server and plugin skill you added was used in your last {} sessions or is already named in the settings",
                                     history.sessions
                                 )
                             }
@@ -224,6 +227,7 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
                         context_budget = Some(found);
                     }
                 }
+                choice.restore = restore;
             }
         }
     }
@@ -501,17 +505,19 @@ fn budget_notes(
             verb("set", "would set")
         ));
     }
-    let new_denials = after.deny.len().saturating_sub(before.deny.len());
-    let new_skills = after.skills.len().saturating_sub(before.skills.len());
-    if new_denials + new_skills > 0 {
-        let tokens: u64 = change
-            .deny
-            .iter()
-            .filter(|u| u.recorded_in(after) && !u.recorded_in(before))
-            .map(|u| u.tokens)
-            .sum();
+    // Counted from what this run picked: a run that also puts earlier
+    // picks back can shrink the record while it adds.
+    let new: Vec<&budget::Unused> = change
+        .deny
+        .iter()
+        .filter(|u| u.recorded_in(after) && !u.recorded_in(before))
+        .collect();
+    let new_skills = new.iter().filter(|u| u.kind == budget::Kind::Skill).count();
+    let new_denials = new.len() - new_skills;
+    if !new.is_empty() {
+        let tokens: u64 = new.iter().map(|u| u.tokens).sum();
         notes.push(format!(
-            "{} {new_denials} unused tools and MCP servers and {} {new_skills} unused skills from the model, \
+            "{} {new_denials} unused MCP servers and {} {new_skills} unused skills from the model, \
              ~{} tokens a request; `{setup} --undo unused` takes them back",
             verb("denied", "would deny"),
             verb("hid", "would hide"),

@@ -6,6 +6,9 @@
 //! `projects/` that record their tool definitions (the first
 //! `prompt_snapshot` attachment). A tool, MCP server or skill is unused when
 //! it was offered in at least [`MIN_SESSIONS`] of them and called in none.
+//! Only what the person added can be unused this way (see [`pickable`]):
+//! Claude Code's and the app's own tools answer events a quiet stretch of
+//! history never shows, and a skill someone wrote is there to trigger.
 //! Its tokens per request are estimated from the size of its definition
 //! (tool JSON at about 4.6 characters a token, a skill's listing line at
 //! about 3.6), so treat them as ±30%.
@@ -36,24 +39,104 @@ const MAX_WINDOW: u64 = 1_000_000;
 /// What a hidden skill's `skillOverrides` entry says: out of the model's
 /// listing, still there as `/name` for the person.
 const HIDDEN: &str = "user-invocable-only";
-/// Tools never offered for denial, used or not: the ones every session
-/// works with, and the ones that reach the rest (skills, deferred tools,
-/// subagents, questions to the person, plan mode).
-const KEEP: &[&str] = &[
-    "Bash",
-    "Read",
-    "Edit",
-    "Write",
-    "MultiEdit",
-    "Grep",
-    "Glob",
-    "Skill",
-    "ToolSearch",
-    "Agent",
-    "Task",
-    "AskUserQuestion",
-    "ExitPlanMode",
-];
+/// Whether history may call `name` unused: only what the person added and
+/// can as well take away. Everything else is depended on, called or not:
+///
+/// - Claude Code's and the desktop app's built-in tools (`ReadNotifications`,
+///   `ReportFindings`, `ScheduleWakeup`, ...) answer a notification, a
+///   review or a wake that fifty quiet sessions need never show.
+/// - The app's own MCP servers (`ccd_*`, `terminal`, `visualize`, ...) are
+///   how it reaches the session; only a server in `servers` (one the
+///   person configured, see [`added_servers`]), a plugin's (`plugin_*`) or
+///   a claude.ai connector (`claude_ai_*`, or a UUID in the desktop app)
+///   is the person's.
+/// - A skill without a plugin prefix is the person's own
+///   (`~/.claude/skills`), a project's (`.claude/skills`) or one Claude
+///   Code bundles (`loop`, `simplify`); each is there to trigger on its
+///   own when its moment comes. Only a plugin's (`plugin:skill`) can go.
+pub(crate) fn pickable(kind: Kind, name: &str, servers: &HashSet<String>) -> bool {
+    match kind {
+        Kind::Tool => false,
+        Kind::Mcp => {
+            servers.contains(name)
+                || name.starts_with("plugin_")
+                || name.starts_with("claude_ai_")
+                || is_uuid(name)
+        }
+        Kind::Skill => name.contains(':'),
+    }
+}
+
+/// `8-4-4-4-12` hex digits: the desktop app's name for a claude.ai
+/// connector.
+fn is_uuid(name: &str) -> bool {
+    let groups: Vec<&str> = name.split('-').collect();
+    groups.len() == 5
+        && groups
+            .iter()
+            .zip([8, 4, 4, 4, 12])
+            .all(|(g, n)| g.len() == n && g.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// The MCP servers the person configured: in Claude Code's `.claude.json`
+/// (at the top or for any project) and in the `.mcp.json` of any project
+/// it lists or a recent session ran in.
+fn added_servers(root: &Path, cwds: &HashSet<String>) -> HashSet<String> {
+    let read = |path: &Path| -> Option<Value> {
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+    };
+    let mut configs: Vec<Value> = Vec::new();
+    // `CLAUDE_CONFIG_DIR/.claude.json`, or `~/.claude.json` beside `~/.claude`.
+    let mut files = vec![root.join(".claude.json")];
+    if root.file_name().is_some_and(|n| n == ".claude")
+        && let Some(home) = root.parent()
+    {
+        files.push(home.join(".claude.json"));
+    }
+    // Every project Claude Code has opened, not only where the recent
+    // sessions ran: a server configured in a project left alone for a while
+    // is still the person's, and a repair must not take its denial back.
+    let mut dirs: HashSet<String> = cwds.clone();
+    for file in files {
+        if let Some(doc) = read(&file) {
+            if let Some(projects) = doc.get("projects").and_then(Value::as_object) {
+                dirs.extend(projects.keys().cloned());
+                configs.extend(projects.values().cloned());
+            }
+            configs.push(doc);
+        }
+    }
+    configs.extend(
+        dirs.iter()
+            .filter_map(|dir| read(&Path::new(dir).join(".mcp.json"))),
+    );
+    configs
+        .iter()
+        .filter_map(|c| c.get("mcpServers").and_then(Value::as_object))
+        .flat_map(|servers| servers.keys().cloned())
+        .collect()
+}
+
+/// What setup added earlier that [`pickable`] now keeps: the
+/// `permissions.deny` entries and the hidden skills to put back.
+pub(crate) fn wrong_picks(added: &Added, servers: &HashSet<String>) -> (Vec<String>, Vec<String>) {
+    let deny = added
+        .deny
+        .iter()
+        .filter(|entry| match entry.strip_prefix("mcp__") {
+            Some(server) => !pickable(Kind::Mcp, server, servers),
+            None => !pickable(Kind::Tool, entry, servers),
+        })
+        .cloned()
+        .collect();
+    let skills = added
+        .skills
+        .iter()
+        .filter(|name| !pickable(Kind::Skill, name, servers))
+        .cloned()
+        .collect();
+    (deny, skills)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -126,6 +209,9 @@ pub(crate) struct History {
     pub(crate) peak: u64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) unused: Vec<Unused>,
+    /// The MCP servers the person configured, from [`added_servers`].
+    #[serde(skip)]
+    pub(crate) servers: HashSet<String>,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -184,6 +270,8 @@ struct Session {
     called: HashSet<String>,
     skills_called: HashSet<String>,
     peak: u64,
+    /// Where it ran.
+    cwd: Option<String>,
 }
 
 /// Reads the newest [`RECENT`] main transcripts under `root/projects` that
@@ -209,15 +297,20 @@ pub(crate) fn scan(root: &Path) -> History {
         }
     }
     files.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
-    let sessions = files
+    let sessions: Vec<Session> = files
         .iter()
         .filter_map(|(_, path)| read_session(path))
-        .take(RECENT);
-    summarize(sessions)
+        .take(RECENT)
+        .collect();
+    let cwds = sessions.iter().filter_map(|s| s.cwd.clone()).collect();
+    summarize(sessions.into_iter(), added_servers(root, &cwds))
 }
 
-fn summarize(sessions: impl Iterator<Item = Session>) -> History {
-    let mut history = History::default();
+fn summarize(sessions: impl Iterator<Item = Session>, servers: HashSet<String>) -> History {
+    let mut history = History {
+        servers,
+        ..History::default()
+    };
     // (kind, name) -> (characters over every session it was in, sessions)
     let mut present: HashMap<(Kind, String), (usize, usize)> = HashMap::new();
     let mut used: HashSet<(Kind, String)> = HashSet::new();
@@ -266,14 +359,10 @@ fn summarize(sessions: impl Iterator<Item = Session>) -> History {
         .into_iter()
         .filter(|((kind, name), (_, n))| {
             *n >= MIN_SESSIONS
+                && pickable(*kind, name, &history.servers)
                 && match kind {
-                    Kind::Tool => {
-                        !KEEP.contains(&name.as_str())
-                            && !crate::setup::UNUSED_CLAUDE_TOOLS.contains(&name.as_str())
-                            && !used.contains(&(*kind, name.clone()))
-                    }
-                    Kind::Mcp => !used.contains(&(*kind, name.clone())),
                     Kind::Skill => !skill_used(name),
+                    _ => !used.contains(&(*kind, name.clone())),
                 }
         })
         .map(|((kind, name), (chars, n))| {
@@ -353,6 +442,9 @@ fn read_into(path: &Path, session: &mut Session, main: bool) -> std::io::Result<
             continue;
         };
         let side = !main || record.get("isSidechain").and_then(Value::as_bool) == Some(true);
+        if session.cwd.is_none() && !side {
+            session.cwd = record.get("cwd").and_then(Value::as_str).map(String::from);
+        }
         let (snapshot, listing) = (snapshot && !side, listing && !side);
         let attachment = record.get("attachment");
         let kind = attachment
@@ -505,13 +597,21 @@ pub(crate) struct Change {
     pub(crate) deny: Vec<Unused>,
     pub(crate) undo_window: bool,
     pub(crate) undo_unused: bool,
+    /// What setup added earlier and [`wrong_picks`] puts back: denials and
+    /// hidden skills.
+    pub(crate) restore: (Vec<String>, Vec<String>),
     /// Only for the notes' wording: nothing is written either way.
     pub(crate) dry_run: bool,
 }
 
 impl Change {
     pub(crate) fn is_empty(&self) -> bool {
-        self.window.is_none() && self.deny.is_empty() && !self.undo_window && !self.undo_unused
+        self.window.is_none()
+            && self.deny.is_empty()
+            && !self.undo_window
+            && !self.undo_unused
+            && self.restore.0.is_empty()
+            && self.restore.1.is_empty()
     }
 }
 
@@ -545,6 +645,67 @@ pub(crate) fn apply(doc: &mut Value, change: &Change, added: &mut Added) -> Vec<
             None => {}
         }
         added.auto_compact_window = None;
+    }
+    let (deny, skills) = &change.restore;
+    let deny: Vec<String> = deny
+        .iter()
+        .filter(|d| added.deny.contains(d))
+        .cloned()
+        .collect();
+    let skills: Vec<String> = skills
+        .iter()
+        .filter(|s| added.skills.contains(s))
+        .cloned()
+        .collect();
+    if !change.undo_unused {
+        // Only what is still there as setup left it goes back; a skill
+        // override changed since is the person's, and is named as left.
+        let mut back: Vec<&str> = deny
+            .iter()
+            .filter(|d| listed_in(object.get("permissions"), "deny", d))
+            .map(String::as_str)
+            .collect();
+        remove_from(object, "permissions", "deny", |v| {
+            v.as_str().is_some_and(|s| deny.iter().any(|d| d == s))
+        });
+        let mut changed: Vec<&str> = Vec::new();
+        if let Some(overrides) = object
+            .get_mut("skillOverrides")
+            .and_then(Value::as_object_mut)
+        {
+            for name in &skills {
+                match overrides.get(name).map(Value::as_str) {
+                    Some(Some(HIDDEN)) => {
+                        overrides.remove(name);
+                        back.push(name);
+                    }
+                    Some(_) => changed.push(name),
+                    None => {}
+                }
+            }
+            if overrides.is_empty() {
+                object.remove("skillOverrides");
+            }
+        }
+        let verb = if change.dry_run {
+            "would put back"
+        } else {
+            "put back"
+        };
+        if !back.is_empty() {
+            notes.push(format!(
+                "{verb} {}: setup took them for unused, but they are Claude Code's, the app's or your own",
+                back.join(", ")
+            ));
+        }
+        if !changed.is_empty() {
+            notes.push(format!(
+                "left the skill overrides of {} as they are: they were changed since setup hid them",
+                changed.join(", ")
+            ));
+        }
+        added.deny.retain(|d| !deny.contains(d));
+        added.skills.retain(|s| !skills.contains(s));
     }
     if change.undo_unused {
         let deny = std::mem::take(&mut added.deny);
@@ -699,29 +860,49 @@ mod tests {
             called: called.iter().map(|n| n.to_string()).collect(),
             skills_called: HashSet::new(),
             peak,
+            cwd: None,
         }
     }
 
+    fn servers(names: &[&str]) -> HashSet<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
     #[test]
-    fn an_item_no_recent_session_called_is_unused() {
+    fn only_what_the_person_added_and_no_recent_session_called_is_unused() {
         let tools = [
             ("Bash", 4600),
+            // Built in, and never called: still depended on.
             ("Workflow", 9200),
-            ("ScheduleWakeup", 4600),
-            ("Artifact", 46000),
+            ("ReadNotifications", 4600),
+            ("ReportFindings", 4600),
+            // The app's own servers.
             ("mcp__visualize__show_widget", 2300),
-            ("mcp__visualize__read_me", 2300),
+            ("mcp__terminal__read_terminal", 2300),
             ("mcp__ccd_pr__get_status", 2300),
+            // The person's: configured, a plugin's and connectors.
+            ("mcp__linear__list", 4600),
+            ("mcp__github__search", 2300),
+            ("mcp__plugin_cloudflare_cloudflare__docs", 2300),
+            ("mcp__claude_ai_Gmail__search", 2300),
+            ("mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__guide", 2300),
+        ];
+        let skills = [
+            "update-aube",
+            "loop",
+            "mise-docs-validation",
+            "cloudflare:wrangler",
+            "anthropic-skills:docx",
         ];
         let sessions = (0..MIN_SESSIONS).map(|i| {
             let called: &[&str] = if i == 0 {
-                &["Bash", "mcp__ccd_pr__get_status"]
+                &["Bash", "mcp__github__search"]
             } else {
                 &["Bash"]
             };
-            session(&tools, called, &["pr-description", "docx"], 150_000)
+            session(&tools, called, &skills, 150_000)
         });
-        let history = summarize(sessions);
+        let history = summarize(sessions, servers(&["linear", "github"]));
         let names: Vec<_> = history
             .unused
             .iter()
@@ -730,20 +911,111 @@ mod tests {
         assert_eq!(
             names,
             [
-                (Kind::Tool, "Workflow", 2000),
-                (Kind::Tool, "ScheduleWakeup", 1000),
-                (Kind::Mcp, "visualize", 1000),
-                (Kind::Skill, "docx", 100),
-                (Kind::Skill, "pr-description", 100),
+                (Kind::Mcp, "linear", 1000),
+                (Kind::Mcp, "1a59c906-04da-521d-bda7-7f71b9f9e01c", 500),
+                (Kind::Mcp, "claude_ai_Gmail", 500),
+                (Kind::Mcp, "plugin_cloudflare_cloudflare", 500),
+                (Kind::Skill, "anthropic-skills:docx", 100),
+                (Kind::Skill, "cloudflare:wrangler", 100),
             ]
         );
         assert_eq!(history.past_window, 0);
+        assert!(!is_uuid("1a59c906-04da-521d-bda7-7f71b9f9e01"));
+        assert!(!is_uuid("ccd_pr"));
+    }
+
+    #[test]
+    fn the_servers_come_from_claude_json_and_where_sessions_ran() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(".claude");
+        let project = dir.path().join("p");
+        // A project Claude Code opened, but no recent session ran in.
+        let idle = dir.path().join("idle");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(&idle).unwrap();
+        std::fs::write(
+            dir.path().join(".claude.json"),
+            json!({"mcpServers": {"linear": {}},
+                   "projects": {"/x": {"mcpServers": {"github": {}}},
+                                idle.display().to_string(): {}}})
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            project.join(".mcp.json"),
+            json!({"mcpServers": {"sentry": {}}}).to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            idle.join(".mcp.json"),
+            json!({"mcpServers": {"posthog": {}}}).to_string(),
+        )
+        .unwrap();
+        let cwds = [project.display().to_string(), "/nowhere".into()].into();
+        let mut found: Vec<_> = added_servers(&root, &cwds).into_iter().collect();
+        found.sort();
+        assert_eq!(found, ["github", "linear", "posthog", "sentry"]);
+    }
+
+    #[test]
+    fn what_an_earlier_run_wrongly_picked_goes_back_and_the_rest_stays() {
+        let mut doc = json!({
+            "permissions": {"deny": ["Bash(rm:*)", "ReportFindings", "mcp__terminal", "mcp__linear"]},
+            "skillOverrides": {"update-aube": HIDDEN, "cloudflare:wrangler": HIDDEN, "loop": "on"}
+        });
+        let mut added = Added {
+            deny: vec![
+                "ReportFindings".into(),
+                "mcp__terminal".into(),
+                "mcp__linear".into(),
+            ],
+            skills: vec![
+                "update-aube".into(),
+                "cloudflare:wrangler".into(),
+                "loop".into(),
+            ],
+            ..Added::default()
+        };
+        let restore = wrong_picks(&added, &servers(&["linear"]));
+        assert_eq!(
+            restore,
+            (
+                vec!["ReportFindings".into(), "mcp__terminal".into()],
+                vec!["update-aube".into(), "loop".into()]
+            )
+        );
+        let change = Change {
+            restore,
+            ..Change::default()
+        };
+        let notes = apply(&mut doc, &change, &mut added);
+        assert_eq!(
+            doc,
+            json!({
+                "permissions": {"deny": ["Bash(rm:*)", "mcp__linear"]},
+                // `loop` was set to "on" since, so it is the person's now.
+                "skillOverrides": {"cloudflare:wrangler": HIDDEN, "loop": "on"}
+            })
+        );
+        assert_eq!(added.deny, ["mcp__linear"]);
+        assert_eq!(added.skills, ["cloudflare:wrangler"]);
+        assert_eq!(
+            notes,
+            [
+                "put back ReportFindings, mcp__terminal, update-aube: setup took them for unused, \
+              but they are Claude Code's, the app's or your own",
+                "left the skill overrides of loop as they are: they were changed since setup hid them"
+            ]
+        );
     }
 
     #[test]
     fn too_few_sessions_offer_nothing_but_still_show_the_window() {
-        let history =
-            summarize((1..MIN_SESSIONS).map(|_| session(&[("Workflow", 9200)], &[], &[], 640_000)));
+        let history = summarize(
+            (1..MIN_SESSIONS).map(|_| session(&[("mcp__linear__list", 9200)], &[], &[], 640_000)),
+            servers(&["linear"]),
+        );
         assert!(history.unused.is_empty());
         assert_eq!(history.past_window, MIN_SESSIONS - 1);
         assert_eq!(history.peak, 640_000);
@@ -752,13 +1024,24 @@ mod tests {
     #[test]
     fn a_skill_called_or_typed_is_used() {
         let mut sessions: Vec<Session> = (0..MIN_SESSIONS)
-            .map(|_| session(&[], &[], &["anthropic-skills:docx", "loop", "simplify"], 0))
+            .map(|_| {
+                session(
+                    &[],
+                    &[],
+                    &[
+                        "anthropic-skills:docx",
+                        "cloudflare:loop",
+                        "cloudflare:simplify",
+                    ],
+                    0,
+                )
+            })
             .collect();
         sessions[0].skills_called.insert("docx".into());
-        sessions[1].skills_called.insert("loop".into());
-        let history = summarize(sessions.into_iter());
+        sessions[1].skills_called.insert("cloudflare:loop".into());
+        let history = summarize(sessions.into_iter(), HashSet::new());
         let names: Vec<_> = history.unused.iter().map(|u| u.name.as_str()).collect();
-        assert_eq!(names, ["simplify"]);
+        assert_eq!(names, ["cloudflare:simplify"]);
     }
 
     #[test]
