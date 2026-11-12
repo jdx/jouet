@@ -79,8 +79,8 @@ fn is_uuid(name: &str) -> bool {
 }
 
 /// The MCP servers the person configured: in Claude Code's `.claude.json`
-/// (at the top or for any project) and in a `.mcp.json` where a recent
-/// session ran.
+/// (at the top or for any project) and in the `.mcp.json` of any project
+/// it lists or a recent session ran in.
 fn added_servers(root: &Path, cwds: &HashSet<String>) -> HashSet<String> {
     let read = |path: &Path| -> Option<Value> {
         serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
