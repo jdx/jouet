@@ -236,16 +236,26 @@ fn per_arm(half_width: f64, target: f64, control: u64, new: u64) -> Option<u64> 
 }
 
 /// Each session's arm of each toggle, from its session-start entries that
-/// `filter` keeps, by session.
+/// `filter` keeps, by session. A resumed session starts again; its later
+/// starts add to the earlier ones, so a toggle retired in between keeps
+/// the arm the session was first recorded in.
 pub fn session_arms(
     entries: &[LedgerEntry],
     filter: &StatsFilter,
 ) -> BTreeMap<String, BTreeMap<String, String>> {
-    entries
+    let mut sessions: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    for e in entries
         .iter()
         .filter(|e| e.event == "session-start" && !e.arm.is_empty() && filter.keeps(e))
-        .filter_map(|e| Some((e.session.clone()?, e.arm.clone())))
-        .collect()
+    {
+        if let Some(session) = &e.session {
+            sessions
+                .entry(session.clone())
+                .or_default()
+                .extend(e.arm.clone());
+        }
+    }
+    sessions
 }
 
 /// Each toggle's arms compared within each repository, over the sessions
@@ -413,6 +423,40 @@ fn bootstrap(a: &[f64], b: &[f64]) -> Option<(f64, f64)> {
 mod tests {
     use super::*;
     use crate::{Call, Request, Tool};
+
+    #[test]
+    fn a_resumed_session_keeps_the_arm_of_a_toggle_retired_since() {
+        let start = |session: &str, arm: &[(&str, &str)]| LedgerEntry {
+            event: "session-start".into(),
+            session: Some(session.into()),
+            arm: arm
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            ..LedgerEntry::default()
+        };
+        let entries = [
+            start("s", &[("gate", "new"), ("piped-rewrite", "control")]),
+            start("s", &[("gate", "new"), ("drop", "control")]),
+            start("t", &[("gate", "control")]),
+        ];
+        let arms = session_arms(&entries, &StatsFilter::default());
+        let pairs = |s: &str| -> Vec<(&str, &str)> {
+            arms[s]
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect()
+        };
+        assert_eq!(
+            pairs("s"),
+            [
+                ("drop", "control"),
+                ("gate", "new"),
+                ("piped-rewrite", "control")
+            ]
+        );
+        assert_eq!(pairs("t"), [("gate", "control")]);
+    }
 
     #[test]
     fn a_session_counts_its_requests_once_and_its_active_time_capped() {
