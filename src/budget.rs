@@ -93,20 +93,22 @@ fn added_servers(root: &Path, cwds: &HashSet<String>) -> HashSet<String> {
     {
         files.push(home.join(".claude.json"));
     }
+    // Every project Claude Code has opened, not only where the recent
+    // sessions ran: a server configured in a project left alone for a while
+    // is still the person's, and a repair must not take its denial back.
+    let mut dirs: HashSet<String> = cwds.clone();
     for file in files {
         if let Some(doc) = read(&file) {
-            configs.extend(
-                doc.get("projects")
-                    .and_then(Value::as_object)
-                    .into_iter()
-                    .flat_map(|p| p.values().cloned()),
-            );
+            if let Some(projects) = doc.get("projects").and_then(Value::as_object) {
+                dirs.extend(projects.keys().cloned());
+                configs.extend(projects.values().cloned());
+            }
             configs.push(doc);
         }
     }
     configs.extend(
-        cwds.iter()
-            .filter_map(|cwd| read(&Path::new(cwd).join(".mcp.json"))),
+        dirs.iter()
+            .filter_map(|dir| read(&Path::new(dir).join(".mcp.json"))),
     );
     configs
         .iter()
@@ -645,33 +647,65 @@ pub(crate) fn apply(doc: &mut Value, change: &Change, added: &mut Added) -> Vec<
         added.auto_compact_window = None;
     }
     let (deny, skills) = &change.restore;
-    let deny: Vec<&String> = deny.iter().filter(|d| added.deny.contains(d)).collect();
-    let skills: Vec<&String> = skills.iter().filter(|s| added.skills.contains(s)).collect();
-    if !change.undo_unused && !(deny.is_empty() && skills.is_empty()) {
+    let deny: Vec<String> = deny
+        .iter()
+        .filter(|d| added.deny.contains(d))
+        .cloned()
+        .collect();
+    let skills: Vec<String> = skills
+        .iter()
+        .filter(|s| added.skills.contains(s))
+        .cloned()
+        .collect();
+    if !change.undo_unused {
+        // Only what is still there as setup left it goes back; a skill
+        // override changed since is the person's, and is named as left.
+        let mut back: Vec<&str> = deny
+            .iter()
+            .filter(|d| listed_in(object.get("permissions"), "deny", d))
+            .map(String::as_str)
+            .collect();
         remove_from(object, "permissions", "deny", |v| {
-            v.as_str().is_some_and(|s| deny.iter().any(|d| *d == s))
+            v.as_str().is_some_and(|s| deny.iter().any(|d| d == s))
         });
+        let mut changed: Vec<&str> = Vec::new();
         if let Some(overrides) = object
             .get_mut("skillOverrides")
             .and_then(Value::as_object_mut)
         {
-            overrides.retain(|name, v| !(skills.contains(&name) && v.as_str() == Some(HIDDEN)));
+            for name in &skills {
+                match overrides.get(name).map(Value::as_str) {
+                    Some(Some(HIDDEN)) => {
+                        overrides.remove(name);
+                        back.push(name);
+                    }
+                    Some(_) => changed.push(name),
+                    None => {}
+                }
+            }
             if overrides.is_empty() {
                 object.remove("skillOverrides");
             }
         }
-        let names: Vec<&str> = deny.iter().chain(&skills).map(|s| s.as_str()).collect();
-        notes.push(format!(
-            "{} {}: setup took them for unused, but they are Claude Code's, the app's or your own",
-            if change.dry_run {
-                "would put back"
-            } else {
-                "put back"
-            },
-            names.join(", ")
-        ));
-        added.deny.retain(|d| !deny.contains(&d));
-        added.skills.retain(|s| !skills.contains(&s));
+        let verb = if change.dry_run {
+            "would put back"
+        } else {
+            "put back"
+        };
+        if !back.is_empty() {
+            notes.push(format!(
+                "{verb} {}: setup took them for unused, but they are Claude Code's, the app's or your own",
+                back.join(", ")
+            ));
+        }
+        if !changed.is_empty() {
+            notes.push(format!(
+                "left the skill overrides of {} as they are: they were changed since setup hid them",
+                changed.join(", ")
+            ));
+        }
+        added.deny.retain(|d| !deny.contains(d));
+        added.skills.retain(|s| !skills.contains(s));
     }
     if change.undo_unused {
         let deny = std::mem::take(&mut added.deny);
@@ -895,12 +929,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join(".claude");
         let project = dir.path().join("p");
+        // A project Claude Code opened, but no recent session ran in.
+        let idle = dir.path().join("idle");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(&idle).unwrap();
         std::fs::write(
             dir.path().join(".claude.json"),
             json!({"mcpServers": {"linear": {}},
-                   "projects": {"/x": {"mcpServers": {"github": {}}}}})
+                   "projects": {"/x": {"mcpServers": {"github": {}}},
+                                idle.display().to_string(): {}}})
             .to_string(),
         )
         .unwrap();
@@ -909,10 +947,15 @@ mod tests {
             json!({"mcpServers": {"sentry": {}}}).to_string(),
         )
         .unwrap();
+        std::fs::write(
+            idle.join(".mcp.json"),
+            json!({"mcpServers": {"posthog": {}}}).to_string(),
+        )
+        .unwrap();
         let cwds = [project.display().to_string(), "/nowhere".into()].into();
         let mut found: Vec<_> = added_servers(&root, &cwds).into_iter().collect();
         found.sort();
-        assert_eq!(found, ["github", "linear", "sentry"]);
+        assert_eq!(found, ["github", "linear", "posthog", "sentry"]);
     }
 
     #[test]
@@ -960,8 +1003,9 @@ mod tests {
         assert_eq!(
             notes,
             [
-                "put back ReportFindings, mcp__terminal, update-aube, loop: setup took them for unused, \
-              but they are Claude Code's, the app's or your own"
+                "put back ReportFindings, mcp__terminal, update-aube: setup took them for unused, \
+              but they are Claude Code's, the app's or your own",
+                "left the skill overrides of loop as they are: they were changed since setup hid them"
             ]
         );
     }
