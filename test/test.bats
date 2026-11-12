@@ -1134,46 +1134,46 @@ hint: jouet test --budget BYTES --cmd -- mise run test:e2e test_a"
 	assert_output --regexp 'cmd: passed in [0-9.]+s: 2 passed \(full log: '
 }
 
-@test "in the experiment's control arm, the hooks steer a cut test run to --cmd, denying once warned, and record a --cmd build as a build" {
-	# The control arm keeps the behaviour from before rewrites: a warning,
-	# then a denial.
-	export JOUET_EXPERIMENT_CONTROL_SHARE=100
+@test "where a call cannot be rewritten, the hooks steer a cut test run to --cmd, denying once warned, and record a --cmd build as a build" {
+	# Codex cannot run another command in the call's place, so a cut run
+	# gets a warning, then a denial.
 	payload() {
 		jq -cn --arg c "$1" --arg cwd "$PWD" '{session_id: "s1", cwd: $cwd, tool_name: "Bash", tool_input: {command: $c}}'
 	}
 
-	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload "cargo test -q -p app 2>&1 | grep -E 'panicked|FAILED' | head -20")"
+	run --separate-stderr jouet hook codex pre-tool-use <<<"$(payload "cargo test -q -p app 2>&1 | grep -E 'panicked|FAILED' | head -20")"
 	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
 	assert_output --partial "Run \`jouet test --cmd -- cargo test -q -p app\` instead of cutting its output with grep."
 	assert_output --partial '[jouet rule: piped-test-output]'
 
 	# Warned once in this session, the next cut run is denied. Assignments
 	# stay in front, and what the shell would expand stays bare.
-	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload "RUST_LOG=debug cargo test --manifest-path \$DIR/Cargo.toml 'a b' | tail")"
+	run --separate-stderr jouet hook codex pre-tool-use <<<"$(payload "RUST_LOG=debug cargo test --manifest-path \$DIR/Cargo.toml 'a b' | tail")"
 	run jq -r '.hookSpecificOutput | .permissionDecision, .permissionDecisionReason' <<<"$output"
 	assert_line --index 0 deny
 	assert_output --partial "already warned about cutting a run's output. Run \`RUST_LOG=debug jouet test --cmd -- cargo test --manifest-path \$DIR/Cargo.toml \"a b\"\` instead"
 	assert_output --partial "Nothing in this call ran, so run its other commands again too."
 
 	# Another session is only warned.
-	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload "cargo test | tail" | jq -c '.session_id = "s2"')"
+	run --separate-stderr jouet hook codex pre-tool-use <<<"$(payload "cargo test | tail" | jq -c '.session_id = "s2"')"
 	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
 	assert_output --partial "Run \`jouet test\` instead of cutting its output with tail."
 
 	# So is a subagent of the warned session, which was never shown the
 	# warning; once warned itself, it is denied.
 	for verdict in warn deny; do
-		run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload "cargo test | tail" | jq -c '.agent_id = "a7"')"
+		run --separate-stderr jouet hook codex pre-tool-use <<<"$(payload "cargo test | tail" | jq -c '.agent_id = "a7"')"
 		run jq -r '.hookSpecificOutput.permissionDecision // "warn"' <<<"$output"
 		assert_output "$verdict"
 	done
 
-	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'cargo test > out.log 2>&1')"
-	run jq -c '.hookSpecificOutput | del(.updatedInput)' <<<"$output"
-	assert_output '{"hookEventName":"PreToolUse"}'
+	# Output written to a file the call does not read back is left alone.
+	run --separate-stderr jouet hook codex pre-tool-use <<<"$(payload 'cargo test > out.log 2>&1')"
+	assert_success
+	refute_output --partial 'piped-test-output'
 
 	# The whole suite, cut: plain `jouet test` runs it.
-	run --separate-stderr jouet hook claude pre-tool-use <<<"$(payload 'python3 -m unittest discover -v 2>&1 | tail -5')"
+	run --separate-stderr jouet hook codex pre-tool-use <<<"$(payload 'python3 -m unittest discover -v 2>&1 | tail -5')"
 	run jq -r '.hookSpecificOutput.permissionDecisionReason' <<<"$output"
 	assert_output --partial "Run \`jouet test\` instead of cutting its output with tail."
 

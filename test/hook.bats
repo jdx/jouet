@@ -1094,7 +1094,7 @@ transcript() {
 			env JOUET_EXPERIMENT_CONTROL_SHARE=100 jouet hook claude session-start >/dev/null
 	done
 	run jq -c 'select(.event == "session-start") | .arm' "$ledger"
-	assert_line --index 0 '{"gate":"control","piped-rewrite":"control","python-edit":"control"}'
+	assert_line --index 0 '{"gate":"control","python-edit":"control"}'
 
 	# The control arm: python-edit denies, and the stop gate blocks.
 	script="python3 - <<'E'
@@ -1116,7 +1116,7 @@ E"
 	# Two sessions on the new defaults, and a transcript for each of the four.
 	for s in n1 n2; do
 		jq -cn --arg s "$s" --argjson ts "$(date +%s)" \
-			'{ts: $ts, harness: "claude", session: $s, event: "session-start", arm: {gate: "new", "piped-rewrite": "new", "python-edit": "new"}}' >>"$ledger"
+			'{ts: $ts, harness: "claude", session: $s, event: "session-start", arm: {gate: "new", "python-edit": "new"}}' >>"$ledger"
 	done
 	transcript c1 5
 	transcript c2 7
@@ -1126,8 +1126,7 @@ E"
 	assert_success
 	run jq -c '.arms[] | [.toggle, .control.sessions, .new.sessions, (.differences[] | select(.metric == "requests") | .median, .ci_low, .ci_high)]' <<<"$output"
 	assert_line --index 0 '["gate",2,2,3.0,1.0,5.0]'
-	assert_line --index 1 '["piped-rewrite",2,2,3.0,1.0,5.0]'
-	assert_line --index 2 '["python-edit",2,2,3.0,1.0,5.0]'
+	assert_line --index 1 '["python-edit",2,2,3.0,1.0,5.0]'
 	run --separate-stderr jouet stats --display plain
 	assert_line '  /work:'
 	assert_line '    gate: control n=2, new n=2'

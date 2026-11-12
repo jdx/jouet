@@ -372,7 +372,7 @@ These built-in rules have scripts: `affected-tests`, `checks`, `claimed-path`, `
 | `session` | The agent session making the call: the hook payload's `session_id`. |
 | `agent` | The subagent making the call within that session: the payload's `agent_id` (Claude Code's Agent tool). `nil` for the session's own agent. |
 | `exit_code` | The command's exit code, after a tool (post-tool-use only). |
-| `rewrite` | Whether this rule may return `jouet.rewrite(...)`: only a built-in deny-mode rule, before a Claude Code Bash call, outside the `piped-rewrite` experiment's control arm. |
+| `rewrite` | Whether this rule may return `jouet.rewrite(...)`: only a built-in deny-mode rule, before a Claude Code Bash call. |
 | `commands` | Every command the shell command runs: top-level ones first, then those inside `$(...)` and `sh -c '...'`. |
 
 `call.commands` is the command parsed the way a shell parses it, as for a matcher. Each command has:
