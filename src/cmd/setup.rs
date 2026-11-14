@@ -52,8 +52,8 @@ struct Report {
     notes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     benchmark_prompt: Option<&'static str>,
-    /// Claude Code: what `--compact-window` and `--deny-unused` would
-    /// change, when neither was given and nobody could be asked.
+    /// Claude Code: the context budget a plain setup applied (or, with
+    /// `--dry-run`, would apply), from your recent sessions.
     #[serde(skip_serializing_if = "Option::is_none")]
     context_budget: Option<offer::Offer>,
 }
@@ -169,7 +169,9 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
         None => (None, Vec::new()),
     };
     // The context budget, for Claude Code's settings of your own: an
-    // explicit flag, a yes at the terminal, or only a note.
+    // explicit flag, or by default what your recent sessions call for,
+    // except a part you took back with --undo or all of it with
+    // --no-context-budget.
     let setup_command = match scope {
         Scope::Local => "jouet setup claude --project",
         _ => "jouet setup claude",
@@ -184,15 +186,18 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
             choice.window = window;
             choice.undo_window = args.undo.as_deref() == Some("window");
             choice.undo_unused = args.undo.as_deref() == Some("unused");
-            if args.deny_unused || !budget_flags {
+            choice.decline = args.undo.is_some();
+            choice.deny_asked = args.deny_unused;
+            if args.deny_unused || !(budget_flags || args.no_context_budget) {
                 let doc = read_hooks(&config).map_or(serde_json::Value::Null, |(_, doc)| doc);
                 let root = jouet_output::paths::env_dir("CLAUDE_CONFIG_DIR")
                     .unwrap_or_else(|| home.join(".claude"));
                 let history = budget::scan(&root);
                 let unused = budget::offered(&history, &doc);
+                let record = budget::load(&config);
                 // What an earlier run picked that the rule now keeps goes
                 // back on every run that reads the history.
-                let restore = budget::wrong_picks(&budget::load(&config), &history.servers);
+                let restore = budget::wrong_picks(&record, &history.servers);
                 if args.deny_unused {
                     if unused.is_empty() {
                         notes.push(format!(
@@ -213,17 +218,36 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
                     }
                     choice.deny = unused;
                 } else {
-                    let window = (history.past_window > 0 && !budget::window_chosen(&doc))
+                    // A window that is setup's own is chosen already, so
+                    // a second run sets nothing new. At project scope, a
+                    // window in your global settings or the project's
+                    // shared ones is a choice too, which a local window
+                    // would override.
+                    let elsewhere = match scope {
+                        Scope::Local => [Scope::Global, Scope::Shared]
+                            .into_iter()
+                            .map(|other| harness.config_path(other, &home, &project))
+                            .filter(|path| *path != config)
+                            .any(|path| {
+                                read_hooks(&path).is_ok_and(|(_, doc)| budget::window_chosen(&doc))
+                            }),
+                        _ => false,
+                    };
+                    let window = (history.past_window > 0
+                        && !record.declined_window
+                        && !budget::window_chosen(&doc)
+                        && !elsewhere)
                         .then_some(budget::WINDOW);
-                    let found = offer::Offer::new(&history, window, unused);
-                    let can_ask =
-                        !out.json && !args.dry_run && jouet_output::display::person_at_terminal();
-                    if found.is_empty() {
-                        // Nothing to offer.
-                    } else if can_ask {
-                        choice = found.ask(setup_command);
+                    let unused = if record.declined_unused {
+                        Vec::new()
                     } else {
-                        notes.push(found.note(setup_command));
+                        unused
+                    };
+                    let found = offer::Offer::new(&history, window, unused);
+                    if !found.is_empty() {
+                        notes.push(found.note(setup_command, args.dry_run));
+                        choice.window = found.compact_window;
+                        choice.deny.clone_from(&found.unused);
                         context_budget = Some(found);
                     }
                 }
