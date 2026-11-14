@@ -766,39 +766,53 @@ fn background_time(
     background: &[(usize, String)],
     commands: &mut BTreeMap<(String, String), CommandRuns>,
 ) {
+    // Foreground calls only keep their runs from background ones.
+    if background.is_empty() {
+        return;
+    }
     let of = |path: &str, command: &str| {
         command
             .strip_prefix(path)
             .is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))
     };
+    // Each session's runs, in ledger order, so a call searches only its own.
+    let mut by_session: HashMap<Option<&str>, Vec<usize>> = HashMap::new();
+    for (r, (at, _)) in runs.iter().enumerate() {
+        by_session
+            .entry(kept[*at].session.as_deref())
+            .or_default()
+            .push(r);
+    }
     let mut claimed = vec![false; runs.len()];
     for (call, command) in foreground {
         let f = kept[*call];
-        let run = runs.iter().enumerate().rev().find(|(r, (at, path))| {
-            let e = kept[*at];
-            !claimed[*r]
-                && at < call
-                && e.session == f.session
-                && of(path, command)
-                && f.ts <= e.ts.saturating_add(2)
+        let Some(own) = by_session.get(&f.session.as_deref()) else {
+            continue;
+        };
+        // Runs come in ledger order: those before the call end here.
+        let before = own.partition_point(|r| runs[*r].0 < *call);
+        let run = own[..before].iter().rev().find(|r| {
+            let (at, path) = &runs[**r];
+            !claimed[**r] && of(path, command) && f.ts <= kept[*at].ts.saturating_add(2)
         });
-        if let Some((r, _)) = run {
-            claimed[r] = true;
+        if let Some(r) = run {
+            claimed[*r] = true;
         }
     }
     for (call, command) in background {
         let f = kept[*call];
-        let run = runs.iter().enumerate().find(|(r, (at, path))| {
-            let e = kept[*at];
-            !claimed[*r]
-                && e.session == f.session
-                && of(path, command)
-                && e.ts.saturating_add(2) >= f.ts
+        let Some(own) = by_session.get(&f.session.as_deref()) else {
+            continue;
+        };
+        let run = own.iter().find(|r| {
+            let (at, path) = &runs[**r];
+            !claimed[**r] && of(path, command) && kept[*at].ts.saturating_add(2) >= f.ts
         });
-        if let Some((r, (at, _))) = run {
-            claimed[r] = true;
+        if let Some(r) = run {
+            claimed[*r] = true;
+            let at = runs[*r].0;
             command_runs(commands, &f.harness, command).duration_ms +=
-                kept[*at].duration_ms.unwrap_or(0);
+                kept[at].duration_ms.unwrap_or(0);
         }
     }
 }
