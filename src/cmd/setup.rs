@@ -219,11 +219,25 @@ pub(crate) fn run(args: &SetupArgs, out: &Output) -> Exit {
                     choice.deny = unused;
                 } else {
                     // A window that is setup's own is chosen already, so
-                    // a second run sets nothing new.
+                    // a second run sets nothing new. At project scope, a
+                    // window in your global settings or the project's
+                    // shared ones is a choice too, which a local window
+                    // would override.
+                    let elsewhere = match scope {
+                        Scope::Local => [Scope::Global, Scope::Shared]
+                            .into_iter()
+                            .map(|other| harness.config_path(other, &home, &project))
+                            .filter(|path| *path != config)
+                            .any(|path| {
+                                read_hooks(&path).is_ok_and(|(_, doc)| budget::window_chosen(&doc))
+                            }),
+                        _ => false,
+                    };
                     let window = (history.past_window > 0
                         && !record.declined_window
-                        && !budget::window_chosen(&doc))
-                    .then_some(budget::WINDOW);
+                        && !budget::window_chosen(&doc)
+                        && !elsewhere)
+                        .then_some(budget::WINDOW);
                     let unused = if record.declined_unused {
                         Vec::new()
                     } else {

@@ -687,7 +687,7 @@ claude_sessions() {
 	run --separate-stderr jouet setup claude
 	assert_success
 	assert_output --partial "note: setup cut what each request carries, from your recent sessions: compact at 200k tokens (20 of your last 20 sessions went past 200k tokens of context, up to 640k); and deny 2 definitions none of your last 20 sessions used"
-	assert_output --partial 'MCP servers linear; 1 skills;'
+	assert_output --partial 'MCP servers linear; skills anthropic-skills:docx)'
 	assert_output --partial "\`jouet setup claude --no-context-budget\` installs without it"
 	assert_output --partial "note: set autoCompactWindow to 200000; \`jouet setup claude --undo window\` takes it back"
 	assert_output --partial "\`jouet setup claude --undo unused\` takes them back"
@@ -738,6 +738,25 @@ claude_sessions() {
 	run --separate-stderr jouet setup claude --deny-unused
 	assert_success
 	assert_output --partial 'note: nothing to deny: only 19 recent sessions recorded their tools, and it takes 20'
+}
+
+@test "project setup sets no window over a global or shared one" {
+	claude_sessions 20 640000
+	mkdir -p "$HOME/.claude" "$PWD/.claude"
+	jq -n '{autoCompactWindow: 400000}' >"$HOME/.claude/settings.json"
+	run --separate-stderr jouet setup claude --project
+	assert_success
+	refute_output --partial 'compact at'
+	run jq .autoCompactWindow "$PWD/.claude/settings.local.json"
+	assert_output null
+
+	rm "$HOME/.claude/settings.json"
+	jq -n '{modelSettings: {opus: {autoCompactWindow: 300000}}}' >"$PWD/.claude/settings.json"
+	run --separate-stderr jouet setup claude --project
+	assert_success
+	refute_output --partial 'compact at'
+	run jq .autoCompactWindow "$PWD/.claude/settings.local.json"
+	assert_output null
 }
 
 @test "each context budget choice is one undo, and uninstall takes back both" {

@@ -600,10 +600,13 @@ pub(crate) struct Change {
 
 impl Change {
     pub(crate) fn is_empty(&self) -> bool {
+        // `--deny-unused` with nothing to deny still lifts an earlier
+        // `--undo unused`, which only the record keeps.
         self.window.is_none()
             && self.deny.is_empty()
             && !self.undo_window
             && !self.undo_unused
+            && !self.deny_asked
             && self.restore.0.is_empty()
             && self.restore.1.is_empty()
     }
@@ -856,6 +859,16 @@ pub(crate) fn save(settings: &Path, added: &Added) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deny_unused_alone_is_a_change() {
+        assert!(Change::default().is_empty());
+        let asked = Change {
+            deny_asked: true,
+            ..Change::default()
+        };
+        assert!(!asked.is_empty());
+    }
 
     fn session(tools: &[(&str, usize)], called: &[&str], skills: &[&str], peak: u64) -> Session {
         Session {

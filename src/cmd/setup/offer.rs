@@ -88,18 +88,20 @@ impl Offer {
                     .collect::<Vec<_>>()
             };
             let mut what = Vec::new();
-            for (kind, label) in [(Kind::Tool, "tools"), (Kind::Mcp, "MCP servers")] {
+            // Each by name: once denied, `--dry-run --json` no longer
+            // offers them, so this note is where they are listed.
+            for (kind, label) in [
+                (Kind::Tool, "tools"),
+                (Kind::Mcp, "MCP servers"),
+                (Kind::Skill, "skills"),
+            ] {
                 let names = named(kind);
                 if !names.is_empty() {
                     what.push(format!("{label} {}", names.join(", ")));
                 }
             }
-            let skills = named(Kind::Skill).len();
-            if skills > 0 {
-                what.push(format!("{skills} skills"));
-            }
             parts.push(format!(
-                "deny {} ({}; `--dry-run --json` lists each with its tokens)",
+                "deny {} ({})",
                 self.unused_reason(),
                 what.join("; ")
             ));
