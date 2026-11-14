@@ -8,6 +8,10 @@
 -- `scoped-lint`'s. Where the harness lets it (`call.rewrite`), a run piped
 -- straight into the programs that cut it runs under `jouet test --cmd`
 -- instead, uncut; the rest of the call stays as written.
+--
+-- `jouet wait pr` piped the same way loses the pipe: its output is short
+-- already, and its exit code says how the wait ended, which a pipe into
+-- tail turns into tail's 0.
 
 local function set(list: { string }): { [string]: boolean }
 	local out = {}
@@ -210,6 +214,11 @@ local function status_read(script: string, last: JouetCommand): boolean
 	if string.find(string.match(rest, "^[%s;]*") or "", ";;", 1, true) then
 		return true
 	end
+	-- `grep x; matched=$?` saves the status for later.
+	local next = string.match(rest, "^[%s;]*([^;&|\n]*)") or ""
+	if string.find(next, "$?", 1, true) or string.find(next, "PIPESTATUS", 1, true) then
+		return true
+	end
 	local after = string.match(rest, "^[%s;]*(%S*)") or ""
 	local first = string.sub(after, 1, 1)
 	return first == "}" or first == ")" or STATUS_WORDS[string.match(after, "^%a+") or ""] == true
@@ -323,6 +332,57 @@ local function jouet_test(command: JouetCommand): boolean
 	return false
 end
 
+-- Whether a command is a `jouet wait pr`, past jouet's own options; help
+-- only asks about one.
+-- `jouet wait`'s own options, which may come between `wait` and `pr`, and
+-- whether each takes a value.
+local WAIT_OPTIONS: { [string]: boolean } = {
+	["--timeout"] = true,
+	["--interval"] = true,
+	["--confirm-conflict"] = true,
+	["--jsonl"] = false,
+	["--quiet"] = false,
+}
+
+local function jouet_wait_pr(command: JouetCommand): boolean
+	if command.program ~= "jouet" then
+		return false
+	end
+	local i = 2
+	while command.argv[i] do
+		local arg = command.argv[i]
+		if arg == "--display" then
+			i += 2
+		elseif string.sub(arg, 1, 1) == "-" then
+			i += 1
+		else
+			if arg ~= "wait" then
+				return false
+			end
+			i += 1
+			while command.argv[i] and string.sub(command.argv[i], 1, 1) == "-" do
+				local option = command.argv[i]
+				local takes = WAIT_OPTIONS[option]
+				if takes == nil and not WAIT_OPTIONS[string.match(option, "^([^=]*)=") or ""] then
+					-- `--help`, or an option this rule does not know.
+					return false
+				end
+				i += if takes then 2 else 1
+			end
+			if command.argv[i] ~= "pr" then
+				return false
+			end
+			for k = i + 1, #command.argv do
+				if INSPECT[command.argv[k]] then
+					return false
+				end
+			end
+			return true
+		end
+	end
+	return false
+end
+
 -- The script of a `jouet test --cmd -- sh -c SCRIPT`.
 local SHELLS = set({ "sh", "bash", "zsh", "dash", "ksh" })
 local function script_under(command: JouetCommand): string?
@@ -357,22 +417,49 @@ local function speak(call: JouetCall, message: string): JouetDecision
 	return jouet.warn(message)
 end
 
--- One run to put under `jouet test --cmd`: where its words start and end
--- in the call's command, and where the pipeline that cut it ends.
-type Swap = { at: number, run: number, cut: number, by: string }
+-- One run to put under `jouet test --cmd`, or with `wait` a `jouet wait pr`
+-- to keep as it is: where its words start and end in the call's command,
+-- and where the pipeline that cut it ends.
+type Swap = { at: number, run: number, cut: number, by: string, wait: boolean }
 
--- The call's command with each run under `jouet test --cmd` and the
--- programs that cut it gone.
+-- The call's command with each run under `jouet test --cmd` (a wait as it
+-- is) and the programs that cut it gone.
 local function swapped(command: string, swaps: { Swap }): string
 	-- From the right, so the positions of the runs before stay true.
 	for k = #swaps, 1, -1 do
 		local s = swaps[k]
 		command = string.sub(command, 1, s.at - 1)
-			.. "jouet test --cmd -- "
+			.. (if s.wait then "" else "jouet test --cmd -- ")
 			.. string.sub(command, s.at, s.run)
 			.. string.sub(command, s.cut + 1)
 	end
 	return command
+end
+
+-- Why the call was rewritten, by the kinds of run it rewrote.
+local function rewritten_because(command: string, swaps: { Swap }): string
+	local tests, waits = nil, nil
+	for _, s in swaps do
+		if s.wait then
+			waits = waits or s.by
+		else
+			tests = tests or s.by
+		end
+	end
+	local why = {}
+	if tests then
+		table.insert(
+			why,
+			`a test or build run cut with {tests} goes under \`jouet test --cmd\` instead, which keeps the whole output in a log and prints one line of counts when the run passes, or each failure with the lines that explain it and the log's path, to read rather than running it again`
+		)
+	end
+	if waits then
+		table.insert(
+			why,
+			`\`jouet wait pr\` runs without the {waits} it was piped into, since its output is short already and the pipe hid its exit code, which says how the wait ended`
+		)
+	end
+	return `jouet ran this call as \`{command}\`, on purpose: {table.concat(why, "; and ")}.`
 end
 
 local rule: JouetRule = {
@@ -380,6 +467,19 @@ local rule: JouetRule = {
 		local swaps: { Swap } = {}
 		for i, command in call.commands do
 			if command.nested then
+				continue
+			end
+			if jouet_wait_pr(command) then
+				local last = if call.rewrite and call.command then pipeline_end(call.command :: string, call.commands, i) else nil
+				if last then
+					table.insert(swaps, {
+						at = command.words_at :: number,
+						run = (command.span :: { first: number, last: number }).last,
+						cut = (last.span :: { first: number, last: number }).last,
+						by = last.program or "",
+						wait = true,
+					})
+				end
 				continue
 			end
 			-- `jouet test` already prints only what matters, keeps the whole
@@ -449,6 +549,7 @@ local rule: JouetRule = {
 					run = (command.span :: { first: number, last: number }).last,
 					cut = (last.span :: { first: number, last: number }).last,
 					by = (cut :: JouetCommand).program or "",
+					wait = false,
 				})
 			elseif cut then
 				-- Assignments go before jouet, whose environment the command
@@ -473,10 +574,7 @@ local rule: JouetRule = {
 		end
 		if #swaps > 0 then
 			local command = swapped(call.command :: string, swaps)
-			return jouet.rewrite(
-				command,
-				`jouet ran this call as \`{command}\`, on purpose: a test or build run cut with {swaps[1].by} goes under \`jouet test --cmd\` instead, which keeps the whole output in a log and prints one line of counts when the run passes, or each failure with the lines that explain it and the log's path, to read rather than running it again.`
-			)
+			return jouet.rewrite(command, rewritten_because(command, swaps))
 		end
 		return nil
 	end,

@@ -15,15 +15,9 @@
 //! "block"`, `[rules] enable = ["python-edit"]`) applies to every session,
 //! whatever its arm, so both arms then behave alike.
 //!
-//! The watcher toggle runs the other way: it is new behaviour on trial, not
-//! an old default kept. `[experiment] watcher_share` percent of Claude Code
-//! sessions (the `new` arm) are told by the primer to run `jouet wait pr
-//! --until needs-agent` in the background after each push; the rest (the
-//! `control` arm) get today's primer and rely on the desktop app's Auto-fix
-//! alone.
-//!
-//! The drop toggle is new behaviour on trial too. `[experiment] drop_share`
-//! percent of Claude Code sessions (the `new` arm) have the desktop app's
+//! The drop toggle runs the other way: it is new behaviour on trial, not an
+//! old default kept. `[experiment] drop_share` percent of Claude Code
+//! sessions (the `new` arm) have the desktop app's
 //! Auto-fix events that are only noise (`crate::prompt::noise`) blocked
 //! before the agent sees them; the rest (the `control` arm) get every event.
 //! It is 0, off, by default.
@@ -33,7 +27,6 @@ use std::collections::BTreeMap;
 /// The toggles under test, as the ledger names them.
 pub(crate) const GATE: &str = "gate";
 pub(crate) const PYTHON_EDIT: &str = "python-edit";
-pub(crate) const WATCHER: &str = "watcher";
 pub(crate) const DROP: &str = "drop";
 
 /// Which arm of each toggle a session is in.
@@ -43,9 +36,6 @@ pub(crate) struct Arm {
     pub gate_blocks: bool,
     /// The python-edit rule denies, as before it was off by default.
     pub python_edit: bool,
-    /// The primer has the agent watch its PR with `jouet wait pr --until
-    /// needs-agent` after a push.
-    pub watcher: bool,
     /// Auto-fix events that are only noise are blocked before the agent
     /// sees them.
     pub drop: bool,
@@ -53,29 +43,24 @@ pub(crate) struct Arm {
 
 impl Arm {
     /// The arm of `session` when `control` percent of sessions (0 to 100)
-    /// keep each old default, `watcher` percent get the watcher and `drop`
-    /// percent have noise dropped.
-    pub(crate) fn of(session: &str, control: u64, watcher: u64, drop: u64) -> Self {
+    /// keep each old default and `drop` percent have noise dropped.
+    pub(crate) fn of(session: &str, control: u64, drop: u64) -> Self {
         let within = |toggle: &str, share: u64| bucket(toggle, session) < share.min(100);
         Self {
             gate_blocks: within(GATE, control),
             python_edit: within(PYTHON_EDIT, control),
-            watcher: within(WATCHER, watcher),
             drop: within(DROP, drop),
         }
     }
 
     /// For the ledger: the arm, `control` (today's behaviour) or `new`, of
     /// each toggle whose share is above 0.
-    pub(crate) fn labels(self, control: u64, watcher: u64, drop: u64) -> BTreeMap<String, String> {
+    pub(crate) fn labels(self, control: u64, drop: u64) -> BTreeMap<String, String> {
         let label = |old: bool| if old { "control" } else { "new" }.to_string();
         let mut labels = BTreeMap::new();
         if control > 0 {
             labels.insert(GATE.to_string(), label(self.gate_blocks));
             labels.insert(PYTHON_EDIT.to_string(), label(self.python_edit));
-        }
-        if watcher > 0 {
-            labels.insert(WATCHER.to_string(), label(!self.watcher));
         }
         if drop > 0 {
             labels.insert(DROP.to_string(), label(!self.drop));
@@ -106,26 +91,25 @@ mod tests {
     #[test]
     fn a_session_keeps_its_arm_and_the_share_holds_over_many() {
         let id = "3f0c2a8e-1b7d-4c55-9e2a-0d6f1b9c7e41";
-        assert_eq!(Arm::of(id, 25, 25, 25), Arm::of(id, 25, 25, 25));
-        assert_eq!(Arm::of(id, 0, 0, 0), Arm::default());
+        assert_eq!(Arm::of(id, 25, 25), Arm::of(id, 25, 25));
+        assert_eq!(Arm::of(id, 0, 0), Arm::default());
         assert_eq!(
-            Arm::of(id, 100, 0, 0),
+            Arm::of(id, 100, 0),
             Arm {
                 gate_blocks: true,
                 python_edit: true,
-                watcher: false,
                 drop: false,
             }
         );
         assert_eq!(
-            Arm::of(id, 0, 100, 0),
+            Arm::of(id, 0, 100),
             Arm {
-                watcher: true,
+                drop: true,
                 ..Arm::default()
             }
         );
         let arms: Vec<Arm> = (0..10_000)
-            .map(|n| Arm::of(&format!("session-{n}"), 25, 10, 10))
+            .map(|n| Arm::of(&format!("session-{n}"), 25, 10))
             .collect();
         let gate = arms.iter().filter(|a| a.gate_blocks).count();
         let python = arms.iter().filter(|a| a.python_edit).count();
@@ -137,16 +121,11 @@ mod tests {
         assert!((2_300..2_700).contains(&python), "{python}");
         // Assigned independently: about a quarter of a quarter.
         assert!((450..800).contains(&both), "{both}");
-        let watcher = arms.iter().filter(|a| a.watcher).count();
-        assert!((800..1_200).contains(&watcher), "{watcher}");
-        // Also independent of the gate: a tenth of a quarter, not all of a tenth.
-        let gate_and_watcher = arms.iter().filter(|a| a.gate_blocks && a.watcher).count();
-        assert!((150..400).contains(&gate_and_watcher), "{gate_and_watcher}");
         let drop = arms.iter().filter(|a| a.drop).count();
         assert!((800..1_200).contains(&drop), "{drop}");
-        // The drop arm hashes on its own toggle, not the watcher's.
-        let watcher_and_drop = arms.iter().filter(|a| a.watcher && a.drop).count();
-        assert!(watcher_and_drop < 300, "{watcher_and_drop}");
+        // Also independent of the gate: a tenth of a quarter, not all of a tenth.
+        let gate_and_drop = arms.iter().filter(|a| a.gate_blocks && a.drop).count();
+        assert!((150..400).contains(&gate_and_drop), "{gate_and_drop}");
         // The hash is fixed, so a session keeps its arm across releases.
         assert_eq!(bucket(GATE, "s1"), bucket(GATE, "s1"));
         assert_ne!(bucket(GATE, "s1"), bucket(PYTHON_EDIT, "s1"));
@@ -157,23 +136,21 @@ mod tests {
         let arm = Arm {
             gate_blocks: true,
             python_edit: false,
-            watcher: true,
             drop: false,
         };
         assert_eq!(
-            arm.labels(25, 25, 25),
+            arm.labels(25, 25),
             BTreeMap::from([
                 ("drop".to_string(), "control".to_string()),
                 ("gate".to_string(), "control".to_string()),
                 ("python-edit".to_string(), "new".to_string()),
-                ("watcher".to_string(), "new".to_string()),
             ])
         );
         // A toggle with no share is not under test, so it has no arm.
         assert_eq!(
-            arm.labels(0, 25, 0),
-            BTreeMap::from([("watcher".to_string(), "new".to_string())])
+            arm.labels(0, 25),
+            BTreeMap::from([("drop".to_string(), "control".to_string())])
         );
-        assert!(arm.labels(0, 0, 0).is_empty());
+        assert!(arm.labels(0, 0).is_empty());
     }
 }
