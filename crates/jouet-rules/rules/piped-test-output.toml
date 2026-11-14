@@ -1,7 +1,7 @@
 #:schema https://jouet.jdx.dev/schema/rules.json
 [[rule]]
 name = "piped-test-output"
-why = "Cutting a test or build run's output with head, tail or grep often drops the failure that mattered, and the whole run is repeated with another filter; `jouet test --cmd` keeps all of it in a log and prints each failure within a budget. Where the harness lets it, a run piped straight into head, tail or grep runs under `jouet test --cmd` instead. Other cuts warn the first time in a session and are denied after that, since a warning alone was followed once and then forgotten."
+why = "Cutting a test or build run's output with head, tail or grep often drops the failure that mattered, and the whole run is repeated with another filter; `jouet test --cmd` keeps all of it in a log and prints each failure within a budget. Where the harness lets it, a run piped straight into head, tail or grep runs under `jouet test --cmd` instead, and a `jouet wait pr` piped that way runs without the pipe, whose exit code hid how the wait ended. Other cuts warn the first time in a session and are denied after that, since a warning alone was followed once and then forgotten."
 mode = "deny"
 # The primer already asks for `jouet test --cmd` for any test or build, and
 # the rule warns before it ever denies, so naming it there saves no call.
@@ -109,6 +109,11 @@ fires = [
   { command = "cargo test | grep FAILED > saved.txt | head", rewrite = true, action = "warn" },
   # One run it cannot rewrite keeps the whole call as written.
   { command = "cargo build | tail && cargo test | tee t.log | tail", rewrite = true, action = "warn" },
+  # A piped `jouet wait pr` loses the pipe, so its exit code reaches the
+  # agent; a test run in the same call still goes under `jouet test --cmd`.
+  { command = "jouet wait pr --until needs-agent 2>&1 | tail -40", rewritten = "jouet wait pr --until needs-agent 2>&1" },
+  { command = "git push && jouet wait pr 12 --until checks | grep -v pending | tail -5; echo done", rewritten = "git push && jouet wait pr 12 --until checks; echo done" },
+  { command = "cargo test | tail -3 && jouet wait pr | head", rewritten = "jouet test --cmd -- cargo test && jouet wait pr" },
 ]
 quiet = [
   # Left to `scoped-lint`.
@@ -149,4 +154,11 @@ quiet = [
   # Nothing to rewrite where the call may be rewritten, either.
   { command = "cargo test 2>&1 | tee out.log", rewrite = true },
   { command = "cargo clippy 2>&1 | tail", rewrite = true },
+  # A wait that is not piped, piped where its status is read, or asked about.
+  { command = "jouet wait pr --until needs-agent", rewrite = true },
+  { command = "jouet wait pr --until checks | grep -q failed && echo red", rewrite = true },
+  { command = "jouet wait pr --help | head", rewrite = true },
+  { command = "jouet wait ci | tail", rewrite = true },
+  # Without a rewrite, it says nothing: the wait's output is short.
+  "jouet wait pr --until needs-agent | tail -5",
 ]
