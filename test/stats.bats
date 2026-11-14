@@ -108,6 +108,10 @@ stamp_revisions() {
 	run --separate-stderr jq -c 'select(.event == "jouet-run") | [.harness, .shape, .exit_code != 0]' "$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
 	assert_output '["jouet","jouet edit replace",true]
 ["jouet","jouet edit replace",true]'
+	# Each run says how long it took, which a background call cannot.
+	run --separate-stderr jq -c 'select(.event == "jouet-run") | .duration_ms | type' "$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	assert_output '"number"
+"number"'
 
 	run --separate-stderr jouet stats --json --display plain
 	assert_success

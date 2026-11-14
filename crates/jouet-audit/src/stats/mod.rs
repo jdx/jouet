@@ -22,13 +22,14 @@ pub use arms::{
 };
 pub use costs::{AfterSetup, Cost, CostKind, costs, net};
 /// When a check or edit was issued, in milliseconds: the end of the ledger
-/// second it ended in, less how long it ran. A `jouet-run` line has no
-/// duration, so the shell call that ran it gives both: one of the session's
+/// second it ended in, less how long it ran. A `jouet-run` line is dated by
+/// the shell call that ran it, which began before jouet did: one of the session's
 /// `post-tool-use` lines of a `jouet` command in the next two seconds,
 /// the one whose shape names the run. Older ledgers wrote every subcommand
 /// as `<arg>`, so there it is the first `jouet` call that began at or after
 /// `not_before`, the decision (an earlier one was another, already
-/// running); with none, the run is dated by its own line.
+/// running); with none, the run is dated by its own line, less its own
+/// duration where it recorded one.
 fn issued_ms<'a>(
     closer: &'a LedgerEntry,
     after: impl Iterator<Item = &'a LedgerEntry>,
@@ -40,8 +41,9 @@ fn issued_ms<'a>(
             .saturating_sub(e.duration_ms.unwrap_or(0))
     };
     // `jouet test` writes two lines without a duration, its `test-run`
-    // record and its `jouet-run`; the shell call that ran it has one.
-    if closer.duration_ms.is_none() && matches!(closer.event.as_str(), "jouet-run" | "test-run") {
+    // record and, before runs recorded their own, its `jouet-run`; the
+    // shell call that ran it has one.
+    if closer.event == "jouet-run" || (closer.duration_ms.is_none() && closer.event == "test-run") {
         let within = closer.ts.saturating_add(2);
         let calls: Vec<&LedgerEntry> = after
             .take_while(|e| e.ts <= within)
@@ -429,6 +431,10 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
     let mut blocks: Vec<usize> = Vec::new();
     // Each reason the gate found at a stop: the entry, its reason and action.
     let mut gate: Vec<(usize, &str, &str)> = Vec::new();
+    // Background calls of each command in each session whose own run has
+    // not ended yet: that run's duration is the command's time, not the
+    // call's, which only started it.
+    let mut backgrounded: HashMap<(Option<&str>, String), u64> = HashMap::new();
     for (i, e) in kept.iter().enumerate() {
         sessions.insert(e.session.as_deref());
         if let Some(session) = e.session.as_deref() {
@@ -508,12 +514,33 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
         if e.event == "jouet-run" {
             let code = e.exit_code.unwrap_or(0);
             added.failed_runs += u64::from(failed_run(code));
+            // A run in the foreground is followed by its call, within the
+            // two seconds the hook takes; that call has the time.
+            let within = e.ts.saturating_add(2);
+            let called = |command: &str| {
+                kept[i + 1..]
+                    .iter()
+                    .take_while(|f| f.ts <= within)
+                    .any(|f| {
+                        f.event == "post-tool-use"
+                            && !f.background
+                            && f.session == e.session
+                            && f.shape.as_deref().is_some_and(|s| s.contains(command))
+                    })
+            };
             for command in &ran {
                 let c = command_runs(&mut commands, &e.harness, command);
                 c.own_runs += 1;
                 // Exit 1 from `jouet test` is the tests failing, not jouet.
                 c.own_failed +=
                     u64::from(code != 0 && !is_answer(std::slice::from_ref(command), code));
+                let pending = backgrounded
+                    .get_mut(&(e.session.as_deref(), command.clone()))
+                    .filter(|n| **n > 0 && !called(command));
+                if let (Some(n), Some(ms)) = (pending, e.duration_ms) {
+                    *n -= 1;
+                    c.duration_ms += ms;
+                }
             }
             continue;
         }
@@ -558,7 +585,13 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
             let c = command_runs(&mut commands, &e.harness, &command);
             c.runs += 1;
             c.failed += u64::from(failed);
-            c.duration_ms += e.duration_ms.unwrap_or(0);
+            if e.background {
+                *backgrounded
+                    .entry((e.session.as_deref(), command))
+                    .or_default() += 1;
+            } else {
+                c.duration_ms += e.duration_ms.unwrap_or(0);
+            }
         }
     }
     // What the agent did after each denial: its next command in the session.

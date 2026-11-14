@@ -28,6 +28,9 @@ pub struct LedgerEntry {
     pub shape: Option<String>,
     pub exit_code: Option<i32>,
     pub duration_ms: Option<u64>,
+    /// For a `post-tool-use`: the call ran in the background, so its
+    /// duration is only how long it took to start.
+    pub background: bool,
     /// The bytes of output the call gave the agent, where the harness says.
     pub output_bytes: Option<u64>,
     pub decisions: Vec<LedgerDecision>,

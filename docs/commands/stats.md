@@ -101,9 +101,11 @@ Each harness is priced by its own history, which ends at that harness's first le
 
 ### Own exit codes
 
-The hooks see the exit code of the whole call, so a call such as `jouet edit replace ... && cargo test` that fails on its tests looks like a failed edit. To tell the two apart, every jouet command run in an agent's session (one with `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID` or `JOUET_SESSION_ID` set) appends a `jouet-run` line to the [ledger](/setup#the-ledger) with the command's name and its own exit code, never its arguments. Its harness is its session's, from the hooks' lines; a run in a session the hooks never saw is left out. Turning the ledger off (`[hooks] ledger`) turns this off too.
+The hooks see the exit code of the whole call, so a call such as `jouet edit replace ... && cargo test` that fails on its tests looks like a failed edit. To tell the two apart, every jouet command run in an agent's session (one with `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID` or `JOUET_SESSION_ID` set) appends a `jouet-run` line to the [ledger](/setup#the-ledger) with the command's name, its own exit code and how long it ran, never its arguments. Its harness is its session's, from the hooks' lines; a run in a session the hooks never saw is left out. Turning the ledger off (`[hooks] ledger`) turns this off too.
 
 In the table of commands, `calls failed` counts the calls that ran a command and failed, on it or on whatever else they ran, and `own runs` and `own failed` count its runs that recorded their own exit code, and its own failures among them. A check's answer, such as `jouet test` exit 1 for failing tests or `jouet wait pr` exit 124 for still waiting, is not an own failure (see [how the costs work](#how-the-costs-work)). Own runs can exceed runs: they include the jouet commands a call started itself, as a script, a test suite or another jouet command does, which the hooks never see.
+
+`time` is how long the calls that ran a command took, as the harness says. A call started in the background (Claude Code's `run_in_background`) returns as soon as it starts, so for it the command's own run gives the time: a `jouet wait pr` left watching for two hours counts two hours, not the few milliseconds its call took. Runs recorded before jouet kept their duration add nothing.
 
 ## How the costs work
 

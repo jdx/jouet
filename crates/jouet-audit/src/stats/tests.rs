@@ -937,6 +937,40 @@ fn jouet_runs_own_exit_codes_decide_what_jouet_failed() {
 }
 
 #[test]
+fn a_background_run_takes_its_own_time_not_the_calls() {
+    let call = |shape: &str, ms, background| LedgerEntry {
+        duration_ms: Some(ms),
+        background,
+        ..post(shape, 0)
+    };
+    let run = |shape: &str, code, ms| LedgerEntry {
+        harness: "jouet".into(),
+        event: "jouet-run".into(),
+        duration_ms: Some(ms),
+        ..post(shape, code)
+    };
+    let entries = [
+        // Started in the background: the call returns in 3 ms, the wait
+        // ends two hours later.
+        call("jouet wait pr --until <arg> | tail <arg>", 3, true),
+        // In the foreground the call's time stands, the run's is not
+        // added, though a background wait is still running.
+        run("jouet wait pr", 0, 59_900),
+        call("jouet wait pr --until <arg>", 60_000, false),
+        run("jouet wait pr", 124, 7_200_000),
+        // A run whose call is unknown adds nothing.
+        run("jouet wait pr", 0, 5_000),
+    ];
+    let m = measure(&entries, &StatsFilter::default());
+    let wait = m
+        .commands
+        .iter()
+        .find(|c| c.command == "jouet wait pr")
+        .unwrap();
+    assert_eq!((wait.runs, wait.duration_ms), (2, 7_260_000));
+}
+
+#[test]
 fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
     let at = |ts: u64, e: LedgerEntry| LedgerEntry { ts, ..e };
     let decided = |ts: u64, session: &str, action: &str, revision: Option<&str>| {
