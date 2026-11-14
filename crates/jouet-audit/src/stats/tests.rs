@@ -971,6 +971,44 @@ fn a_background_run_takes_its_own_time_not_the_calls() {
 }
 
 #[test]
+fn background_runs_pair_one_to_one_in_either_order() {
+    let at = |ts, e: LedgerEntry| LedgerEntry { ts, ..e };
+    let call = |shape: &str, ms, background| LedgerEntry {
+        duration_ms: Some(ms),
+        background,
+        ..post(shape, 0)
+    };
+    let run = |shape: &str, ms| LedgerEntry {
+        harness: "jouet".into(),
+        event: "jouet-run".into(),
+        duration_ms: Some(ms),
+        ..post(shape, 0)
+    };
+    let entries = [
+        // A background wait and a foreground one end together: the
+        // foreground call takes its own run, the latest before it.
+        at(100, call("jouet wait pr --until <arg>", 3, true)),
+        at(200, run("jouet wait pr", 7_200_000)),
+        at(201, run("jouet wait pr", 590)),
+        at(201, call("jouet wait pr --until <arg>", 600, false)),
+        // A fast background run ends before its hook writes the call, and
+        // its path is shorter than the call's command.
+        at(300, run("jouet pr threads", 1_500)),
+        at(301, call("jouet pr threads reply <arg>", 4, true)),
+    ];
+    let m = measure(&entries, &StatsFilter::default());
+    let time = |command: &str| {
+        m.commands
+            .iter()
+            .filter(|c| c.command == command)
+            .map(|c| c.duration_ms)
+            .sum::<u64>()
+    };
+    assert_eq!(time("jouet wait pr"), 7_200_600);
+    assert_eq!(time("jouet pr threads reply"), 1_500);
+}
+
+#[test]
 fn each_deny_warning_and_rewrite_runs_until_the_next_check_or_edit() {
     let at = |ts: u64, e: LedgerEntry| LedgerEntry { ts, ..e };
     let decided = |ts: u64, session: &str, action: &str, revision: Option<&str>| {

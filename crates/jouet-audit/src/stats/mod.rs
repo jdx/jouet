@@ -431,10 +431,13 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
     let mut blocks: Vec<usize> = Vec::new();
     // Each reason the gate found at a stop: the entry, its reason and action.
     let mut gate: Vec<(usize, &str, &str)> = Vec::new();
-    // Background calls of each command in each session whose own run has
-    // not ended yet: that run's duration is the command's time, not the
-    // call's, which only started it.
-    let mut backgrounded: HashMap<(Option<&str>, String), u64> = HashMap::new();
+    // Each jouet run (its entry and command path) and each call of a jouet
+    // command in the foreground and in the background (its entry and
+    // command), paired after the loop: a background call's time is its
+    // run's, since the call only started it.
+    let mut runs: Vec<(usize, String)> = Vec::new();
+    let mut foreground: Vec<(usize, String)> = Vec::new();
+    let mut background: Vec<(usize, String)> = Vec::new();
     for (i, e) in kept.iter().enumerate() {
         sessions.insert(e.session.as_deref());
         if let Some(session) = e.session.as_deref() {
@@ -514,33 +517,13 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
         if e.event == "jouet-run" {
             let code = e.exit_code.unwrap_or(0);
             added.failed_runs += u64::from(failed_run(code));
-            // A run in the foreground is followed by its call, within the
-            // two seconds the hook takes; that call has the time.
-            let within = e.ts.saturating_add(2);
-            let called = |command: &str| {
-                kept[i + 1..]
-                    .iter()
-                    .take_while(|f| f.ts <= within)
-                    .any(|f| {
-                        f.event == "post-tool-use"
-                            && !f.background
-                            && f.session == e.session
-                            && f.shape.as_deref().is_some_and(|s| s.contains(command))
-                    })
-            };
             for command in &ran {
                 let c = command_runs(&mut commands, &e.harness, command);
                 c.own_runs += 1;
                 // Exit 1 from `jouet test` is the tests failing, not jouet.
                 c.own_failed +=
                     u64::from(code != 0 && !is_answer(std::slice::from_ref(command), code));
-                let pending = backgrounded
-                    .get_mut(&(e.session.as_deref(), command.clone()))
-                    .filter(|n| **n > 0 && !called(command));
-                if let (Some(n), Some(ms)) = (pending, e.duration_ms) {
-                    *n -= 1;
-                    c.duration_ms += ms;
-                }
+                runs.push((i, command.clone()));
             }
             continue;
         }
@@ -586,14 +569,14 @@ pub fn measure(entries: &[LedgerEntry], filter: &StatsFilter) -> Measured {
             c.runs += 1;
             c.failed += u64::from(failed);
             if e.background {
-                *backgrounded
-                    .entry((e.session.as_deref(), command))
-                    .or_default() += 1;
+                background.push((i, command));
             } else {
                 c.duration_ms += e.duration_ms.unwrap_or(0);
+                foreground.push((i, command));
             }
         }
     }
+    background_time(&kept, &runs, &foreground, &background, &mut commands);
     // What the agent did after each denial: its next command in the session.
     for indexes in by_session.values() {
         for (n, &i) in indexes.iter().enumerate() {
@@ -765,6 +748,59 @@ fn command_runs<'a>(
             harness: harness.to_string(),
             ..CommandRuns::default()
         })
+}
+
+/// Adds each background call's run to its command's time. Each run goes to
+/// one call at most. A foreground call claims first: it takes the latest
+/// run of its command, in its session, that the ledger has before it and
+/// that ended at most two seconds earlier. Its own duration already counts.
+/// Then each background call takes the earliest run left that ended no more
+/// than two seconds before the call was recorded: a fast run can end before
+/// its hook writes the call. A run's path is the declared command, which
+/// may be shorter than the call's (`jouet pr threads` for `jouet pr threads
+/// reply`), so a call matches a run its command starts with.
+fn background_time(
+    kept: &[&LedgerEntry],
+    runs: &[(usize, String)],
+    foreground: &[(usize, String)],
+    background: &[(usize, String)],
+    commands: &mut BTreeMap<(String, String), CommandRuns>,
+) {
+    let of = |path: &str, command: &str| {
+        command
+            .strip_prefix(path)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))
+    };
+    let mut claimed = vec![false; runs.len()];
+    for (call, command) in foreground {
+        let f = kept[*call];
+        let run = runs.iter().enumerate().rev().find(|(r, (at, path))| {
+            let e = kept[*at];
+            !claimed[*r]
+                && at < call
+                && e.session == f.session
+                && of(path, command)
+                && f.ts <= e.ts.saturating_add(2)
+        });
+        if let Some((r, _)) = run {
+            claimed[r] = true;
+        }
+    }
+    for (call, command) in background {
+        let f = kept[*call];
+        let run = runs.iter().enumerate().find(|(r, (at, path))| {
+            let e = kept[*at];
+            !claimed[*r]
+                && e.session == f.session
+                && of(path, command)
+                && e.ts.saturating_add(2) >= f.ts
+        });
+        if let Some((r, (at, _))) = run {
+            claimed[r] = true;
+            command_runs(commands, &f.harness, command).duration_ms +=
+                kept[*at].duration_ms.unwrap_or(0);
+        }
+    }
 }
 
 fn rule_counts<'a>(rules: &'a mut BTreeMap<String, RuleCounts>, rule: &str) -> &'a mut RuleCounts {
