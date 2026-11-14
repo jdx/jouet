@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5](https://github.com/jdx/jouet/compare/v0.0.4...v0.0.5) - 2026-11-14
+
+### Added
+
+- *(setup)* apply the context budget by default ([#612](https://github.com/jdx/jouet/pull/612))
+- *(hooks)* rewrite every cut test run on Claude Code ([#607](https://github.com/jdx/jouet/pull/607))
+- *(experiment)* add a drop arm that blocks Auto-fix events that are only noise ([#605](https://github.com/jdx/jouet/pull/605))
+- *(rules)* rewrite a cut test run to jouet test --cmd on Claude Code (Track E) ([#601](https://github.com/jdx/jouet/pull/601))
+- *(rules)* give each parsed command its source span (Track E) ([#595](https://github.com/jdx/jouet/pull/595))
+- *(experiment)* add a watcher arm that has the agent wait on its PR ([#599](https://github.com/jdx/jouet/pull/599))
+- *(stats)* judge each rule decision by the requests until the next check or edit ([#600](https://github.com/jdx/jouet/pull/600))
+- *(stats)* compare experiment arms within each repository ([#598](https://github.com/jdx/jouet/pull/598))
+- *(hook)* record what started each Claude Code turn ([#597](https://github.com/jdx/jouet/pull/597))
+- *(stats)* split the experiment arms evenly by default ([#593](https://github.com/jdx/jouet/pull/593))
+- *(hook)* give Claude Code subagents the session-start primer ([#591](https://github.com/jdx/jouet/pull/591))
+- *(wait)* wake once when a PR needs the agent with wait pr --until needs-agent ([#588](https://github.com/jdx/jouet/pull/588))
+- *(stats)* compare experiment arms for the stop gate and python-edit per session ([#586](https://github.com/jdx/jouet/pull/586))
+- *(audit)* charge input to what stays in the context, and replay a what-if ([#587](https://github.com/jdx/jouet/pull/587))
+- *(audit)* report the fixed context and jouet's own costs ([#579](https://github.com/jdx/jouet/pull/579))
+- *(setup)* [**breaking**] install the jouet-init skill only with --init-skill ([#581](https://github.com/jdx/jouet/pull/581))
+- *(setup)* offer a context budget from your own Claude Code sessions ([#580](https://github.com/jdx/jouet/pull/580))
+- *(rule)* turn python-edit off by default, with the primer line it backs ([#582](https://github.com/jdx/jouet/pull/582))
+- *(verify)* make the stop gate observe by default, and fix two coverage misses ([#578](https://github.com/jdx/jouet/pull/578))
+- *(setup)* deny Claude Code's unused Artifact tools to cut every request by ~12.8k tokens ([#566](https://github.com/jdx/jouet/pull/566))
+- *(ci)* rerun every failed job with ci explain --rerun ([#565](https://github.com/jdx/jouet/pull/565))
+
+### Fixed
+
+- *(stats)* count a background jouet run's own time ([#611](https://github.com/jdx/jouet/pull/611))
+- *(setup)* deny only what the person added and never used ([#608](https://github.com/jdx/jouet/pull/608))
+- *(ledger)* keep every jouet subcommand in a call's shape ([#596](https://github.com/jdx/jouet/pull/596))
+- *(stats)* stop counting a check's answer as an own failure ([#594](https://github.com/jdx/jouet/pull/594))
+- *(hook)* answer a session start or tool call once when the hooks are installed twice ([#592](https://github.com/jdx/jouet/pull/592))
+- *(diag)* report a fallback checker that fails without a finding as unavailable ([#590](https://github.com/jdx/jouet/pull/590))
+- *(hook)* set the check-run timeout in every Claude Code permission mode ([#577](https://github.com/jdx/jouet/pull/577))
+- expose npx to the Actual Budget benchmark ([#583](https://github.com/jdx/jouet/pull/583))
+- *(search)* suggest literal mode for invalid regex ([#576](https://github.com/jdx/jouet/pull/576))
+- *(verify)* read an hk file list named through a shell variable ([#572](https://github.com/jdx/jouet/pull/572))
+- *(setup)* verify affected checks before writing configuration ([#567](https://github.com/jdx/jouet/pull/567))
+- *(wait)* avoid passing while CI checks gate disagrees ([#570](https://github.com/jdx/jouet/pull/570))
+- *(test)* explain missing baseline dependencies ([#573](https://github.com/jdx/jouet/pull/573))
+- *(bench)* retain fnox checker build errors ([#574](https://github.com/jdx/jouet/pull/574))
+- *(guide)* show an executable patch example for edit ([#568](https://github.com/jdx/jouet/pull/568))
+- *(test)* show npm fixture installation errors ([#569](https://github.com/jdx/jouet/pull/569))
+- *(bench)* run Claude Code as the desktop app, like real sessions ([#571](https://github.com/jdx/jouet/pull/571))
+
+### Other
+
+- *(ci)* migrate lock workflows to GitHub App client IDs ([#610](https://github.com/jdx/jouet/pull/610))
+- email when the docs build fails on the default branch ([#606](https://github.com/jdx/jouet/pull/606))
+- only accept bug reports from real use
+- *(ci)* stop cargo-deny advisories from blocking unrelated PRs ([#603](https://github.com/jdx/jouet/pull/603))
+- *(setup)* say that new hook events need setup run again ([#604](https://github.com/jdx/jouet/pull/604))
+
 ## [0.0.4](https://github.com/jdx/jouet/compare/v0.0.3...v0.0.4) - 2026-11-09
 
 ### Added
