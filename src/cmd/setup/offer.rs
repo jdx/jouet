@@ -1,13 +1,12 @@
-//! The context budget setup offers for Claude Code: asked at a terminal,
-//! noted everywhere else, and written only on a yes or an explicit flag.
+//! The context budget a plain `jouet setup claude` applies from your recent
+//! sessions, and the note that says why and how to take it back.
 
-use crate::budget::{self, Change, History, Kind, Unused};
+use crate::budget::{self, History, Kind, Unused};
 use serde::Serialize;
-use std::fmt::Write as _;
 use std::io::{self, Write as _};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// What setup could change, for `--json` and the note.
+/// What setup changes, for `--json` and the note.
 #[derive(Debug, Serialize)]
 pub(super) struct Offer {
     /// Recent sessions read.
@@ -68,12 +67,15 @@ impl Offer {
         )
     }
 
-    /// The note for a run that cannot ask: what each flag would do.
-    pub(super) fn note(&self, setup: &str) -> String {
+    /// Why setup changes what it does, and how to install without it. The
+    /// notes from [`super::budget_notes`] say what changed and how to undo
+    /// each part.
+    pub(super) fn note(&self, setup: &str, dry_run: bool) -> String {
         let mut parts = Vec::new();
-        if self.compact_window.is_some() {
+        if let Some(window) = self.compact_window {
             parts.push(format!(
-                "`{setup} --compact-window 200k` ({})",
+                "compact at {} tokens ({})",
+                budget::tokens(window),
                 self.window_reason()
             ));
         }
@@ -97,55 +99,22 @@ impl Offer {
                 what.push(format!("{skills} skills"));
             }
             parts.push(format!(
-                "`{setup} --deny-unused` ({}: {}; `--dry-run --json` lists each with its tokens)",
+                "deny {} ({}; `--dry-run --json` lists each with its tokens)",
                 self.unused_reason(),
                 what.join("; ")
             ));
         }
         format!(
-            "setup can also cut what each request carries, changing nothing unless asked: {}",
+            "{} what each request carries, from your recent sessions: {}. \
+             `{setup} --no-context-budget` installs without it",
+            if dry_run {
+                "setup would cut"
+            } else {
+                "setup cut"
+            },
             parts.join("; and ")
         )
     }
-
-    /// Asks the person at the terminal about each choice, and returns the
-    /// ones accepted.
-    pub(super) fn ask(self, setup: &str) -> Change {
-        let mut change = Change::default();
-        if let Some(window) = self.compact_window {
-            eprintln!("{}.", capitalized(&self.window_reason()));
-            if confirm(&format!(
-                "Compact conversations at {} tokens of context (autoCompactWindow: {window})? \
-                 `{setup} --undo window` takes it back. [y/N] ",
-                budget::tokens(window)
-            )) {
-                change.window = Some(window);
-            }
-        }
-        if !self.unused.is_empty() {
-            let mut list = String::new();
-            for item in &self.unused {
-                let _ = writeln!(list, "  {}", item.line());
-            }
-            eprint!(
-                "These are {} (tokens per request, estimated):\n{list}",
-                self.unused_reason()
-            );
-            if confirm(&format!(
-                "Deny them? Skills stay available as /name. `{setup} --undo unused` takes them back. [y/N] "
-            )) {
-                change.deny = self.unused;
-            }
-        }
-        change
-    }
-}
-
-fn capitalized(text: &str) -> String {
-    let mut chars = text.chars();
-    chars.next().map_or_else(String::new, |c| {
-        c.to_uppercase().chain(chars).collect::<String>()
-    })
 }
 
 /// Whether stdin has ended: every later question is then a no, rather than

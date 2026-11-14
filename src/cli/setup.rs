@@ -11,11 +11,10 @@ use usage_rs::Args;
 /// --uninstall removes only what jouet added. The hooks do
 /// nothing where jouet is not on PATH.
 ///
-/// For Claude Code, setup also offers a context budget from your own recent
+/// For Claude Code, setup also applies a context budget from your own recent
 /// sessions: a compaction window when they run on a 1M-token model, and
-/// denying what none of them used. Asked at a terminal, otherwise only
-/// noted: nothing is written without --compact-window or --deny-unused, and
-/// --undo takes each back.
+/// denying what none of them used. It says what it changed; --undo takes
+/// each part back and keeps it back, and --no-context-budget skips both.
 #[derive(Args)]
 pub(crate) struct SetupArgs {
     /// claude, codex, cursor, gemini or copilot
@@ -61,7 +60,12 @@ pub(crate) struct SetupArgs {
     #[usage(long)]
     pub(crate) deny_unused: bool,
     /// Claude Code: take back what --compact-window (window) or
-    /// --deny-unused (unused) added, and nothing else
+    /// --deny-unused (unused) added, and nothing else. A later setup leaves
+    /// that part alone until its flag asks for it again
     #[usage(long, value_name = "CHOICE", choices("window", "unused"))]
     pub(crate) undo: Option<String>,
+    /// Claude Code: install without the context budget setup otherwise
+    /// applies from your recent sessions
+    #[usage(long)]
+    pub(crate) no_context_budget: bool,
 }

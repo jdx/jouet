@@ -676,34 +676,65 @@ claude_sessions() {
 	jq -nc '{type: "user", message: {content: "<command-name>/loop</command-name>"}}' >>"$dir/session-0.jsonl"
 }
 
-@test "setup notes the context budget it could set, and writes none of it unasked" {
+@test "setup applies the context budget, says why and how to take it back" {
 	claude_sessions 20 640000
-	run --separate-stderr jouet setup claude
-	assert_success
-	assert_output --partial "note: setup can also cut what each request carries, changing nothing unless asked: \`jouet setup claude --compact-window 200k\` (20 of your last 20 sessions went past 200k tokens of context, up to 640k); and \`jouet setup claude --deny-unused\` (2 definitions none of your last 20 sessions used"
-	assert_output --partial 'MCP servers linear; 1 skills;'
-	run jq -c '[.autoCompactWindow, .permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
-	assert_output '[null,["Artifact","ArtifactComments","ArtifactData"],null]'
 	run --separate-stderr jouet setup claude --dry-run --json
+	assert_success
 	run jq -c '.context_budget | [.compact_window, .past_window, [.unused[] | [.kind, .name]]]' <<<"$output"
 	assert_output '[200000,20,[["mcp","linear"],["skill","anthropic-skills:docx"]]]'
+	assert [ ! -e "$HOME/.claude/settings.json" ]
+
+	run --separate-stderr jouet setup claude
+	assert_success
+	assert_output --partial "note: setup cut what each request carries, from your recent sessions: compact at 200k tokens (20 of your last 20 sessions went past 200k tokens of context, up to 640k); and deny 2 definitions none of your last 20 sessions used"
+	assert_output --partial 'MCP servers linear; 1 skills;'
+	assert_output --partial "\`jouet setup claude --no-context-budget\` installs without it"
+	assert_output --partial "note: set autoCompactWindow to 200000; \`jouet setup claude --undo window\` takes it back"
+	assert_output --partial "\`jouet setup claude --undo unused\` takes them back"
+	run jq -c '[.autoCompactWindow, .permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
+	assert_output '[200000,["Artifact","ArtifactComments","ArtifactData","mcp__linear"],{"anthropic-skills:docx":"user-invocable-only"}]'
+
+	# Running it again changes nothing.
+	run --separate-stderr jouet setup claude
+	assert_success
+	refute_output --partial 'setup cut'
 }
 
-@test "setup asked at a terminal writes nothing without a yes" {
+@test "an undone part of the context budget stays undone, and --no-context-budget skips it" {
 	claude_sessions 20 640000
-	run in_tty "XDG_STATE_HOME=$XDG_STATE_HOME" jouet setup claude
+	run --separate-stderr jouet setup claude --no-context-budget
 	assert_success
-	assert_output --partial 'Compact conversations at 200k tokens of context (autoCompactWindow: 200000)?'
-	assert_output --partial 'Deny them? Skills stay available as /name.'
-	run jq -c '[.autoCompactWindow, .skillOverrides]' "$HOME/.claude/settings.json"
-	assert_output '[null,null]'
+	refute_output --partial 'setup cut'
+	run jq -c '[.autoCompactWindow, .permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
+	assert_output '[null,["Artifact","ArtifactComments","ArtifactData"],null]'
+
+	run --separate-stderr jouet setup claude
+	run --separate-stderr jouet setup claude --undo window
+	assert_success
+	run --separate-stderr jouet setup claude
+	assert_success
+	refute_output --partial 'compact at'
+	run jq -c '[.autoCompactWindow, (.permissions.deny | length)]' "$HOME/.claude/settings.json"
+	assert_output '[null,4]'
+
+	run --separate-stderr jouet setup claude --undo unused
+	run --separate-stderr jouet setup claude
+	refute_output --partial 'setup cut'
+	run jq -c '[.autoCompactWindow, .permissions.deny, .skillOverrides]' "$HOME/.claude/settings.json"
+	assert_output '[null,["Artifact","ArtifactComments","ArtifactData"],null]'
+
+	# Its flag asks for it again.
+	run --separate-stderr jouet setup claude --compact-window 200k
+	run --separate-stderr jouet setup claude
+	run jq .autoCompactWindow "$HOME/.claude/settings.json"
+	assert_output 200000
 }
 
 @test "a 200k model's sessions are not offered a window, and few sessions no denials" {
 	claude_sessions 19 150000
 	run --separate-stderr jouet setup claude
 	assert_success
-	refute_output --partial 'setup can also cut'
+	refute_output --partial 'setup cut'
 	run --separate-stderr jouet setup claude --deny-unused
 	assert_success
 	assert_output --partial 'note: nothing to deny: only 19 recent sessions recorded their tools, and it takes 20'

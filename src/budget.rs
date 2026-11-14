@@ -146,16 +146,6 @@ pub(crate) enum Kind {
     Skill,
 }
 
-impl Kind {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Tool => "tool",
-            Self::Mcp => "MCP server",
-            Self::Skill => "skill",
-        }
-    }
-}
-
 /// A definition every request carried and no recent session used.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct Unused {
@@ -184,15 +174,6 @@ impl Unused {
             Some(entry) => added.deny.contains(&entry),
             None => added.skills.contains(&self.name),
         }
-    }
-
-    pub(crate) fn line(&self) -> String {
-        format!(
-            "{:>6}  {} ({})",
-            format!("~{}", tokens(self.tokens)),
-            self.name,
-            self.kind.label()
-        )
     }
 }
 
@@ -588,6 +569,14 @@ pub(crate) struct Added {
     pub(crate) deny: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) skills: Vec<String>,
+    /// `--undo window` was run: a plain setup sets no window again until
+    /// `--compact-window` asks for one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) declined_window: bool,
+    /// `--undo unused` was run: a plain setup denies nothing again until
+    /// `--deny-unused` asks.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) declined_unused: bool,
 }
 
 /// The budget changes for one run of setup.
@@ -597,6 +586,11 @@ pub(crate) struct Change {
     pub(crate) deny: Vec<Unused>,
     pub(crate) undo_window: bool,
     pub(crate) undo_unused: bool,
+    /// The undo was asked for (`--undo`), not part of `--uninstall`, so a
+    /// later plain setup leaves that part alone.
+    pub(crate) decline: bool,
+    /// `--deny-unused` was given, which lifts an earlier `--undo unused`.
+    pub(crate) deny_asked: bool,
     /// What setup added earlier and [`wrong_picks`] puts back: denials and
     /// hidden skills.
     pub(crate) restore: (Vec<String>, Vec<String>),
@@ -622,6 +616,16 @@ pub(crate) fn apply(doc: &mut Value, change: &Change, added: &mut Added) -> Vec<
     let Some(object) = doc.as_object_mut() else {
         return notes;
     };
+    if change.decline {
+        added.declined_window |= change.undo_window;
+        added.declined_unused |= change.undo_unused;
+    }
+    if change.window.is_some() {
+        added.declined_window = false;
+    }
+    if change.deny_asked {
+        added.declined_unused = false;
+    }
     if change.undo_window
         && let Some(window) = added.auto_compact_window
     {

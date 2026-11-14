@@ -7,7 +7,7 @@ Install jouet's hooks into a coding agent's harness
 
 Merges hooks into Claude Code's settings.json, Codex's hooks.json, Cursor's hooks.json, Gemini CLI's settings.json or Copilot's hooks/jouet.json, keeping every other hook. The session-start hook primes each session with the commands and rules, so the skill, which says the same, is installed only with --skill or when priming is off ([hooks] prime). Running it again changes nothing. The jouet-init project onboarding skill is installed only with --init-skill; --uninstall removes only what jouet added. The hooks do nothing where jouet is not on PATH.
 
-For Claude Code, setup also offers a context budget from your own recent sessions: a compaction window when they run on a 1M-token model, and denying what none of them used. Asked at a terminal, otherwise only noted: nothing is written without --compact-window or --deny-unused, and --undo takes each back.
+For Claude Code, setup also applies a context budget from your own recent sessions: a compaction window when they run on a 1M-token model, and denying what none of them used. It says what it changed; --undo takes each part back and keeps it back, and --no-context-budget skips both.
 
 ## Arguments
 - **`<HARNESS>`** — claude, codex, cursor, gemini or copilot
@@ -23,7 +23,8 @@ For Claude Code, setup also offers a context budget from your own recent session
 - **`--benchmark`** — Print a prompt for an agent to benchmark jouet on this project
 - **`--compact-window <TOKENS>`** — Claude Code: compact a conversation once its context reaches TOKENS (100k to 1m), by setting autoCompactWindow. It pays on a 1M-token model; a 200k one already compacts there
 - **`--deny-unused`** — Claude Code: deny the tools and MCP servers that none of your last 50 sessions called, and hide from the model the skills none used (still there as /name)
-- **`--undo <CHOICE>`** — Claude Code: take back what --compact-window (window) or --deny-unused (unused) added, and nothing else
+- **`--undo <CHOICE>`** — Claude Code: take back what --compact-window (window) or --deny-unused (unused) added, and nothing else. A later setup leaves that part alone until its flag asks for it again
 
   **Choices:** `window`, `unused`
+- **`--no-context-budget`** — Claude Code: install without the context budget setup otherwise applies from your recent sessions
 - **`-h --help`** — Print help
