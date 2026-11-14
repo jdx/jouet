@@ -757,6 +757,7 @@ impl Log<'_> {
         entry.shape = call.command.as_deref().map(ledger::shape);
         entry.exit_code = call.exit_code;
         entry.duration_ms = payload.get("duration_ms").and_then(Value::as_u64);
+        entry.background = in_background(payload);
         entry.output_bytes = output_bytes(payload);
         entry.tree = tree;
         entry.decisions = records.iter().map(decision).collect();
@@ -1134,16 +1135,21 @@ struct Ran {
     repo: Option<String>,
 }
 
+/// Whether the call asked to run in the background (Claude Code's
+/// `run_in_background`, Gemini's renamed to it).
+fn in_background(payload: &Value) -> bool {
+    payload
+        .get("tool_input")
+        .and_then(|i| i.get("run_in_background"))
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
 /// Runs the post-tool-use rules on a finished Bash command: what they
 /// record and what they warn about. A command whose exit code is unknown, or
 /// that runs in the background and so has not finished, gets nothing.
 fn post_tool_use(engine: &Engine, payload: &Value, call: &Call) -> Outcome {
-    let background = payload
-        .get("tool_input")
-        .and_then(|i| i.get("run_in_background"))
-        .and_then(Value::as_bool)
-        == Some(true);
-    if call.tool != "Bash" || call.exit_code.is_none() || background {
+    if call.tool != "Bash" || call.exit_code.is_none() || in_background(payload) {
         return Outcome::default();
     }
     let call = Call {

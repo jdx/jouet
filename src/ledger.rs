@@ -77,8 +77,15 @@ pub(crate) struct Entry {
     pub shape: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
+    /// For a `post-tool-use`: how long the call took, as the harness says;
+    /// for a `jouet-run`: how long the command ran, from its own start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
+    /// For a `post-tool-use`: the call ran in the background, so its
+    /// duration is how long it took to start, and the command's own
+    /// `jouet-run` says how long it ran.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub background: bool,
     /// For a `post-tool-use`: how many bytes of output the call gave the
     /// agent, when the harness says (Claude Code's `tool_response`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -193,7 +200,7 @@ fn deprecation_in(dir: &Path, session: Option<&str>, id: &str) -> bool {
 /// `jouet stats`: the hooks see only the exit code of the whole call, which
 /// may have run more than jouet. Only the command's name is kept, never its
 /// arguments; the harness is the session's, which the stats look up.
-pub(crate) fn record_run(args: &[String], code: i32) {
+pub(crate) fn record_run(args: &[String], code: i32, ran: Duration) {
     let Some(session) = crate::cmd::search::session_id() else {
         return;
     };
@@ -201,7 +208,9 @@ pub(crate) fn record_run(args: &[String], code: i32) {
     let Some(dir) = dir().filter(|_| settings.hooks.ledger) else {
         return;
     };
-    append(&dir, &run_entry(&session, args, code));
+    let mut entry = run_entry(&session, args, code);
+    entry.duration_ms = Some(u64::try_from(ran.as_millis()).unwrap_or(u64::MAX));
+    append(&dir, &entry);
 }
 
 /// `jouet edit replace` and its exit code, from `args` without the program.

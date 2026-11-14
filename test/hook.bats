@@ -672,9 +672,18 @@ stop_reason() {
 	run grep -c 'secret' "$ledger"
 	assert_output 0
 
+	# A call started in the background says so: its duration is only its start.
+	jq -cn '{session_id: "s1", hook_event_name: "PostToolUse", tool_name: "Bash", duration_ms: 4,
+		tool_input: {command: "jouet wait pr --until needs-agent", run_in_background: true}, tool_response: {}}' |
+		jouet hook claude post-tool-use
+	run jq -c '[.event, .duration_ms, .background]' <<<"$(tail -1 "$ledger")"
+	assert_output '["post-tool-use",4,true]'
+	run jq -c 'select(.event == "post-tool-use" and .duration_ms == 1200) | has("background")' "$ledger"
+	assert_output false
+
 	run --separate-stderr env JOUET_HOOKS_LEDGER=false jouet hook claude pre-tool-use <<<"$(bash_payload 'ls')"
 	run wc -l <"$ledger"
-	assert_output --regexp '^ *4$'
+	assert_output --regexp '^ *5$'
 
 	# In a work tree, entries carry a hash of its root, never the path.
 	mkdir -p repo/.git repo/src

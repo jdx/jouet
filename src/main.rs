@@ -42,6 +42,7 @@ use cli::{Cmd, Jouet};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    STARTED.get_or_init(std::time::Instant::now);
     jouet_output::deprecation::set_recorder(ledger::record_deprecation);
     if let Some(exit) = routine_typo() {
         return exit;
@@ -153,9 +154,16 @@ fn recorded(exit: ExitCode) -> ExitCode {
         .find(|&c| ExitCode::from(c) == exit)
         .unwrap_or(1);
     let args: Vec<String> = std::env::args().skip(1).collect();
-    ledger::record_run(&args, i32::from(code));
+    let ran = STARTED
+        .get()
+        .map(std::time::Instant::elapsed)
+        .unwrap_or_default();
+    ledger::record_run(&args, i32::from(code), ran);
     exit
 }
+
+/// When the process started, for how long a recorded run took.
+static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
 /// `jouet triage`, when `triage` is a routine and not a command: says to
 /// run `joue triage` instead of failing as an unknown command.
