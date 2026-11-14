@@ -214,6 +214,11 @@ local function status_read(script: string, last: JouetCommand): boolean
 	if string.find(string.match(rest, "^[%s;]*") or "", ";;", 1, true) then
 		return true
 	end
+	-- `grep x; matched=$?` saves the status for later.
+	local next = string.match(rest, "^[%s;]*([^;&|\n]*)") or ""
+	if string.find(next, "$?", 1, true) or string.find(next, "PIPESTATUS", 1, true) then
+		return true
+	end
 	local after = string.match(rest, "^[%s;]*(%S*)") or ""
 	local first = string.sub(after, 1, 1)
 	return first == "}" or first == ")" or STATUS_WORDS[string.match(after, "^%a+") or ""] == true
@@ -329,6 +334,16 @@ end
 
 -- Whether a command is a `jouet wait pr`, past jouet's own options; help
 -- only asks about one.
+-- `jouet wait`'s own options, which may come between `wait` and `pr`, and
+-- whether each takes a value.
+local WAIT_OPTIONS: { [string]: boolean } = {
+	["--timeout"] = true,
+	["--interval"] = true,
+	["--confirm-conflict"] = true,
+	["--jsonl"] = false,
+	["--quiet"] = false,
+}
+
 local function jouet_wait_pr(command: JouetCommand): boolean
 	if command.program ~= "jouet" then
 		return false
@@ -341,10 +356,23 @@ local function jouet_wait_pr(command: JouetCommand): boolean
 		elseif string.sub(arg, 1, 1) == "-" then
 			i += 1
 		else
-			if arg ~= "wait" or command.argv[i + 1] ~= "pr" then
+			if arg ~= "wait" then
 				return false
 			end
-			for k = i + 2, #command.argv do
+			i += 1
+			while command.argv[i] and string.sub(command.argv[i], 1, 1) == "-" do
+				local option = command.argv[i]
+				local takes = WAIT_OPTIONS[option]
+				if takes == nil and not WAIT_OPTIONS[string.match(option, "^([^=]*)=") or ""] then
+					-- `--help`, or an option this rule does not know.
+					return false
+				end
+				i += if takes then 2 else 1
+			end
+			if command.argv[i] ~= "pr" then
+				return false
+			end
+			for k = i + 1, #command.argv do
 				if INSPECT[command.argv[k]] then
 					return false
 				end

@@ -114,6 +114,9 @@ fires = [
   { command = "jouet wait pr --until needs-agent 2>&1 | tail -40", rewritten = "jouet wait pr --until needs-agent 2>&1" },
   { command = "git push && jouet wait pr 12 --until checks | grep -v pending | tail -5; echo done", rewritten = "git push && jouet wait pr 12 --until checks; echo done" },
   { command = "cargo test | tail -3 && jouet wait pr | head", rewritten = "jouet test --cmd -- cargo test && jouet wait pr" },
+  # `wait`'s own options may come before `pr`.
+  { command = "jouet wait --timeout 60s --quiet pr --until needs-agent | tail -5", rewritten = "jouet wait --timeout 60s --quiet pr --until needs-agent" },
+  { command = "jouet wait --interval=5s pr | tail", rewritten = "jouet wait --interval=5s pr" },
 ]
 quiet = [
   # Left to `scoped-lint`.
@@ -157,7 +160,10 @@ quiet = [
   # A wait that is not piped, piped where its status is read, or asked about.
   { command = "jouet wait pr --until needs-agent", rewrite = true },
   { command = "jouet wait pr --until checks | grep -q failed && echo red", rewrite = true },
+  { command = "jouet wait pr --until needs-agent | grep conflict; matched=$?", rewrite = true },
+  { command = "jouet wait pr | grep conflict\necho ${PIPESTATUS[0]}", rewrite = true },
   { command = "jouet wait pr --help | head", rewrite = true },
+  { command = "jouet wait --help pr | head", rewrite = true },
   { command = "jouet wait ci | tail", rewrite = true },
   # Without a rewrite, it says nothing: the wait's output is short.
   "jouet wait pr --until needs-agent | tail -5",
