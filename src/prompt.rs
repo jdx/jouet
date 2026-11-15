@@ -273,7 +273,8 @@ pub(crate) fn coverable(prompt: &str) -> Option<Coverable> {
 
 /// The ID on each of the app's comment lines: an inline comment's
 /// `comment_id`, or the review or PR comment its `gh api` path names. None
-/// unless every one has an ID.
+/// unless every one has an ID. Each key is tried wherever it occurs, so an
+/// owner or repo named `reviews` does not hide the path's own.
 fn comment_ids(quoted: &str) -> Vec<u64> {
     let entries: Vec<&str> = quoted
         .lines()
@@ -285,11 +286,13 @@ fn comment_ids(quoted: &str) -> Vec<u64> {
             ["comment_id=", "/reviews/", "/issues/comments/"]
                 .iter()
                 .find_map(|key| {
-                    let rest = &line[line.find(key)? + key.len()..];
-                    rest.split(|c: char| !c.is_ascii_digit())
-                        .next()?
-                        .parse()
-                        .ok()
+                    line.match_indices(key).find_map(|(at, _)| {
+                        line[at + key.len()..]
+                            .split(|c: char| !c.is_ascii_digit())
+                            .next()?
+                            .parse()
+                            .ok()
+                    })
                 })
         })
         .collect();
@@ -397,6 +400,13 @@ mod tests {
                 .unwrap()
                 .comments,
             [78, 91]
+        );
+        // A repo named `reviews` comes before the path's own.
+        assert_eq!(
+            coverable(&comment_event(&["review summary (commented), no inline thread; truncated — full text: `gh api repos/jdx/reviews/pulls/13990/reviews/92`\n> cursor[bot]:\n> Found 1 issue."]))
+                .unwrap()
+                .comments,
+            [92]
         );
         // Not every comment named: none are, so none is matched by ID.
         assert!(
