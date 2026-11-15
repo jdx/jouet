@@ -67,37 +67,66 @@ pub struct HeldReport {
     pub notes: Vec<String>,
 }
 
-/// What became of each held event, by what the PR shows now.
-fn account(
-    held: &[Held],
+/// What a digest shows, and what the PR shows now, for [`account`].
+struct Shown<'a> {
     open: bool,
-    checks: &[Check],
+    /// Every check on the head.
+    checks: &'a [Check],
+    /// The failed checks the digest shows.
+    failed: &'a [Check],
     conflict: bool,
     items: usize,
-    dropped: &BTreeMap<&'static str, usize>,
-) -> Vec<HeldReport> {
+    dropped: &'a BTreeMap<&'static str, usize>,
+    /// What triage made of each thread or top-level comment, by its ID.
+    judged: &'a BTreeMap<u64, Judged>,
+}
+
+/// What triage made of one thread or top-level comment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Judged {
+    Shown,
+    Noise,
+    /// The agent spoke last.
+    Answered,
+    /// Its newest comment is older than the wait's `--since`.
+    Old,
+}
+
+/// What became of each held event, by what the digest shows.
+fn account(held: &[Held], now: &Shown<'_>) -> Vec<HeldReport> {
     held.iter()
         .map(|h| {
             let mut notes = Vec::new();
             let mut accounted = true;
-            if !open {
-                notes.push("the PR is closed".to_string());
+            let mut note = |ok: bool, text: String| {
+                accounted &= ok;
+                notes.push(text);
+            };
+            if !now.open {
+                note(true, "the PR is closed".to_string());
             } else {
                 for kind in &h.kinds {
                     match kind.as_str() {
-                        "ci-failure" => notes.extend(check_notes(&h.checks, checks)),
-                        "conflict" if conflict => notes.push("the conflict is shown above".into()),
-                        "conflict" => notes.push("the conflict has cleared".into()),
-                        "review-comment" if items > 0 => {
-                            notes.push("the review comments are shown above".into());
+                        "ci-failure" => {
+                            for (ok, text) in check_notes(&h.checks, now.checks, now.failed) {
+                                note(ok, text);
+                            }
                         }
-                        "review-comment" if !dropped.is_empty() => {
-                            notes.push("its comments were left out as bot noise".into());
+                        "conflict" if now.conflict => {
+                            note(true, "the conflict is shown above".into());
                         }
-                        _ => {
-                            accounted = false;
-                            notes.push(format!("{kind}: not found on the PR now"));
+                        "conflict" => note(true, "the conflict has cleared".into()),
+                        "review-comment" if !h.comment_ids.is_empty() => {
+                            for id in &h.comment_ids {
+                                let (ok, text) = comment_note(*id, now);
+                                note(ok, text);
+                            }
                         }
+                        "review-comment" => {
+                            let (ok, text) = comments_note(now);
+                            note(ok, text.to_string());
+                        }
+                        _ => note(false, format!("{kind}: not found on the PR now")),
                     }
                 }
             }
@@ -112,26 +141,65 @@ fn account(
         .collect()
 }
 
-/// What became of each check a held CI failure named.
-fn check_notes(named: &[String], checks: &[Check]) -> Vec<String> {
+/// What became of one comment a held event relayed, and whether that is
+/// accounted for. A reply on a thread is not known by its own ID, so one
+/// triage did not judge falls back to [`comments_note`].
+fn comment_note(id: u64, now: &Shown<'_>) -> (bool, String) {
+    match now.judged.get(&id) {
+        Some(Judged::Shown) => (true, format!("comment {id}: shown above")),
+        Some(Judged::Noise) => (true, format!("comment {id}: left out as bot noise")),
+        Some(Judged::Answered) => (true, format!("comment {id}: answered since")),
+        Some(Judged::Old) => (
+            false,
+            format!("comment {id}: older than this wait's --since, so not shown"),
+        ),
+        None => {
+            let (ok, text) = comments_note(now);
+            (ok, format!("comment {id}: {text}"))
+        }
+    }
+}
+
+/// What became of a held event's comments when they cannot be told apart.
+fn comments_note(now: &Shown<'_>) -> (bool, &'static str) {
+    if now.items > 0 {
+        (true, "the review comments are shown above")
+    } else if !now.dropped.is_empty() {
+        (true, "its comments were left out as bot noise")
+    } else {
+        (false, "review-comment: not found on the PR now")
+    }
+}
+
+/// What became of each check a held CI failure named, and whether that is
+/// accounted for: a failure the digest does not show is not.
+fn check_notes(named: &[String], checks: &[Check], failed: &[Check]) -> Vec<(bool, String)> {
     if named.is_empty() {
-        let failing = checks.iter().any(|c| c.state.failed() && !c.derived());
-        return vec![
-            if failing {
-                "the failed checks are shown above"
-            } else {
-                "no check fails now"
-            }
-            .to_string(),
-        ];
+        let unshown = checks
+            .iter()
+            .any(|c| c.state.failed() && !c.derived() && !failed.iter().any(|f| f.name == c.name));
+        return vec![if unshown {
+            (false, "a failed check is not shown here".to_string())
+        } else if failed.is_empty() {
+            (true, "no check fails now".to_string())
+        } else {
+            (true, "the failed checks are shown above".to_string())
+        }];
     }
     named
         .iter()
         .map(|name| match checks.iter().find(|c| &c.name == name) {
-            Some(c) if c.state.failed() => format!("{name}: shown above"),
-            Some(c) if c.state.finished() => format!("{name}: failed, and passes now"),
-            Some(_) => format!("{name}: running again"),
-            None => format!("{name}: not on the head now"),
+            Some(_) if failed.iter().any(|f| &f.name == name) => {
+                (true, format!("{name}: shown above"))
+            }
+            Some(c) if c.state.failed() && c.derived() => (
+                true,
+                format!("{name}: fails only with other checks, or on a base update or an approval"),
+            ),
+            Some(c) if c.state.failed() => (false, format!("{name}: fails, not shown here")),
+            Some(c) if c.state.finished() => (true, format!("{name}: failed, and passes now")),
+            Some(_) => (true, format!("{name}: running again")),
+            None => (true, format!("{name}: not on the head now")),
         })
         .collect()
 }
@@ -217,13 +285,18 @@ fn said(t: &threads::Thread) -> Vec<Said> {
         .collect()
 }
 
-/// The threads and top-level comments that need the agent, and how many
-/// of each noise class were left out.
+/// The threads and top-level comments that need the agent, how many of
+/// each noise class were left out, and what triage made of each by its ID.
 fn review(
     pr: &PrThreads,
     since: i64,
     acks: Acks,
-) -> (Vec<Item>, BTreeMap<&'static str, usize>, Activity) {
+) -> (
+    Vec<Item>,
+    BTreeMap<&'static str, usize>,
+    Activity,
+    BTreeMap<u64, Judged>,
+) {
     let filter = Filter {
         status: Status::Unresolved,
         outdated: None,
@@ -234,6 +307,7 @@ fn review(
     };
     let mut items = Vec::new();
     let mut dropped = BTreeMap::new();
+    let mut judged = BTreeMap::new();
     let mut activity = Activity::default();
     for t in threads::select(pr, &filter) {
         let comments = said(t);
@@ -251,9 +325,16 @@ fn review(
             Kind::Comment => (Place::TopLevel, "comment"),
         };
         match needs_agent(place, &comments, pr.viewer(), since, acks) {
-            Ok(false) => {}
-            Err(class) => *dropped.entry(class).or_insert(0) += 1,
+            Ok(false) => {
+                let old = comments.last().is_some_and(|c| c.created < since);
+                judged.insert(t.id, if old { Judged::Old } else { Judged::Answered });
+            }
+            Err(class) => {
+                *dropped.entry(class).or_insert(0) += 1;
+                judged.insert(t.id, Judged::Noise);
+            }
             Ok(true) => {
+                judged.insert(t.id, Judged::Shown);
                 let first = condense(&comments[0].body, BODY_LINES);
                 let latest = (comments.len() > 1).then(|| {
                     let last = &comments[comments.len() - 1];
@@ -278,7 +359,7 @@ fn review(
             }
         }
     }
-    (items, dropped, activity)
+    (items, dropped, activity, judged)
 }
 
 /// What a change to any of resets the quiet window.
@@ -301,6 +382,9 @@ pub struct SettleWait {
     conflict: ConflictCheck,
     items: Vec<Item>,
     dropped: BTreeMap<&'static str, usize>,
+    judged: BTreeMap<u64, Judged>,
+    /// The conflict the latest poll confirmed.
+    conflicted: Option<String>,
     /// When the PR last settled with nothing for the agent (Unix seconds).
     settled_at: Option<i64>,
     /// Whether the latest poll found it so.
@@ -376,6 +460,8 @@ impl SettleWait {
             conflict,
             items: Vec::new(),
             dropped: BTreeMap::new(),
+            judged: BTreeMap::new(),
+            conflicted: None,
             settled_at: None,
             last_poll_settled: false,
             held: Vec::new(),
@@ -395,11 +481,15 @@ impl SettleWait {
         };
         let held = account(
             &self.held,
-            result != "closed",
-            &self.snap.checks,
-            conflict.is_some(),
-            self.items.len(),
-            &self.dropped,
+            &Shown {
+                open: result != "closed",
+                checks: &self.snap.checks,
+                failed: &checks,
+                conflict: conflict.is_some(),
+                items: self.items.len(),
+                dropped: &self.dropped,
+                judged: &self.judged,
+            },
         );
         let wake_after_first_held_s = self
             .held
@@ -512,9 +602,11 @@ impl Watch for SettleWait {
                 })
             })?;
         self.last_poll_settled = false;
-        let (items, dropped, activity) = review(&fetched, self.options.since, self.options.acks);
+        let (items, dropped, activity, judged) =
+            review(&fetched, self.options.since, self.options.acks);
         self.items = items;
         self.dropped = dropped;
+        self.judged = judged;
         let now = Fingerprint {
             head: pr.head_sha.clone(),
             checks: self
@@ -534,6 +626,7 @@ impl Watch for SettleWait {
             .conflict
             .confirmed(pr.conflicted(), now_ms())
             .then(|| format!("{repo}#{number} conflicts with {}", pr.base_ref));
+        self.conflicted.clone_from(&conflict);
         let pending = self
             .snap
             .checks
@@ -605,7 +698,16 @@ impl Watch for SettleWait {
                 self.settled_at.unwrap_or(self.options.since),
             ),
         };
-        let mut doc = self.doc("timeout", state, None, Vec::new());
+        // What the latest poll found failing is shown, so a held event is
+        // not said to be shown when it is not.
+        let failed = self
+            .snap
+            .checks
+            .iter()
+            .filter(|c| c.state.failed() && !c.derived())
+            .cloned()
+            .collect();
+        let mut doc = self.doc("timeout", state, self.conflicted.clone(), failed);
         doc.next_since = format_utc(next);
         doc
     }
@@ -822,6 +924,24 @@ mod tests {
             kinds: kinds.iter().map(|k| (*k).to_string()).collect(),
             comments: 0,
             checks: checks.iter().map(|c| (*c).to_string()).collect(),
+            comment_ids: Vec::new(),
+        }
+    }
+
+    fn shown<'a>(
+        checks: &'a [Check],
+        failed: &'a [Check],
+        dropped: &'a BTreeMap<&'static str, usize>,
+        judged: &'a BTreeMap<u64, Judged>,
+    ) -> Shown<'a> {
+        Shown {
+            open: true,
+            checks,
+            failed,
+            conflict: false,
+            items: 0,
+            dropped,
+            judged,
         }
     }
 
@@ -833,10 +953,10 @@ mod tests {
             Check::new("build".into(), checks::State::Pending),
         ];
         let none = BTreeMap::new();
+        let unjudged = BTreeMap::new();
         let ci = held(&["ci-failure"], &["lint", "test", "build", "gone"]);
-        let [r] = account(std::slice::from_ref(&ci), true, &checks, false, 0, &none)
-            .try_into()
-            .unwrap();
+        let all = shown(&checks, &checks[..1], &none, &unjudged);
+        let [r] = account(std::slice::from_ref(&ci), &all).try_into().unwrap();
         assert!(r.accounted);
         assert_eq!(
             r.notes,
@@ -847,8 +967,22 @@ mod tests {
                 "gone: not on the head now"
             ]
         );
+        // A timeout digest that does not show a failure does not say it does.
+        let unshown = account(
+            std::slice::from_ref(&ci),
+            &shown(&checks, &[], &none, &unjudged),
+        );
+        assert!(!unshown[0].accounted);
+        assert_eq!(unshown[0].notes[0], "lint: fails, not shown here");
         let both = held(&["review-comment", "conflict"], &[]);
-        let found = account(std::slice::from_ref(&both), true, &checks, true, 1, &none);
+        let found = account(
+            std::slice::from_ref(&both),
+            &Shown {
+                conflict: true,
+                items: 1,
+                ..shown(&checks, &checks[..1], &none, &unjudged)
+            },
+        );
         assert_eq!(
             found[0].notes,
             [
@@ -858,7 +992,10 @@ mod tests {
         );
         // A comment the digest neither shows nor left out as noise went
         // missing: a silent drop.
-        let lost = account(std::slice::from_ref(&both), true, &[], false, 0, &none);
+        let lost = account(
+            std::slice::from_ref(&both),
+            &shown(&[], &[], &none, &unjudged),
+        );
         assert!(!lost[0].accounted);
         assert_eq!(
             lost[0].notes,
@@ -868,8 +1005,20 @@ mod tests {
             ]
         );
         let noise = BTreeMap::from([("rate_limit", 1)]);
-        assert!(account(std::slice::from_ref(&both), true, &[], false, 0, &noise)[0].accounted);
-        let closed = account(&[ci], false, &[], false, 0, &none);
+        assert!(
+            account(
+                std::slice::from_ref(&both),
+                &shown(&[], &[], &noise, &unjudged)
+            )[0]
+            .accounted
+        );
+        let closed = account(
+            &[ci],
+            &Shown {
+                open: false,
+                ..shown(&[], &[], &none, &unjudged)
+            },
+        );
         assert_eq!(
             (closed[0].accounted, &closed[0].notes[..]),
             (true, &["the PR is closed".to_string()][..])
@@ -882,9 +1031,56 @@ mod tests {
             )
         );
         assert_eq!(
-            check_notes(&[], &checks[..1]),
-            ["the failed checks are shown above"]
+            check_notes(&[], &checks[..1], &checks[..1]),
+            [(true, "the failed checks are shown above".to_string())]
         );
-        assert_eq!(check_notes(&[], &checks[1..]), ["no check fails now"]);
+        assert_eq!(
+            check_notes(&[], &checks[1..], &[]),
+            [(true, "no check fails now".to_string())]
+        );
+    }
+
+    #[test]
+    fn each_held_comment_is_matched_by_its_id() {
+        let judged = BTreeMap::from([
+            (1, Judged::Shown),
+            (2, Judged::Noise),
+            (3, Judged::Answered),
+            (4, Judged::Old),
+        ]);
+        let none = BTreeMap::new();
+        let now = Shown {
+            items: 1,
+            ..shown(&[], &[], &none, &judged)
+        };
+        let mut comments = held(&["review-comment"], &[]);
+        comments.comment_ids = vec![1, 2, 3];
+        let [r] = account(std::slice::from_ref(&comments), &now)
+            .try_into()
+            .unwrap();
+        assert!(r.accounted);
+        assert_eq!(
+            r.notes,
+            [
+                "comment 1: shown above",
+                "comment 2: left out as bot noise",
+                "comment 3: answered since"
+            ]
+        );
+        // Another comment being shown does not account for one older than
+        // the wait's --since.
+        comments.comment_ids = vec![1, 4];
+        let old = account(std::slice::from_ref(&comments), &now);
+        assert!(!old[0].accounted);
+        assert_eq!(
+            old[0].notes[1],
+            "comment 4: older than this wait's --since, so not shown"
+        );
+        // A reply on a thread is not known by its own ID.
+        comments.comment_ids = vec![9];
+        assert_eq!(
+            account(std::slice::from_ref(&comments), &now)[0].notes,
+            ["comment 9: the review comments are shown above"]
+        );
     }
 }

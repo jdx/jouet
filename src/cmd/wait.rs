@@ -291,6 +291,7 @@ fn settle_watch(
         pr: number,
         branch: None,
         started: now,
+        since: options.since,
         heartbeat: now,
     };
     let path = lease::dir()
@@ -333,6 +334,7 @@ fn settle_watch(
             held: held.len() as u64,
             accounted: reported.iter().filter(|h| h.accounted).count() as u64,
             wake_after_first_held_s: doc.as_ref().and_then(|d| d.wake_after_first_held_s),
+            watcher: Some(std::process::id()),
         },
     );
     if parked {

@@ -24,17 +24,18 @@ fn now() -> i64 {
     jouet_output::time::now()
 }
 
-/// The live lease of `session` that covers every PR the event names.
-pub(crate) fn covering(session: &str, event: &Coverable) -> Option<PathBuf> {
+/// The live lease of `session` that covers every PR the event names, with
+/// its watcher's pid.
+pub(crate) fn covering(session: &str, event: &Coverable) -> Option<(PathBuf, u32)> {
     let dir = lease::dir()?;
     covering_in(&dir, session, event, now())
 }
 
-fn covering_in(dir: &Path, session: &str, event: &Coverable, now: i64) -> Option<PathBuf> {
+fn covering_in(dir: &Path, session: &str, event: &Coverable, now: i64) -> Option<(PathBuf, u32)> {
     Lease::of_session(dir, session)
         .into_iter()
         .find(|(_, l)| l.live(now) && event.prs.iter().all(|(r, n)| l.covers(r, *n)))
-        .map(|(path, _)| path)
+        .map(|(path, l)| (path, l.pid))
 }
 
 /// Holds the event for the watcher of `lease`. False when it could not be
@@ -46,6 +47,7 @@ pub(crate) fn hold(lease_path: &Path, event: &Coverable, shape: &Shape) -> bool 
         kinds: shape.kinds.clone(),
         comments: shape.comments,
         checks: event.checks.clone(),
+        comment_ids: event.comments.clone(),
     };
     // The watcher removes its lease before it reads the held file a last
     // time, so a lease still there means the watcher will see this one.
@@ -55,6 +57,8 @@ pub(crate) fn hold(lease_path: &Path, event: &Coverable, shape: &Shape) -> bool 
 /// A watcher that ended without its digest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Lost {
+    /// The watcher's pid.
+    pub pid: u32,
     pub held: usize,
     /// What to tell the agent, when events were held for it.
     pub note: Option<String>,
@@ -73,6 +77,7 @@ fn lost_in(dir: &Path, session: &str, now: i64) -> Vec<Lost> {
             let held = lease::held(&path);
             Lease::remove(&path);
             Lost {
+                pid: l.pid,
                 held: held.len(),
                 note: lost_note(&l, &held),
             }
@@ -82,6 +87,11 @@ fn lost_in(dir: &Path, session: &str, now: i64) -> Vec<Lost> {
 
 fn lost_note(lease: &Lease, held: &[Held]) -> Option<String> {
     let first = held.iter().map(|h| h.at).min()?;
+    // The watcher's own --since, so a restart sees the comments it did:
+    // they were posted before their events were held.
+    let since = Some(lease.since)
+        .filter(|s| *s > 0)
+        .unwrap_or_else(|| lease.started.min(first));
     let n = held.len();
     let mut note = format!(
         "jouet: the `jouet wait pr` watcher for {}#{} stopped before its digest, with {n} Auto-fix event{} jouet held for it:",
@@ -107,7 +117,7 @@ fn lost_note(lease: &Lease, held: &[Held]) -> Option<String> {
         " look at the PR, or start the watcher again in the background: `jouet wait pr {} --repo {} --until needs-agent --since {}`",
         lease.pr,
         lease.repo,
-        jouet_output::time::format_utc(first)
+        jouet_output::time::format_utc(since)
     );
     Some(note)
 }
@@ -126,10 +136,7 @@ pub(crate) fn watching(session: &str) -> bool {
 pub(crate) fn pushes(command: &str) -> bool {
     let words: Vec<&str> = command.split_whitespace().collect();
     let has = |pair: [&str; 2]| words.windows(2).any(|w| w == pair);
-    has(["git", "push"])
-        || has(["pr", "create"])
-        || has(["stack", "submit"])
-        || (has(["jouet", "commit"]) && words.contains(&"--push"))
+    has(["git", "push"]) || has(["pr", "create"]) || has(["stack", "submit"])
 }
 
 #[cfg(test)]
@@ -144,6 +151,7 @@ mod tests {
             pr: 12,
             branch: None,
             started: heartbeat,
+            since: heartbeat - 60,
             heartbeat,
         }
     }
@@ -152,6 +160,7 @@ mod tests {
         Coverable {
             prs: prs.iter().map(|(r, n)| ((*r).to_string(), *n)).collect(),
             checks: vec!["trusted / test".into()],
+            comments: Vec::new(),
         }
     }
 
@@ -164,7 +173,7 @@ mod tests {
         let now = 1_010;
         assert_eq!(
             covering_in(dir.path(), "s1", &event(&[("jdx/jouet", 12)]), now),
-            Some(path.clone())
+            Some((path.clone(), me))
         );
         assert_eq!(
             covering_in(dir.path(), "s2", &event(&[("jdx/jouet", 12)]), now),
@@ -216,7 +225,10 @@ mod tests {
         );
         assert!(note.contains("ci-failure (trusted / test)"), "{note}");
         assert!(
-            note.contains("jouet wait pr 12 --repo jdx/jouet --until needs-agent --since "),
+            note.contains(&format!(
+                "jouet wait pr 12 --repo jdx/jouet --until needs-agent --since {}",
+                jouet_output::time::format_utc(940)
+            )),
             "{note}"
         );
         assert!(lost.iter().any(|l| l.held == 0 && l.note.is_none()));
@@ -239,7 +251,6 @@ mod tests {
     #[test]
     fn pushes_and_pr_creation_are_recognized() {
         assert!(pushes("git push -u origin feat/x"));
-        assert!(pushes("jouet commit a.rs --message m --push"));
         assert!(pushes("gh pr create --fill"));
         assert!(pushes("gh stack submit --open"));
         assert!(!pushes("git status"));

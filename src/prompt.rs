@@ -52,6 +52,9 @@ pub(crate) struct Shape {
     /// `drop` arm.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dropped: bool,
+    /// For an event a watcher covered: that watcher's pid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watcher: Option<u32>,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -192,11 +195,13 @@ pub(crate) fn classify(prompt: &str) -> Shape {
 }
 
 /// What an Auto-fix event a watcher could cover names: each PR as
-/// `(owner/name, N)`, and the failing checks it quotes.
+/// `(owner/name, N)`, the failing checks it quotes, and the IDs of the
+/// comments it relays when it names every one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Coverable {
     pub prs: Vec<(String, u64)>,
     pub checks: Vec<String>,
+    pub comments: Vec<u64>,
 }
 
 /// The PRs and checks of an Auto-fix event a `wait pr --until needs-agent`
@@ -259,7 +264,40 @@ pub(crate) fn coverable(prompt: &str) -> Option<Coverable> {
             }
         }
     }
-    Some(Coverable { prs, checks })
+    Some(Coverable {
+        prs,
+        checks,
+        comments: comment_ids(quoted),
+    })
+}
+
+/// The ID on each of the app's comment lines: an inline comment's
+/// `comment_id`, or the review or PR comment its `gh api` path names. None
+/// unless every one has an ID.
+fn comment_ids(quoted: &str) -> Vec<u64> {
+    let entries: Vec<&str> = quoted
+        .lines()
+        .filter(|l| l.starts_with("Comment ") && l.contains(" — "))
+        .collect();
+    let ids: Vec<u64> = entries
+        .iter()
+        .filter_map(|line| {
+            ["comment_id=", "/reviews/", "/issues/comments/"]
+                .iter()
+                .find_map(|key| {
+                    let rest = &line[line.find(key)? + key.len()..];
+                    rest.split(|c: char| !c.is_ascii_digit())
+                        .next()?
+                        .parse()
+                        .ok()
+                })
+        })
+        .collect();
+    if ids.len() == entries.len() {
+        ids
+    } else {
+        Vec::new()
+    }
 }
 
 /// The PRs the app's own lines name, as `word PR #N`, each once.
@@ -354,6 +392,19 @@ mod tests {
         assert_eq!(got.prs, [("jdx/mise".to_string(), 13990)]);
         assert_eq!(got.checks, ["trusted / lint", "trusted / test"]);
         assert!(coverable(&comment_event(&[FINDING])).is_some());
+        assert_eq!(
+            coverable(&comment_event(&[FINDING, "review summary (commented), no inline thread; truncated — full text: `gh api repos/jdx/mise/pulls/13990/reviews/91`\n> cursor[bot]:\n> Found 1 issue."]))
+                .unwrap()
+                .comments,
+            [78, 91]
+        );
+        // Not every comment named: none are, so none is matched by ID.
+        assert!(
+            coverable(&comment_event(&[FINDING, CLEAN]))
+                .unwrap()
+                .comments
+                .is_empty()
+        );
         // Not a kind a watcher reports, or not one event alone.
         let enabled = "<ci-monitor-event>\"Auto-fix pull requests\" was just enabled for this session. No action needed right now.</ci-monitor-event>";
         assert_eq!(coverable(enabled), None);

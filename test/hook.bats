@@ -1271,7 +1271,7 @@ lease() {
 	assert_output --partial 'jouet wait pr 12 --repo jdx/mise --until needs-agent --since 2023-11-14T22:13:20Z'
 	[ ! -e "$base.json" ] && [ ! -e "$base.held" ]
 	run jq -c 'select(.event == "lease-lost") | .settle' "$ledger"
-	assert_output '{"result":"lease-lost","held":1,"accounted":0}'
+	assert_output "{\"result\":\"lease-lost\",\"held\":1,\"accounted\":0,\"watcher\":$$}"
 	run --separate-stderr jouet hook claude user-prompt-submit <<<"$(prompt 'carry on' p2)"
 	assert_output ''
 }

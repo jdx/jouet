@@ -232,12 +232,14 @@ fn handle(
                 }
                 log.append(entry);
             }
+            let loaded = load_all(payload).filter(|_| hooks.prime)?;
+            // After the primer is known to go out, so the report reaches
+            // the agent; otherwise the next prompt's hook makes it.
             let lost = if subagent {
                 Vec::new()
             } else {
                 lost_leases(&log)
             };
-            let loaded = load_all(payload).filter(|_| hooks.prime)?;
             let cwd = payload.get("cwd").and_then(Value::as_str).map(Path::new);
             let mut primer = session_start(
                 &loaded.engine,
@@ -289,16 +291,17 @@ fn handle(
                 .filter(|_| harness == Harness::Claude && !noise)
                 .zip(crate::prompt::coverable(prompt))
                 .and_then(|(session, event)| {
-                    crate::settle::covering(session, &event).map(|path| (path, event))
+                    crate::settle::covering(session, &event).map(|(path, pid)| (path, pid, event))
                 });
-            if covered.is_some() {
+            if let Some((_, pid, _)) = &covered {
                 shape.would_drop = Some("covered".into());
+                shape.watcher = Some(*pid);
             }
             shape.dropped = match &covered {
-                Some((path, event)) => {
+                Some((path, _, event)) => {
                     arm.settle && lost.is_empty() && crate::settle::hold(path, event, &shape)
                 }
-                None => arm.drop && noise,
+                None => arm.drop && noise && lost.is_empty(),
             };
             let dropped = shape.dropped;
             let mut entry = log.entry("prompt");
@@ -903,13 +906,6 @@ fn evaluate(engine: &Engine, call: &Call) -> Outcome {
     outcome
 }
 
-/// How `harness` waits for a long command in one call, for the primer. Claude
-/// Code moves a Bash call past its 2-minute default timeout to the
-/// background, and Codex's exec returns after its yield time; either way the
-/// agent then spent a request on each check of it. In one benchmark run,
-/// Codex polled a test run 13 times, 580k of its 1.87M input tokens.
-/// Why a dropped Auto-fix event did not reach the agent, as the app shows
-/// it to the user above the event: one line naming jouet and how to stop it.
 /// Removes the session's leases whose watchers are gone, each recorded as a
 /// `lease-lost`, and returns what to tell the agent about the events held
 /// for them.
@@ -923,6 +919,7 @@ fn lost_leases(log: &Log<'_>) -> Vec<String> {
         entry.settle = Some(ledger::Settle {
             result: "lease-lost".into(),
             held: lost.held as u64,
+            watcher: Some(lost.pid),
             ..ledger::Settle::default()
         });
         log.append(entry);
@@ -931,6 +928,13 @@ fn lost_leases(log: &Log<'_>) -> Vec<String> {
     notes
 }
 
+/// How `harness` waits for a long command in one call, for the primer. Claude
+/// Code moves a Bash call past its 2-minute default timeout to the
+/// background, and Codex's exec returns after its yield time; either way the
+/// agent then spent a request on each check of it. In one benchmark run,
+/// Codex polled a test run 13 times, 580k of its 1.87M input tokens.
+/// Why a dropped Auto-fix event did not reach the agent, as the app shows
+/// it to the user above the event: one line naming jouet and how to stop it.
 const DROP_REASON: &str = "jouet dropped this Auto-fix event as bot noise with no finding, failure or conflict; set `[experiment] drop_share = 0` in jouet's config to stop.";
 
 fn wait_hint(harness: Harness) -> Option<&'static str> {

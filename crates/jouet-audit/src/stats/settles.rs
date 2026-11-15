@@ -22,6 +22,9 @@ pub struct LedgerSettle {
     pub held: u64,
     pub accounted: u64,
     pub wake_after_first_held_s: Option<u64>,
+    /// The watcher's pid; absent from entries jouet wrote before it was
+    /// recorded.
+    pub watcher: Option<u32>,
 }
 
 /// A hold with no settle after it for this long is orphaned: a watcher
@@ -65,8 +68,9 @@ struct Session {
     silent: u64,
     lost: u64,
     lost_held: u64,
-    /// When each hold not yet accounted for was made.
-    pending: Vec<u64>,
+    /// When each hold not yet accounted for was made, and for which
+    /// watcher.
+    pending: Vec<(u64, Option<u32>)>,
     wakes: Vec<u64>,
 }
 
@@ -78,13 +82,30 @@ pub fn settle_arms(
     filter: &StatsFilter,
     now: u64,
 ) -> Vec<SettleArm> {
-    // A watcher records its entry as jouet, not as the agent's harness.
-    let filter = StatsFilter {
+    // A watcher records its entry as jouet, not as the agent's harness, so
+    // a harness filter keeps the sessions of that harness with their
+    // watchers' entries.
+    let of_harness: Option<std::collections::BTreeSet<&str>> = filter.harness.as_ref().map(|_| {
+        entries
+            .iter()
+            .filter(|e| filter.keeps(e))
+            .filter_map(|e| e.session.as_deref())
+            .collect()
+    });
+    let any_harness = StatsFilter {
         harness: None,
         ..filter.clone()
     };
+    let keeps = |e: &LedgerEntry| {
+        any_harness.keeps(e)
+            && of_harness.as_ref().is_none_or(|set| {
+                filter.keeps(e)
+                    || (e.harness == "jouet"
+                        && e.session.as_deref().is_some_and(|s| set.contains(s)))
+            })
+    };
     let mut sessions: BTreeMap<&str, Session> = BTreeMap::new();
-    for e in entries.iter().filter(|e| filter.keeps(e)) {
+    for e in entries.iter().filter(|e| keeps(e)) {
         let Some(session) = e.session.as_deref() else {
             continue;
         };
@@ -96,7 +117,7 @@ pub fn settle_arms(
             s.covered += 1;
             if prompt.dropped {
                 s.held += 1;
-                s.pending.push(e.ts);
+                s.pending.push((e.ts, prompt.watcher));
             }
         } else if let Some(settle) = e.settle.as_ref() {
             let s = sessions.entry(session).or_default();
@@ -110,10 +131,15 @@ pub fn settle_arms(
                 s.wakes.extend(settle.wake_after_first_held_s);
             }
             // Each accounts for as many of the oldest holds before it as
-            // were held for it.
+            // were held for it, among those held for its watcher when both
+            // name one, so overlapping watchers keep their own.
             let mut left = settle.held;
-            s.pending.retain(|at| {
-                let mine = left > 0 && *at <= e.ts;
+            s.pending.retain(|(at, watcher)| {
+                let ours = match (watcher, settle.watcher) {
+                    (Some(a), Some(b)) => *a == b,
+                    _ => true,
+                };
+                let mine = left > 0 && *at <= e.ts && ours;
                 left -= u64::from(mine);
                 !mine
             });
@@ -148,7 +174,7 @@ pub fn settle_arms(
                 out.orphaned_holds += s
                     .pending
                     .iter()
-                    .filter(|at| now.saturating_sub(**at) >= ORPHANED_AFTER_S)
+                    .filter(|(at, _)| now.saturating_sub(*at) >= ORPHANED_AFTER_S)
                     .count() as u64;
                 wakes.extend(&s.wakes);
             }
@@ -200,6 +226,7 @@ mod tests {
                 held,
                 accounted,
                 wake_after_first_held_s: (held > 0).then_some(ts - 100),
+                watcher: None,
             }),
             ..entry(
                 session,
@@ -273,5 +300,64 @@ mod tests {
         let recent = settle_arms(&entries, &arms, &StatsFilter::default(), 800 + day - 1);
         assert_eq!(recent[1].orphaned_holds, 1);
         assert!(settle_arms(&[], &arms, &StatsFilter::default(), 0).is_empty());
+    }
+
+    fn of_watcher(mut e: LedgerEntry, pid: u32) -> LedgerEntry {
+        if let Some(p) = e.prompt.as_mut() {
+            p.watcher = Some(pid);
+        }
+        if let Some(s) = e.settle.as_mut() {
+            s.watcher = Some(pid);
+        }
+        e
+    }
+
+    #[test]
+    fn overlapping_watchers_account_for_their_own_holds() {
+        let day = ORPHANED_AFTER_S;
+        let entries = vec![
+            of_watcher(covered("n1", 100, true), 7),
+            of_watcher(covered("n1", 200, true), 8),
+            // Watcher 8 ends first; the older hold is 7's, still waiting.
+            of_watcher(settle("n1", 300, "needs_agent", 1, 1), 8),
+        ];
+        // A day after the hold at 100 only: matched by age alone, 8's
+        // settle would have taken it and left none orphaned.
+        let got = settle_arms(
+            &entries,
+            &BTreeMap::new(),
+            &StatsFilter::default(),
+            200 + day - 1,
+        );
+        assert_eq!(got[0].orphaned_holds, 1, "the hold at 100 is 7's");
+    }
+
+    #[test]
+    fn a_harness_filter_keeps_its_sessions_watchers() {
+        let codex = |e: LedgerEntry| LedgerEntry {
+            harness: "codex".into(),
+            ..e
+        };
+        let entries = vec![
+            covered("c1", 100, false),
+            settle("c1", 300, "closed", 0, 0),
+            codex(covered("x1", 100, false)),
+            settle("x1", 300, "closed", 0, 0),
+        ];
+        let filter = StatsFilter {
+            harness: Some("claude".into()),
+            ..StatsFilter::default()
+        };
+        let [off] = settle_arms(&entries, &BTreeMap::new(), &filter, 400)
+            .try_into()
+            .unwrap();
+        assert_eq!(
+            (
+                off.sessions,
+                off.covered,
+                off.settles.get("closed").copied()
+            ),
+            (1, 1, Some(1))
+        );
     }
 }

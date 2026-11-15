@@ -139,6 +139,9 @@ pub(crate) struct Settle {
     /// Seconds from the first held event to the wake.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake_after_first_held_s: Option<u64>,
+    /// The watcher's pid, which the events held for it name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watcher: Option<u32>,
 }
 
 impl Entry {

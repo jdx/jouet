@@ -41,6 +41,9 @@ pub struct Lease {
     pub branch: Option<String>,
     /// When it started (Unix seconds).
     pub started: i64,
+    /// Its `--since`: comments from then on are new to it (Unix seconds).
+    #[serde(default)]
+    pub since: i64,
     /// Its latest heartbeat (Unix seconds).
     pub heartbeat: i64,
 }
@@ -60,6 +63,9 @@ pub struct Held {
     /// The failing checks it names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checks: Vec<String>,
+    /// The IDs of the comments it relays, when it names every one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub comment_ids: Vec<u64>,
 }
 
 /// `$XDG_STATE_HOME/jouet/watch`.
@@ -181,6 +187,7 @@ mod tests {
             pr: 12,
             branch: None,
             started: heartbeat,
+            since: heartbeat,
             heartbeat,
         }
     }
@@ -218,6 +225,7 @@ mod tests {
             kinds: vec!["ci-failure".into()],
             comments: 0,
             checks: vec!["trusted / test".into()],
+            comment_ids: Vec::new(),
         };
         hold(&a, &one).unwrap();
         hold(

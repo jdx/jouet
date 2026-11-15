@@ -22,6 +22,8 @@ pub struct LedgerPrompt {
     pub would_drop: Option<String>,
     /// The drop arm blocked it.
     pub dropped: bool,
+    /// The pid of the watcher that covered it.
+    pub watcher: Option<u32>,
 }
 
 /// One arm of the drop toggle.
