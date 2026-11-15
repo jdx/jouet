@@ -214,8 +214,16 @@ pub(crate) fn judge(sig: &Signature, f: &Facts) -> Judged {
                     other_os.join(", "),
                     join_and(&jobs)
                 ));
+                // A time limit running out is what a slow runner does, so it
+                // does not show a difference a rerun would meet again.
+                if let Some(line) = &sig.timing {
+                    evidence.push(format!(
+                        "the output reports a time limit running out ({line}), which a slow runner can hit: a rerun of this job on this commit tells a flake from a {os} difference"
+                    ));
+                    return done(Verdict::Unknown, evidence, false);
+                }
                 evidence.push(format!(
-                    "most likely a {os} difference (a command, path or tool that behaves differently there), which a rerun repeats; it is flaky only if the same job passes on this commit"
+                    "most likely a {os} difference (a command, path or tool that behaves differently there); if this job passes when this commit runs again, it was flaky instead"
                 ));
                 return done(Verdict::Real, evidence, false);
             }
@@ -246,6 +254,11 @@ pub(crate) fn judge(sig: &Signature, f: &Facts) -> Judged {
         return done(Verdict::Flaky, evidence, false);
     }
     // Not enough to go on: say what was looked at.
+    if let Some(line) = &sig.timing {
+        evidence.push(format!(
+            "the output reports a time limit running out ({line}), which a slow runner can hit"
+        ));
+    }
     if sig.tests.is_empty() {
         evidence.push(
             "no failed test, compile error or runner trouble recognised in the step's output"
@@ -330,6 +343,28 @@ mod tests {
             "fails only on macos: `a` passed on linux, windows on this commit (trusted / test and trusted / test-windows)"
         );
         assert!(j.evidence[1].starts_with("most likely a macos difference"));
+
+        // A time limit running out is what a slow runner does: unknown,
+        // not an OS difference.
+        let sig = Signature {
+            timing: Some("jouet: rule checks: exceeded its time budget".into()),
+            ..test_sig("a")
+        };
+        let j = judge(&sig, &f);
+        assert_eq!(j.verdict, Verdict::Unknown);
+        assert_eq!(
+            j.evidence[1],
+            "the output reports a time limit running out (jouet: rule checks: exceeded its time budget), which a slow runner can hit: a rerun of this job on this commit tells a flake from a macos difference"
+        );
+        // Failing the same way again on this commit is still real.
+        let mut again = facts();
+        again.passed_on_commit = f.passed_on_commit.clone();
+        again.same_commit = vec![Seen {
+            place: place("x", 1),
+            passed: false,
+            same: true,
+        }];
+        assert_eq!(judge(&sig, &again).verdict, Verdict::Real);
 
         // Another job on the same OS passing it is a flake.
         f.passed_on_commit

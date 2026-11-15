@@ -243,7 +243,7 @@ seed_explain_cache() {
 	assert_line 'REAL trusted / test-macos (macos)  step "Run mise run test"'
 	assert_line "  failed: a_command_is_rerun_until_it_exits_as_expected  at tests/wait.rs:436:5"
 	assert_line "  - fails only on macos: \`a_command_is_rerun_until_it_exits_as_expected\` passed on linux on this commit (trusted / test)"
-	assert_line "  - most likely a macos difference (a command, path or tool that behaves differently there), which a rerun repeats; it is flaky only if the same job passes on this commit"
+	assert_line "  - most likely a macos difference (a command, path or tool that behaves differently there); if this job passes when this commit runs again, it was flaky instead"
 	assert_line --partial "rerun: allowed, reruns every failed job; not a flake or infrastructure: trusted / test-macos (real)"
 	assert_line "GitHub: 0 requests, 9 from the cache"
 }

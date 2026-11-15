@@ -8,6 +8,12 @@
 //!   commit. Passing on another OS is no evidence of a flake, so real; it is
 //!   flaky only with a later run of the same commit in which the job
 //!   passed, which [`github_rerun_passed`] adds.
+//! - The same job with its log swapped for the one `trusted / test-macos`
+//!   left in run 43607360190 (release PR #575, 2026-11-14): a hook test
+//!   failed after the rule it ran on went past its time budget, and the
+//!   rerun passed. A time limit running out says nothing of the OS, so
+//!   unknown, not real. The log is cut to the failed step, with its
+//!   timestamps moved into the recorded step's minute.
 //! - Run 41193332714 (PR #73): every build failed with E0425, the error
 //!   #71 and #74 left on main until #79, which main's ci and docs runs
 //!   failed with too. Real, and not the PR's fault.
@@ -280,7 +286,7 @@ fn a_macos_only_failure_is_an_os_difference_not_a_flake() {
         evidence,
         [
             "fails only on macos: `a_command_is_rerun_until_it_exits_as_expected` passed on linux on this commit (trusted / test)",
-            "most likely a macos difference (a command, path or tool that behaves differently there), which a rerun repeats; it is flaky only if the same job passes on this commit",
+            "most likely a macos difference (a command, path or tool that behaves differently there); if this job passes when this commit runs again, it was flaky instead",
         ]
     );
     let excerpt = job["log_excerpt"].to_string();
@@ -508,4 +514,52 @@ fn the_text_report_groups_jobs_that_failed_the_same_way() {
     );
     // The excerpt keeps to its budget, and says what it left out.
     assert!(text.contains("lines skipped"), "{text}");
+}
+
+#[test]
+fn a_macos_only_failure_past_a_time_limit_is_unknown_not_an_os_difference() {
+    let log = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/ci-explain-overrun/job-test-macos.log"),
+    )
+    .unwrap();
+    // Linux passed the test in that run (job 132484859746); the recorded
+    // Linux log gets that line.
+    let linux = std::fs::read_to_string(fixtures().join("job-124515917923.log"))
+        .unwrap()
+        .replace(
+            "a_command_is_rerun_until_it_exits_as_expected ... ok\n",
+            "a_command_is_rerun_until_it_exits_as_expected ... ok\n2026-10-31T10:43:33.3247023Z \u{1b}[36m\u{1b}[1m[test:cargo]\u{1b}[0m test cmd::hook::tests::codex_replay_lets_a_filter_on_a_failed_tests_path_clear_it ... ok\n",
+        );
+    assert!(linux.contains("codex_replay"), "the line went in");
+    let fake = github_with(vec![
+        ("job-124515918002.log".into(), log),
+        ("job-124515917923.log".into(), linux),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let out = explain(&fake, dir.path(), &["--run", MACOS_RUN]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let doc = json(&out);
+    assert_eq!(doc["result"], "unknown");
+    let [job] = jobs(&doc).as_slice() else {
+        panic!("one failed job: {doc}");
+    };
+    assert_eq!(job["verdict"], "unknown");
+    assert_eq!(
+        job["tests"][0],
+        "cmd::hook::tests::codex_replay_lets_a_filter_on_a_failed_tests_path_clear_it"
+    );
+    let evidence: Vec<&str> = job["evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(
+        evidence.last().copied(),
+        Some(
+            "the output reports a time limit running out (jouet: rule checks: exceeded its time budget), which a slow runner can hit: a rerun of this job on this commit tells a flake from a macos difference"
+        ),
+        "{evidence:?}"
+    );
 }

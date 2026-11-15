@@ -1,0 +1,46 @@
+2026-10-31T10:43:03.0706930Z ##[group]Run mise run test
+2026-10-31T10:43:03.0707230Z [36;1mmise run test[0m
+2026-10-31T10:43:30.3546280Z [36m[1m[test:cargo][0m test cost::tests::a_median_of_huge_timings_does_not_overflow ... ok
+2026-10-31T10:43:30.3546650Z [36m[1m[test:cargo][0m test cost::tests::a_secret_in_a_command_is_not_kept ... ok
+2026-10-31T10:43:30.3547110Z [36m[1m[test:cargo][0m test cost::tests::ci_ratios_become_time_here_through_the_commands_timed_in_both ... ok
+2026-10-31T10:43:30.3550500Z [36m[1m[test:cargo][0m test cost::tests::failing_runs_count_only_when_no_run_passed ... ok
+2026-10-31T10:43:30.3551010Z [36m[1m[test:cargo][0m test cmd::hook::tests::codex_replay_lets_a_filter_on_a_failed_tests_path_clear_it ... FAILED
+2026-10-31T10:43:30.3551510Z [36m[1m[test:cargo][0m test cost::tests::the_primer_names_the_slow_checks_costliest_first ... ok
+2026-10-31T10:43:30.4122910Z [36m[1m[test:e2e][0m 1..1
+2026-10-31T10:43:30.4123090Z [36m[1m[test:cargo][0m 
+2026-10-31T10:43:30.4123660Z [36m[1m[test:e2e][0m not ok 1 bats-gather-tests
+2026-10-31T10:43:30.4123940Z [36m[1m[test:cargo][0m failures:
+2026-10-31T10:43:30.4135950Z [36m[2m[test:bench][0m .................
+2026-10-31T10:43:30.4136150Z [36m[1m[test:cargo][0m 
+2026-10-31T10:43:30.4136620Z [36m[1m[test:cargo][0m ---- cmd::hook::tests::codex_replay_lets_a_filter_on_a_failed_tests_path_clear_it stdout ----
+2026-10-31T10:43:30.4137040Z [36m[1m[test:cargo][0m jouet: rule checks: exceeded its time budget
+2026-10-31T10:43:30.4137370Z [36m[1m[test:cargo][0m jouet: rule checks: exceeded its time budget
+2026-10-31T10:43:30.4137570Z [36m[1m[test:cargo][0m 
+2026-10-31T10:43:30.4138180Z [36m[1m[test:cargo][0m thread 'cmd::hook::tests::codex_replay_lets_a_filter_on_a_failed_tests_path_clear_it' (36908) panicked at src/cmd/hook.rs:2248:9:
+2026-10-31T10:43:30.4138730Z [36m[1m[test:cargo][0m assertion failed: replay(None).block(&root, |_| None, |_| false, |_| true).is_some()
+2026-10-31T10:43:30.4139050Z [36m[1m[test:cargo][0m stack backtrace:
+2026-10-31T10:43:30.4145340Z [36m[1m[test:cargo][0m    0: __rustc::rust_begin_unwind
+2026-10-31T10:43:30.4145860Z [36m[1m[test:cargo][0m              at /rustc/e408947bfd200af42db322daf0fadfe7e26d3bd1/library/std/src/panicking.rs:689:5
+2026-10-31T10:43:30.4146310Z [36m[1m[test:cargo][0m    1: core::panicking::panic_fmt
+2026-10-31T10:43:30.4146730Z [36m[1m[test:cargo][0m              at /rustc/e408947bfd200af42db322daf0fadfe7e26d3bd1/library/core/src/panicking.rs:80:14
+2026-10-31T10:43:30.4147100Z [36m[1m[test:cargo][0m    2: core::panicking::panic
+2026-10-31T10:43:30.4147490Z [36m[1m[test:cargo][0m              at /rustc/e408947bfd200af42db322daf0fadfe7e26d3bd1/library/core/src/panicking.rs:150:5
+2026-10-31T10:43:30.4148010Z [36m[1m[test:cargo][0m    3: jouet::cmd::hook::tests::codex_replay_lets_a_filter_on_a_failed_tests_path_clear_it
+2026-10-31T10:43:30.4148370Z [36m[1m[test:cargo][0m              at ./src/cmd/hook.rs:2248:9
+2026-10-31T10:43:30.4148740Z [36m[1m[test:cargo][0m    4: jouet::cmd::hook::tests::codex_replay_lets_a_filter_on_a_failed_tests_path_clear_it::{{closure}}
+2026-10-31T10:43:30.4149160Z [36m[1m[test:cargo][0m              at ./src/cmd/hook.rs:2217:68
+2026-10-31T10:43:30.4149480Z [36m[1m[test:cargo][0m    5: core::ops::function::FnOnce::call_once
+2026-10-31T10:43:30.4149910Z [36m[1m[test:cargo][0m              at /rustc/e408947bfd200af42db322daf0fadfe7e26d3bd1/library/core/src/ops/function.rs:250:5
+2026-10-31T10:43:30.4150320Z [36m[1m[test:cargo][0m    6: core::ops::function::FnOnce::call_once
+2026-10-31T10:43:30.4150760Z [36m[1m[test:cargo][0m              at /rustc/e408947bfd200af42db322daf0fadfe7e26d3bd1/library/core/src/ops/function.rs:250:5
+2026-10-31T10:43:30.4151300Z [36m[1m[test:cargo][0m note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+2026-10-31T10:43:30.4151580Z [36m[1m[test:cargo][0m 
+2026-10-31T10:43:30.4151710Z [36m[1m[test:cargo][0m 
+2026-10-31T10:43:30.4151850Z [36m[1m[test:cargo][0m failures:
+2026-10-31T10:43:30.4161000Z [36m[1m[test:cargo][0m     cmd::hook::tests::codex_replay_lets_a_filter_on_a_failed_tests_path_clear_it
+2026-10-31T10:43:30.4161340Z [36m[1m[test:cargo][0m 
+2026-10-31T10:43:30.4161720Z [36m[1m[test:cargo][0m test result: FAILED. 596 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.88s
+2026-10-31T10:43:30.4162080Z [36m[1m[test:cargo][0m 
+2026-10-31T10:43:30.4184270Z [2mFinished in 48.23s[0m
+2026-10-31T10:43:30.4184490Z [36m[1m[test:cargo][0m [31mERROR[0m task failed
+2026-10-31T10:43:30.4279400Z ##[error]Process completed with exit code 101.

@@ -123,6 +123,15 @@ static INFRA: LazyLock<Vec<(&str, Regex, bool)>> = LazyLock::new(|| {
 /// The steps the runner itself runs, whose failure is never the code's.
 const RUNNER_STEPS: &[&str] = &["Set up job", "Initialize containers", "Complete job"];
 
+/// A time limit that ran out: a test's timeout, or a budget a tool skips
+/// work past. A slow or loaded runner reaches one that a fast one does not,
+/// so a failure that reports one may pass when run again.
+static TIMING: LazyLock<Regex> = LazyLock::new(|| {
+    re(
+        r"(?i)exceeded (?:its|the) time budget|\btest timed out\b|\btimed out after \d|\bdeadline exceeded\b|\btimeout of \d+ ?ms exceeded|^\s*TIMEOUT \[\s*[\d.]+s\]|\bexceeded timeout of \d",
+    )
+});
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct Test {
     pub(crate) framework: &'static str,
@@ -146,6 +155,8 @@ pub(crate) struct Signature {
     pub(crate) location: Option<String>,
     pub(crate) errors: Vec<String>,
     pub(crate) infra: Option<Infra>,
+    /// The first line that reports a time limit running out.
+    pub(crate) timing: Option<String>,
 }
 
 impl Signature {
@@ -182,6 +193,9 @@ impl Signature {
                 && !sig.errors.contains(&error)
             {
                 sig.errors.push(error);
+            }
+            if sig.timing.is_none() && TIMING.is_match(line) {
+                sig.timing = Some(line.trim().to_string());
             }
             if sig.infra.as_ref().is_none_or(|i| !i.strong) {
                 let found = INFRA
@@ -310,6 +324,34 @@ mod tests {
             error.group_key(Some("linux")),
             error.group_key(Some("macos"))
         );
+    }
+
+    #[test]
+    fn a_time_limit_running_out_is_kept_and_a_test_named_timeout_is_not() {
+        let sig = Signature::of(
+            Some("Run mise run test"),
+            &lines(
+                "[test:cargo] test cmd::hook::tests::codex_replay_lets_a_filter_on_a_failed_tests_path_clear_it ... FAILED
+[test:cargo] test wait::tests::a_timeout_is_a_usage_error ... ok
+[test:cargo] jouet: rule checks: exceeded its time budget
+[test:cargo] jouet: rule checks: exceeded its time budget",
+            ),
+        );
+        assert_eq!(
+            sig.timing.as_deref(),
+            Some("jouet: rule checks: exceeded its time budget")
+        );
+        for line in [
+            "Error: Timeout of 2000ms exceeded.",
+            "        TIMEOUT [  60.003s] jouet::wait a_slow_one",
+            "panic: test timed out after 10m0s",
+            "thrown: \"Exceeded timeout of 5000 ms for a test.\"",
+        ] {
+            let sig = Signature::of(None, &lines(line));
+            assert!(sig.timing.is_some(), "{line}");
+        }
+        let sig = Signature::of(None, &lines("test a_timeout_is_a_usage_error ... FAILED"));
+        assert_eq!(sig.timing, None);
     }
 
     #[test]
