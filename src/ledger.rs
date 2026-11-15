@@ -116,6 +116,29 @@ pub(crate) struct Entry {
     /// `crate::prompt`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<crate::prompt::Shape>,
+    /// For a `settle` (a `jouet wait pr --until needs-agent` watcher of the
+    /// session ended) or a `lease-lost` (a hook found one gone without its
+    /// digest): what it did with the Auto-fix events held for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settle: Option<Settle>,
+}
+
+/// What a watcher's lease came to.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Settle {
+    /// `needs_agent`, `closed`, `timeout`, `parked` (closed with nothing
+    /// held, so it waited without waking the agent), `error` or
+    /// `lease-lost`.
+    pub result: String,
+    /// The events held for it.
+    #[serde(default)]
+    pub held: u64,
+    /// Of those, the ones its digest showed or said were over.
+    #[serde(default)]
+    pub accounted: u64,
+    /// Seconds from the first held event to the wake.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake_after_first_held_s: Option<u64>,
 }
 
 impl Entry {

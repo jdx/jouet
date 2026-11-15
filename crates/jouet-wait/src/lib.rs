@@ -14,6 +14,7 @@ pub mod host;
 pub mod http;
 pub mod job;
 pub mod joblog;
+pub mod lease;
 pub mod local;
 mod os;
 pub use os::process_running;

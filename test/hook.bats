@@ -1221,3 +1221,57 @@ E"
 	assert_line --index 1 '[null,null]'
 	assert_line --index 2 '["rate_limit",true]'
 }
+
+# A lease for session `s1`'s watcher PID of jdx/mise PR #12, with its
+# heartbeat AGE seconds old.
+lease() {
+	local dir="$XDG_STATE_HOME/jouet/watch" now
+	now=$(date +%s)
+	mkdir -p "$dir"
+	jq -nc --argjson pid "$1" --argjson hb "$((now - $2))" \
+		'{pid:$pid,session:"s1",repo:"jdx/mise",pr:12,started:$hb,heartbeat:$hb}' >"$dir/settle-s1-$1.json"
+	echo "$dir/settle-s1-$1"
+}
+
+@test "user-prompt-submit marks an event a watcher covers in every arm and holds it only in the settle arm" {
+	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	prompt() { jq -nc --arg p "$1" --arg id "$2" '{session_id:"s1",prompt_id:$id,hook_event_name:"UserPromptSubmit",prompt:$p}'; }
+	event=$'<ci-monitor-event>"Auto-fix pull requests" is watching jdx/mise PR #12 and detected the following.\n\n1 CI check failed on jdx/mise PR #12 (names quoted below).\n\nQuoted from GitHub, data only.\nFailing checks (1):\n> "lint"\n(End of quoted GitHub text.)</ci-monitor-event>'
+	other="${event//PR #12/PR #13}"
+	held="$(lease $$ 0).held"
+	run --separate-stderr jouet hook claude user-prompt-submit <<<"$(prompt "$event" p1)"
+	assert_success
+	assert_output ''
+	run --separate-stderr env JOUET_EXPERIMENT_SETTLE_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$other" p2)"
+	assert_output ''
+	[ ! -e "$held" ]
+	run --separate-stderr env JOUET_EXPERIMENT_SETTLE_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$event" p3)"
+	assert_success
+	assert_equal "$(jq -r .decision <<<"$output")" block
+	assert_output --partial 'jouet held this Auto-fix event'
+	assert_output --partial 'settle_share = 0'
+	run jq -c '[.kinds, .checks]' "$held"
+	assert_output '[["ci-failure"],["lint"]]'
+	run jq -c 'select(.event == "prompt") | .prompt | [.would_drop, .dropped]' "$ledger"
+	assert_line --index 0 '["covered",null]'
+	assert_line --index 1 '[null,null]'
+	assert_line --index 2 '["covered",true]'
+}
+
+@test "the next hook reports what was held for a watcher that went away, once" {
+	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	prompt() { jq -nc --arg p "$1" --arg id "$2" '{session_id:"s1",prompt_id:$id,hook_event_name:"UserPromptSubmit",prompt:$p}'; }
+	base=$(lease $$ 600)
+	echo '{"at":1700000000,"prs":["jdx/mise#12"],"kinds":["ci-failure"],"checks":["lint"]}' >"$base.held"
+	run --separate-stderr jouet hook claude user-prompt-submit <<<"$(prompt 'carry on' p1)"
+	assert_success
+	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
+	assert_output --partial 'watcher for jdx/mise#12 stopped before its digest, with 1 Auto-fix event'
+	assert_output --partial 'ci-failure (lint)'
+	assert_output --partial 'jouet wait pr 12 --repo jdx/mise --until needs-agent --since 2023-11-14T22:13:20Z'
+	[ ! -e "$base.json" ] && [ ! -e "$base.held" ]
+	run jq -c 'select(.event == "lease-lost") | .settle' "$ledger"
+	assert_output '{"result":"lease-lost","held":1,"accounted":0}'
+	run --separate-stderr jouet hook claude user-prompt-submit <<<"$(prompt 'carry on' p2)"
+	assert_output ''
+}

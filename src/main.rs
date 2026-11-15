@@ -30,6 +30,7 @@ mod reads;
 mod redact;
 mod rules;
 mod settings;
+mod settle;
 mod setup;
 mod share;
 mod sources;

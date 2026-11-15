@@ -14,6 +14,7 @@ use jouet_wait::ci::{self, CiWait};
 use jouet_wait::daemon::{self, Answer, DaemonWait};
 use jouet_wait::host::Remote;
 use jouet_wait::job;
+use jouet_wait::lease::{self, Lease};
 use jouet_wait::local::{CmdWait, FileWait, HttpWait, LogWait, PidWait, PortWait};
 use jouet_wait::pr::{PrWait, Until};
 use jouet_wait::remote::{self, Halt, Watch};
@@ -23,7 +24,9 @@ use jouet_wait::triage::Acks;
 use jouet_wait::{self as wait, Reporter, Stop, Subject, Timing};
 use regex::Regex;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(10);
@@ -33,6 +36,18 @@ const DEFAULT_LOG_LINES: usize = 60;
 /// take longer than one check run to settle.
 const DEFAULT_QUIET: Duration = Duration::from_secs(20 * 60);
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
+/// The quiet window once every check has finished and no review bot says
+/// it is still reviewing, unless `--quiet-for` is given.
+const SHORT_QUIET: Duration = Duration::from_secs(5 * 60);
+/// A watcher in an agent's session holds Auto-fix events, so it waits up
+/// to a day, polling every 5 minutes once the PR has settled.
+const LEASE_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
+const SETTLED_INTERVAL: Duration = Duration::from_secs(5 * 60);
+/// How long a watcher waits, after removing its lease, for a hook that
+/// was holding an event as it did.
+const HOLD_GRACE: Duration = Duration::from_secs(1);
+/// How often a parked watcher looks for its session.
+const PARK_STEP: Duration = Duration::from_secs(60);
 
 pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
     if out.json && args.jsonl {
@@ -80,18 +95,22 @@ pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
             }
         }
         WaitCmd::Pr(a) if a.until == "needs-agent" => {
+            let session = jouet_git::session::id_from_env();
             let timing = Timing {
-                timeout: if args.timeout.is_none() {
-                    SETTLE_TIMEOUT
-                } else {
-                    timing.timeout
+                timeout: match (&args.timeout, &session) {
+                    (Some(_), _) => timing.timeout,
+                    (None, Some(_)) => LEASE_TIMEOUT,
+                    (None, None) => SETTLE_TIMEOUT,
                 },
                 ..timing
             };
             match settle_args(&a, confirm_conflict) {
-                Ok((t, options)) => watch(reporter, &timing, &t.repo().clone(), |_| {
-                    Ok(SettleWait::new(t, options))
-                }),
+                Ok((t, options)) => match session {
+                    Some(session) => settle_watch(reporter, &timing, t, options, &session),
+                    None => watch(reporter, &timing, &t.repo().clone(), |_| {
+                        Ok(SettleWait::new(t, options))
+                    }),
+                },
                 Err(message) => out.error(Exit::Usage, &message),
             }
         }
@@ -224,16 +243,187 @@ fn watch<W: Watch>(
             let mut reporter = reporter(w.label());
             remote::run(&mut w, &mut remote, timing, &mut reporter)
         }
-        Err(halt) => {
-            let stop = match halt {
-                Halt::Stop(stop) => stop,
-                Halt::RateLimited { reset } => Stop {
-                    exit: Exit::Remote,
-                    message: github_failure(reset),
-                },
-            };
-            reporter(String::new()).fail(&stop)
+        Err(halt) => reporter(String::new()).fail(&halt_stop(halt)),
+    }
+}
+
+fn halt_stop(halt: Halt) -> Stop {
+    match halt {
+        Halt::Stop(stop) => stop,
+        Halt::RateLimited { reset } => Stop {
+            exit: Exit::Remote,
+            message: github_failure(reset),
+        },
+    }
+}
+
+/// `wait pr --until needs-agent` in an agent's session: the watcher holds a
+/// lease, so the hooks can hold the Auto-fix events about its PR for its
+/// digest, and records in the ledger what it did with them. Anything that
+/// keeps it from writing the lease leaves a plain wait.
+fn settle_watch(
+    reporter: impl Fn(String) -> Reporter,
+    timing: &Timing,
+    target: Target,
+    mut options: settle::Options,
+    session: &str,
+) -> Exit {
+    let started = Instant::now();
+    let mut remote = match Remote::connect(target.repo()) {
+        Ok(remote) => remote,
+        Err(message) => {
+            return reporter(String::new()).fail(&Stop {
+                exit: Exit::Precondition,
+                message,
+            });
         }
+    };
+    // The lease names its PR, so the target is resolved first.
+    let (repo, number) = match remote.resolve(target) {
+        Ok(resolved) => resolved,
+        Err(halt) => return reporter(String::new()).fail(&halt_stop(halt)),
+    };
+    let now = jouet_output::time::now();
+    let lease = Lease {
+        pid: std::process::id(),
+        session: session.to_string(),
+        repo: repo.to_string(),
+        pr: number,
+        branch: None,
+        started: now,
+        heartbeat: now,
+    };
+    let path = lease::dir()
+        .and_then(|dir| Lease::path(&dir, session, lease.pid))
+        .filter(|path| lease.write(path).is_ok());
+    if path.is_some() {
+        options.lease.clone_from(&path);
+        options.settled_interval = Some(SETTLED_INTERVAL);
+    }
+    let beat = path.clone().map(|path| Heartbeat::start(path, lease));
+    let mut w = SettleWait::new(Target::Number(repo, number), options);
+    let mut reporter = reporter(w.label());
+    let (exit, doc) = remote::run_doc(&mut w, &mut remote, timing, &mut reporter);
+    if let Some(beat) = beat {
+        beat.stop();
+    }
+    let Some(path) = path else {
+        return exit;
+    };
+    // No hook holds an event once the lease is gone; one that was holding
+    // as it went has the grace to finish.
+    let _ = std::fs::remove_file(&path);
+    std::thread::sleep(HOLD_GRACE);
+    let held = lease::held(&path);
+    Lease::remove(&path);
+    let reported = doc.as_ref().map_or(&[][..], |d| &d.held[..]);
+    let late = held.len().saturating_sub(reported.len());
+    if late > 0 {
+        eprintln!(
+            "jouet: {late} Auto-fix event{} held as this wait ended; look at the PR: `jouet wait pr {number} --until needs-agent` or `jouet pr threads {number}`",
+            if late == 1 { "" } else { "s" }
+        );
+    }
+    let result = doc.as_ref().map_or("error", settle::Doc::result);
+    let parked = result == "closed" && held.is_empty();
+    record_settle(
+        session,
+        crate::ledger::Settle {
+            result: if parked { "parked" } else { result }.into(),
+            held: held.len() as u64,
+            accounted: reported.iter().filter(|h| h.accounted).count() as u64,
+            wake_after_first_held_s: doc.as_ref().and_then(|d| d.wake_after_first_held_s),
+        },
+    );
+    if parked {
+        // Nothing for the agent: a wake would only start a turn to read
+        // that the PR closed. The wait stays until its session ends.
+        let parent = parent();
+        while started.elapsed() < timing.timeout && !orphaned(parent) {
+            std::thread::sleep(PARK_STEP.min(timing.timeout.saturating_sub(started.elapsed())));
+        }
+    }
+    exit
+}
+
+/// Records a watcher's `settle` entry, unless the ledger is turned off.
+fn record_settle(session: &str, settle: crate::ledger::Settle) {
+    let settings = crate::settings::Settings::load();
+    let Some(dir) = crate::ledger::dir().filter(|_| settings.hooks.ledger) else {
+        return;
+    };
+    let mut entry = crate::ledger::Entry::new("jouet", Some(session), "settle");
+    entry.repo = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| crate::ledger::repo_key(&cwd));
+    entry.settle = Some(settle);
+    crate::ledger::append(&dir, &entry);
+}
+
+/// The process that started this one: the agent's shell.
+fn parent() -> u32 {
+    #[cfg(unix)]
+    {
+        std::os::unix::process::parent_id()
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+/// Whether the process that started this one has gone: it was reparented.
+fn orphaned(parent: u32) -> bool {
+    #[cfg(unix)]
+    {
+        std::os::unix::process::parent_id() != parent
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = parent;
+        false
+    }
+}
+
+/// The thread that keeps a lease's heartbeat fresh. When the session that
+/// started the watcher is gone, it ends the process: with nothing held, it
+/// removes the lease first; with events held, it leaves the lease to go
+/// stale, so the session's next hook reports them.
+struct Heartbeat {
+    stop: Arc<AtomicBool>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+impl Heartbeat {
+    fn start(path: PathBuf, mut lease: Lease) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = Arc::clone(&stop);
+        let parent = parent();
+        let thread = std::thread::spawn(move || {
+            let mut beat = Instant::now();
+            while !stopped.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(250));
+                if beat.elapsed() < lease::HEARTBEAT || stopped.load(Ordering::Relaxed) {
+                    continue;
+                }
+                beat = Instant::now();
+                if orphaned(parent) {
+                    if lease::held(&path).is_empty() {
+                        Lease::remove(&path);
+                    }
+                    std::process::exit(i32::from(Exit::Failed.code()));
+                }
+                lease.heartbeat = jouet_output::time::now();
+                let _ = lease.write(&path);
+            }
+        });
+        Self { stop, thread }
+    }
+
+    /// Stops it, so it never writes the lease again.
+    fn stop(self) {
+        self.stop.store(true, Ordering::Relaxed);
+        let _ = self.thread.join();
     }
 }
 
@@ -362,10 +552,14 @@ fn settle_args(
     };
     let options = settle::Options {
         quiet,
+        // Given a window, the wait keeps to it.
+        quiet_short: a.quiet_for.is_none().then_some(SHORT_QUIET),
         acks,
         since,
         log_lines: log_lines(a.log_lines, a.no_logs)?,
         confirm_conflict,
+        lease: None,
+        settled_interval: None,
     };
     Ok((target(a.pr.as_deref(), a.repo.as_deref())?, options))
 }

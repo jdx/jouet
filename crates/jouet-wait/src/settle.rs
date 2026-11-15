@@ -8,9 +8,16 @@
 //! since the wait began that is not bot noise ([`crate::triage`]). Then the
 //! wait prints one digest of all of them. A PR that settles with none of
 //! these keeps being watched; one that is merged or closed ends the wait.
+//!
+//! A watcher an agent's session started holds a lease ([`crate::lease`]),
+//! and the Auto-fix events jouet held back for it are part of its digest:
+//! each one, with what became of it. A PR that settles with nothing to act
+//! on but with held events still wakes the agent once, so a held event
+//! always ends up in a digest.
 
 use super::checks::{self, Check};
 use super::host::Remote;
+use super::lease::{self, Held};
 use super::remote::{Halt, Poll, Watch};
 use super::triage::{self, Acks, Place};
 use super::watch::{ConflictCheck, PollError, Snapshot, now_ms, short};
@@ -23,6 +30,7 @@ use jouet_output::time::{elapsed, format_utc};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 /// Lines of each comment the digest shows.
@@ -31,12 +39,101 @@ const BODY_LINES: usize = 20;
 pub struct Options {
     /// How long nothing may change before the PR counts as settled.
     pub quiet: Duration,
+    /// The shorter window used instead once every check has finished and
+    /// no review bot says it is still reviewing.
+    pub quiet_short: Option<Duration>,
     pub acks: Acks,
     /// Comments posted from this time on (Unix seconds) are new.
     pub since: i64,
     /// Lines of each failure log to show; `None` fetches no logs.
     pub log_lines: Option<usize>,
     pub confirm_conflict: Duration,
+    /// The lease whose held events this wait reports.
+    pub lease: Option<PathBuf>,
+    /// The wait between polls once the PR has settled with nothing for the
+    /// agent, instead of the usual back-off.
+    pub settled_interval: Option<Duration>,
+}
+
+/// A held event, and what became of it.
+#[derive(Debug, Clone, Serialize)]
+pub struct HeldReport {
+    /// When jouet held it.
+    pub at: String,
+    pub kinds: Vec<String>,
+    pub prs: Vec<String>,
+    /// Whether this digest shows what it reported, or that it is over.
+    pub accounted: bool,
+    pub notes: Vec<String>,
+}
+
+/// What became of each held event, by what the PR shows now.
+fn account(
+    held: &[Held],
+    open: bool,
+    checks: &[Check],
+    conflict: bool,
+    items: usize,
+    dropped: &BTreeMap<&'static str, usize>,
+) -> Vec<HeldReport> {
+    held.iter()
+        .map(|h| {
+            let mut notes = Vec::new();
+            let mut accounted = true;
+            if !open {
+                notes.push("the PR is closed".to_string());
+            } else {
+                for kind in &h.kinds {
+                    match kind.as_str() {
+                        "ci-failure" => notes.extend(check_notes(&h.checks, checks)),
+                        "conflict" if conflict => notes.push("the conflict is shown above".into()),
+                        "conflict" => notes.push("the conflict has cleared".into()),
+                        "review-comment" if items > 0 => {
+                            notes.push("the review comments are shown above".into());
+                        }
+                        "review-comment" if !dropped.is_empty() => {
+                            notes.push("its comments were left out as bot noise".into());
+                        }
+                        _ => {
+                            accounted = false;
+                            notes.push(format!("{kind}: not found on the PR now"));
+                        }
+                    }
+                }
+            }
+            HeldReport {
+                at: format_utc(h.at),
+                kinds: h.kinds.clone(),
+                prs: h.prs.clone(),
+                accounted,
+                notes,
+            }
+        })
+        .collect()
+}
+
+/// What became of each check a held CI failure named.
+fn check_notes(named: &[String], checks: &[Check]) -> Vec<String> {
+    if named.is_empty() {
+        let failing = checks.iter().any(|c| c.state.failed() && !c.derived());
+        return vec![
+            if failing {
+                "the failed checks are shown above"
+            } else {
+                "no check fails now"
+            }
+            .to_string(),
+        ];
+    }
+    named
+        .iter()
+        .map(|name| match checks.iter().find(|c| &c.name == name) {
+            Some(c) if c.state.failed() => format!("{name}: shown above"),
+            Some(c) if c.state.finished() => format!("{name}: failed, and passes now"),
+            Some(_) => format!("{name}: running again"),
+            None => format!("{name}: not on the head now"),
+        })
+        .collect()
 }
 
 /// A review thread or top-level comment the agent has to see.
@@ -208,6 +305,8 @@ pub struct SettleWait {
     settled_at: Option<i64>,
     /// Whether the latest poll found it so.
     last_poll_settled: bool,
+    /// The events jouet held for this wait, as of the latest poll.
+    held: Vec<Held>,
 }
 
 #[derive(Debug, Serialize)]
@@ -238,6 +337,29 @@ pub struct Doc {
     /// Bot comments left out as noise, by class.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) dropped: BTreeMap<&'static str, usize>,
+    /// The Auto-fix events jouet held back for this wait, and what became
+    /// of each.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub held: Vec<HeldReport>,
+    /// How long after the first held event this wait woke the agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wake_after_first_held_s: Option<u64>,
+}
+
+impl Doc {
+    /// `needs_agent`, `closed` or `timeout`.
+    pub fn result(&self) -> &'static str {
+        self.result
+    }
+
+    /// `owner/name#N`.
+    pub fn pr(&self) -> String {
+        format!("{}#{}", self.repo, self.pr)
+    }
+
+    pub fn quiet_s(&self) -> u64 {
+        self.quiet_s
+    }
 }
 
 impl SettleWait {
@@ -256,6 +378,7 @@ impl SettleWait {
             dropped: BTreeMap::new(),
             settled_at: None,
             last_poll_settled: false,
+            held: Vec::new(),
         }
     }
 
@@ -270,6 +393,20 @@ impl SettleWait {
             Some((repo, n)) => (repo.to_string(), *n),
             None => (self.target.to_string(), 0),
         };
+        let held = account(
+            &self.held,
+            result != "closed",
+            &self.snap.checks,
+            conflict.is_some(),
+            self.items.len(),
+            &self.dropped,
+        );
+        let wake_after_first_held_s = self
+            .held
+            .iter()
+            .map(|h| h.at)
+            .min()
+            .map(|first| u64::try_from(jouet_output::time::now() - first).unwrap_or(0));
         Doc {
             repo,
             pr,
@@ -291,6 +428,15 @@ impl SettleWait {
             checks,
             threads: self.items.clone(),
             dropped: self.dropped.clone(),
+            held,
+            wake_after_first_held_s,
+        }
+    }
+
+    /// Rereads the events held for this wait.
+    fn read_held(&mut self) {
+        if let Some(path) = &self.options.lease {
+            self.held = lease::held(path);
         }
     }
 
@@ -335,6 +481,7 @@ impl Watch for SettleWait {
                 r
             }
         };
+        self.read_held();
         remote
             .ci()
             .poll(&repo, number, None, &mut self.snap)
@@ -402,11 +549,19 @@ impl Watch for SettleWait {
             )));
         }
         let quiet = self.quiet_since.elapsed();
-        if quiet < self.options.quiet {
+        // Once every check has finished and no bot says it is still
+        // reviewing, nothing is known to be on its way.
+        let window = match self.options.quiet_short {
+            Some(short) if pending == 0 && !self.dropped.contains_key("in_progress") => {
+                short.min(self.options.quiet)
+            }
+            _ => self.options.quiet,
+        };
+        if quiet < window {
             return Ok(Poll::Pending(format!(
                 "settling: quiet for {} of {}",
                 elapsed(quiet.as_secs()),
-                elapsed(self.options.quiet.as_secs())
+                elapsed(window.as_secs())
             )));
         }
         let mut failed: Vec<Check> = self
@@ -420,6 +575,15 @@ impl Watch for SettleWait {
             .collect();
         if failed.is_empty() && conflict.is_none() && self.items.is_empty() {
             self.settled_at = Some(jouet_output::time::now());
+            // Held events wake the agent once, to say what became of them.
+            if !self.held.is_empty() {
+                let n = self.held.len();
+                let state = format!(
+                    "nothing needs the agent; {n} held Auto-fix event{} settled",
+                    if n == 1 { "" } else { "s" }
+                );
+                return Ok(Poll::Done(self.doc("needs_agent", state, None, failed)));
+            }
             self.last_poll_settled = true;
             return Ok(Poll::Pending("settled; nothing needs the agent".into()));
         }
@@ -431,6 +595,7 @@ impl Watch for SettleWait {
     }
 
     fn timed_out(&mut self, _remote: &mut Remote) -> Doc {
+        self.read_held();
         // Comments seen before the PR last settled with nothing to do were
         // judged; any later ones were not, so the next wait starts there.
         let (state, next) = match self.settled_at {
@@ -490,6 +655,7 @@ impl Watch for SettleWait {
                 .collect();
             let _ = writeln!(out, "  left out as bot noise: {}", classes.join(", "));
         }
+        out.push_str(&held_text(&doc.held));
         if doc.result != "closed" {
             let _ = writeln!(
                 out,
@@ -504,9 +670,37 @@ impl Watch for SettleWait {
         match doc.result {
             "needs_agent" => Exit::Ok,
             "closed" => Exit::Failed,
+            // The agent has held events to hear about.
+            _ if !doc.held.is_empty() => Exit::Ok,
             _ => Exit::Timeout,
         }
     }
+
+    fn interval(&self) -> Option<Duration> {
+        self.options
+            .settled_interval
+            .filter(|_| self.last_poll_settled)
+    }
+}
+
+/// The held events, for the text digest.
+pub fn held_text(held: &[HeldReport]) -> String {
+    let mut out = String::new();
+    if held.is_empty() {
+        return out;
+    }
+    out.push_str("  held for this wait (jouet kept these Auto-fix events from starting a turn):\n");
+    for h in held {
+        let _ = writeln!(
+            out,
+            "    {} {} on {}: {}",
+            h.at,
+            h.kinds.join(", "),
+            h.prs.join(", "),
+            h.notes.join("; ")
+        );
+    }
+    out
 }
 
 fn summary(failed: usize, conflict: bool, items: usize) -> String {
@@ -619,5 +813,78 @@ mod tests {
             "2 failed checks, a conflict, 1 new review comment"
         );
         assert_eq!(summary(0, false, 3), "3 new review comments");
+    }
+
+    fn held(kinds: &[&str], checks: &[&str]) -> Held {
+        Held {
+            at: 1_000,
+            prs: vec!["jdx/jouet#12".into()],
+            kinds: kinds.iter().map(|k| (*k).to_string()).collect(),
+            comments: 0,
+            checks: checks.iter().map(|c| (*c).to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn each_held_event_says_what_became_of_it() {
+        let checks = [
+            Check::new("lint".into(), checks::State::Fail),
+            Check::new("test".into(), checks::State::Pass),
+            Check::new("build".into(), checks::State::Pending),
+        ];
+        let none = BTreeMap::new();
+        let ci = held(&["ci-failure"], &["lint", "test", "build", "gone"]);
+        let [r] = account(std::slice::from_ref(&ci), true, &checks, false, 0, &none)
+            .try_into()
+            .unwrap();
+        assert!(r.accounted);
+        assert_eq!(
+            r.notes,
+            [
+                "lint: shown above",
+                "test: failed, and passes now",
+                "build: running again",
+                "gone: not on the head now"
+            ]
+        );
+        let both = held(&["review-comment", "conflict"], &[]);
+        let found = account(std::slice::from_ref(&both), true, &checks, true, 1, &none);
+        assert_eq!(
+            found[0].notes,
+            [
+                "the review comments are shown above",
+                "the conflict is shown above"
+            ]
+        );
+        // A comment the digest neither shows nor left out as noise went
+        // missing: a silent drop.
+        let lost = account(std::slice::from_ref(&both), true, &[], false, 0, &none);
+        assert!(!lost[0].accounted);
+        assert_eq!(
+            lost[0].notes,
+            [
+                "review-comment: not found on the PR now",
+                "the conflict has cleared"
+            ]
+        );
+        let noise = BTreeMap::from([("rate_limit", 1)]);
+        assert!(account(std::slice::from_ref(&both), true, &[], false, 0, &noise)[0].accounted);
+        let closed = account(&[ci], false, &[], false, 0, &none);
+        assert_eq!(
+            (closed[0].accounted, &closed[0].notes[..]),
+            (true, &["the PR is closed".to_string()][..])
+        );
+        assert_eq!(
+            held_text(&closed),
+            format!(
+                "  held for this wait (jouet kept these Auto-fix events from starting a turn):\n    {} ci-failure on jdx/jouet#12: the PR is closed\n",
+                format_utc(1_000)
+            )
+        );
+        assert_eq!(
+            check_notes(&[], &checks[..1]),
+            ["the failed checks are shown above"]
+        );
+        assert_eq!(check_notes(&[], &checks[1..]), ["no check fails now"]);
     }
 }

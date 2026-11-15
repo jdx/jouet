@@ -74,6 +74,11 @@ pub trait Watch {
     fn timed_out(&mut self, remote: &mut Remote) -> Self::Doc;
     fn text(&self, doc: &Self::Doc, reporter: &Reporter) -> String;
     fn exit(&self, doc: &Self::Doc) -> Exit;
+    /// The wait before the next poll, when the subject sets it rather than
+    /// the usual back-off.
+    fn interval(&self) -> Option<Duration> {
+        None
+    }
 }
 
 /// Waits, then prints the result document (or the error) and returns the
@@ -84,13 +89,23 @@ pub fn run<W: Watch>(
     timing: &Timing,
     reporter: &mut Reporter,
 ) -> Exit {
+    run_doc(w, remote, timing, reporter).0
+}
+
+/// [`run`], also returning the document it printed, if any.
+pub fn run_doc<W: Watch>(
+    w: &mut W,
+    remote: &mut Remote,
+    timing: &Timing,
+    reporter: &mut Reporter,
+) -> (Exit, Option<W::Doc>) {
     match wait(w, remote, timing, reporter) {
         Ok(doc) => {
             let text = w.text(&doc, reporter);
             reporter.finish_doc(&doc, &text);
-            w.exit(&doc)
+            (w.exit(&doc), Some(doc))
         }
-        Err(stop) => reporter.fail(&stop),
+        Err(stop) => (reporter.fail(&stop), None),
     }
 }
 
@@ -160,6 +175,6 @@ pub fn wait<W: Watch>(
         }
         let state = last_state.clone().unwrap_or_default();
         reporter.pause(interval.min(left), start, &state);
-        interval = timing.back_off(interval);
+        interval = w.interval().unwrap_or_else(|| timing.back_off(interval));
     }
 }

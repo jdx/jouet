@@ -58,6 +58,15 @@ Two defaults changed ahead of a controlled comparison: the [stop gate](#the-stop
   ```
 
   A turn can do work queued from before the event, so the count of would-drops followed by work is an upper bound on the work a drop would hide.
+- **The settle arm.** Off by default: `[experiment] settle_share` percent of Claude Code sessions (0 by default; `JOUET_EXPERIMENT_SETTLE_SHARE`) are in its `new` arm. There, an Auto-fix event about a PR that a [`jouet wait pr --until needs-agent`](/commands/wait#needs-agent) watcher of the same session covers is held for that watcher's digest instead of starting a turn (see [held events](/commands/wait#held-events)). Every session, in either arm or none, records such an event as `would_drop: "covered"` on its `prompt` entry, and `dropped: true` when jouet held it. Each watcher records a `settle` entry when it ends: its result (`needs_agent`, `closed`, `timeout`, `parked` or `error`), how many events were held for it, how many its digest showed or said were over, and the seconds from the first held event to the wake. A hook that finds a watcher gone without its digest records a `lease-lost` entry and tells the agent what was held. The report shows, per arm (`off` for sessions with no settle arm):
+
+  ```text
+  settle arm (new: jouet holds Auto-fix events for the session's `jouet wait pr` watcher):
+    new: 2 sessions, 5 covered by a watcher, 4 held; watchers ended: 2 needs_agent; 3 accounted for, 0 silent drops, 1 lease-lost (1 held), 0 orphaned holds; median 10m from the first hold to the wake
+    off: 3 sessions, 7 covered by a watcher, 0 held
+  ```
+
+  A **silent drop** is a held event that its watcher's digest neither showed nor said was over. An **orphaned hold** is one that no `settle` or `lease-lost` entry accounted for within 25 hours. Both should stay at 0.
 - **The report.** `jouet stats` compares the arms within each repository, so that a repository with long sessions in one arm does not pass for a difference between arms. A session's repository is the main checkout of the directory its transcript started in: every worktree of a repository counts as that repository, including a Claude Code worktree under `.claude/worktrees/` that has since been removed. For each toggle, it reads the transcripts of the sessions with an arm and shows each arm's n, and the median and interquartile range per session of four measures. The difference of the medians (control less new) comes with a 95% bootstrap interval, or none while an arm has fewer than two sessions. The measures are:
   - **requests:** model requests, each counted once even where a resumed session repeats them.
   - **input tokens:** over those requests, cached or not.
