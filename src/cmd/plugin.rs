@@ -124,7 +124,7 @@ fn add(args: &PluginAddArgs, cwd: &Path, out: &Output) -> Exit {
         jouet_rules::Options {
             has_command: Box::new(crate::spec::has_command),
             disabled: Vec::new(),
-            budget: jouet_rules::Budget::default(),
+            budget: crate::rules::budget(&crate::settings::Settings::load()),
             cache_dir: None,
         },
     );

@@ -131,7 +131,7 @@ pub(crate) fn replay(engine: &Engine, rule: &Rule, entries: &[Entry]) -> Replay 
 mod tests {
     use super::*;
     use crate::wind::stats::tests::fired;
-    use jouet_rules::{Budget, Options, Origin, Source};
+    use jouet_rules::{Options, Origin, Source};
 
     pub(super) fn engine(name: &str, code: &str) -> Engine {
         Engine::new(
@@ -143,7 +143,7 @@ mod tests {
             Options {
                 has_command: Box::new(|_| true),
                 disabled: Vec::new(),
-                budget: Budget::default(),
+                budget: crate::rules::test_budget(),
                 cache_dir: None,
             },
         )

@@ -42,6 +42,9 @@ _common_setup() {
 	# No session is put in an experiment arm by chance; hook.bats and
 	# stats.bats test the arms.
 	export JOUET_EXPERIMENT_CONTROL_SHARE=0
+	# Rules get a budget no run reaches: on a slow runner the default 50 ms
+	# skips a rule, and a test of what it decides then sees nothing.
+	export JOUET_RULES_BUDGET_MS=30000
 	export HOME="$BATS_TEST_TMPDIR/home"
 	export XDG_STATE_HOME="$BATS_TEST_TMPDIR/state"
 	export JOUET_LOG_DIR="$BATS_TEST_TMPDIR/logs"

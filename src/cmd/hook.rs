@@ -1939,7 +1939,7 @@ mod tests {
         assert_eq!(output_bytes(&json!({"tool_response": {"file": {}}})), None);
         assert_eq!(output_bytes(&json!({})), None);
     }
-    use jouet_rules::{Budget, Options, Origin, Source};
+    use jouet_rules::{Options, Origin, Source};
 
     fn engine(extra: Vec<Source>) -> Engine {
         let mut sources = jouet_rules::builtin();
@@ -1949,7 +1949,7 @@ mod tests {
             Options {
                 has_command: Box::new(crate::spec::has_command),
                 disabled: Vec::new(),
-                budget: Budget::default(),
+                budget: crate::rules::test_budget(),
                 cache_dir: None,
             },
         )

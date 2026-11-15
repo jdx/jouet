@@ -4,6 +4,31 @@
 use crate::sources::{self, Kind, Set};
 use jouet_rules::{Budget, Engine, Options, Origin, Probes, RuleDir};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+/// Each rule's limits per check: `rules.budget_ms` of its own time, and four
+/// times that for the probes it waits on. A rule past them is skipped, so a
+/// loaded machine lets calls through rather than holding them.
+pub(crate) fn budget(settings: &crate::settings::Settings) -> Budget {
+    let time = Duration::from_millis(settings.rules.budget_ms);
+    Budget {
+        time,
+        probes: time.saturating_mul(4),
+        ..Budget::default()
+    }
+}
+
+/// A budget no test run reaches, for tests that expect a rule to decide:
+/// under the default one, a slow runner skips the rule and the call goes
+/// through. Tests of the budget itself set their own.
+#[cfg(test)]
+pub(crate) fn test_budget() -> Budget {
+    Budget {
+        time: Duration::from_secs(30),
+        probes: Duration::from_secs(30),
+        ..Budget::default()
+    }
+}
 
 pub(crate) struct Loaded {
     pub engine: Engine,
@@ -89,7 +114,7 @@ pub(crate) fn load_with(cwd: &Path, how: &Load) -> Loaded {
         Options {
             has_command: Box::new(crate::spec::has_command),
             disabled: settings.rules.disabled(settings.arm(how.session)),
-            budget: Budget::default(),
+            budget: budget(&settings),
             cache_dir: jouet_output::paths::cache_dir().map(|d| d.join("luau")),
         },
     );

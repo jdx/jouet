@@ -339,6 +339,7 @@ budget_ms = 500 # JOUET_HOOKS_BUDGET_MS: a tool hook slower than this is recorde
 disable = ["git-stash", "no-verify"] # JOUET_RULES_DISABLE=git-stash,no-verify; "all" for every rule but the enforced ones
 enable = ["python-edit"] # JOUET_RULES_ENABLE=python-edit: built-in rules that are off by default
 network = false # JOUET_RULES_NETWORK: let rules in hooks use the GitHub probes (jouet.pr.*); off so a hook never waits on the network
+budget_ms = 50  # JOUET_RULES_BUDGET_MS: each rule's own time per check, its probes get 4×; a rule past it is skipped and the call goes through
 
 [edit]
 fix_after = false     # JOUET_EDIT_FIX_AFTER: format edited files with `hk run fix --safe`

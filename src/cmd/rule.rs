@@ -955,7 +955,7 @@ fn single(origin: Origin, cwd: &Path) -> Result<(Engine, Vec<String>), (Exit, St
         jouet_rules::Options {
             has_command: Box::new(crate::spec::has_command),
             disabled: Vec::new(),
-            budget: jouet_rules::Budget::default(),
+            budget: crate::rules::budget(&crate::settings::Settings::load()),
             cache_dir: None,
         },
     );
