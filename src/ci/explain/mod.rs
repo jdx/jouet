@@ -1169,7 +1169,19 @@ fn siblings(gh: &mut Gh<'_>, history: &mut History, jobs: &[Job], lead: &Read, f
             continue;
         };
         let lines = joblog::excerpt(&log, None, 0).lines;
-        if lead.sig.tests.iter().any(|t| signature::passed(&lines, t)) {
+        let mut any = false;
+        for t in lead
+            .sig
+            .tests
+            .iter()
+            .filter(|t| signature::passed(&lines, t))
+        {
+            any = true;
+            if !f.passed_tests.contains(&t.name) {
+                f.passed_tests.push(t.name.clone());
+            }
+        }
+        if any {
             f.passed_on_commit.push((job.name.clone(), job.os));
         }
     }

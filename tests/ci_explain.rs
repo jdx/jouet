@@ -555,11 +555,13 @@ fn a_macos_only_failure_past_a_time_limit_is_unknown_not_an_os_difference() {
         .iter()
         .filter_map(Value::as_str)
         .collect();
+    // bats-gather-tests failed too, killed when the cargo tests failed;
+    // Linux never ran it under that name, so only the one test passed.
     assert_eq!(
-        evidence.last().copied(),
-        Some(
-            "the output reports a time limit running out (jouet: rule checks: exceeded its time budget), which a slow runner can hit: a rerun of this job on this commit tells a flake from a macos difference"
-        ),
-        "{evidence:?}"
+        evidence,
+        [
+            "fails only on macos: `cmd::hook::tests::codex_replay_lets_a_filter_on_a_failed_tests_path_clear_it` passed on linux on this commit (trusted / test)",
+            "the output reports a time limit running out (jouet: rule checks: exceeded its time budget), which a slow runner can hit: a rerun of this job on this commit tells a flake from a macos difference",
+        ]
     );
 }
