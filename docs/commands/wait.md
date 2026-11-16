@@ -150,6 +150,22 @@ It reads review threads, so it works on GitHub only (exit `4` elsewhere). Run it
 
 The defaults were chosen from a replay of five weeks of Claude Code Auto-fix events, and are not final. With the loose rule and a 20-minute window, the replay dropped or merged 42% of wake-ups. 0.4–0.5% of the events an agent acted on would have been dropped wrongly, some of them requests for a code change. The strict rule with a 10-minute window drops fewer (35%), wrongly drops fewer (0.1–0.2%), and wakes the agent 10 minutes sooner.
 
+Once every check has finished and no review bot says it is still reviewing, the window shortens to 5 minutes. Given `--quiet-for`, the wait keeps to that window instead.
+
+#### Held events {#held-events}
+
+Started in an agent's session (`JOUET_SESSION_ID` or `CLAUDE_CODE_SESSION_ID` is set), the wait writes a lease under `$XDG_STATE_HOME/jouet/watch/` naming its PR, and refreshes its heartbeat every 15 seconds. With no `--timeout` it waits up to `24h`, and polls every 5 minutes while the PR stays settled.
+
+In the settle arm of [`jouet stats`](/commands/stats#experiment-arms), off by default, jouet's hook holds a desktop-app Auto-fix event (a failed check, a conflict or review comments) about that PR alone instead of letting it start a turn, and the block reason says so. The digest then lists each held event and what became of it:
+
+```text
+  held for this wait (jouet kept these Auto-fix events from starting a turn):
+    2026-11-15T10:02:11Z ci-failure on jdx/jouet#12: trusted / lint: shown above
+    2026-11-15T10:09:40Z review-comment on jdx/jouet#12: its comments were left out as bot noise
+```
+
+A PR that closes with held events wakes the agent. A PR that closes with nothing held records `parked` and stays quiet until the session ends or the timeout. Anything that keeps the wait from writing its lease leaves a plain wait, and an event jouet cannot match to one live lease starts a turn as before. When a watcher ends without its digest, the session's next hook says what was held for it and how to start the wait again. In the settle arm, a push with no watcher running gets a note to start one.
+
 ## Local conditions {#local-subjects}
 
 These subjects watch the machine the wait runs on. They stay deliberately small: starting and supervising long-running services, with their ready checks, is [pitchfork](https://pitchfork.jdx.dev)'s job, and one-off background work is [`jouet job`](/commands/job)'s.

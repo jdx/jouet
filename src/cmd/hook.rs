@@ -211,13 +211,13 @@ fn handle(
     };
     // The session's experiment arm: which toggles keep their old behaviour.
     let mut arm = settings.arm(log.session);
-    // Auto-fix is Claude Code's, so only its sessions are in the drop arms.
-    let drop_share = if harness == Harness::Claude {
-        settings.experiment.drop_share
-    } else {
-        arm.drop = false;
-        0
-    };
+    // Auto-fix is Claude Code's, so only its sessions are in the drop and
+    // settle arms.
+    let mut shares = settings.experiment.shares();
+    if harness != Harness::Claude {
+        (arm.drop, arm.settle) = (false, false);
+        (shares.drop, shares.settle) = (0, 0);
+    }
     let gate_blocks = hooks.gate_blocks() || arm.gate_blocks;
     match event {
         // Claude Code shows a subagent nothing of its session's context, so
@@ -228,11 +228,18 @@ fn handle(
             if !subagent {
                 let mut entry = log.entry("session-start");
                 if log.session.is_some() {
-                    entry.arm = arm.labels(settings.experiment.control_share, drop_share);
+                    entry.arm = arm.labels(shares);
                 }
                 log.append(entry);
             }
             let loaded = load_all(payload).filter(|_| hooks.prime)?;
+            // After the primer is known to go out, so the report reaches
+            // the agent; otherwise the next prompt's hook makes it.
+            let lost = if subagent {
+                Vec::new()
+            } else {
+                lost_leases(&log)
+            };
             let cwd = payload.get("cwd").and_then(Value::as_str).map(Path::new);
             let mut primer = session_start(
                 &loaded.engine,
@@ -256,6 +263,7 @@ fn handle(
                 notes.extend(wind_notes(settings, log.session, log.repo.as_deref(), cwd));
             }
             notes.extend(untrusted_note(&loaded));
+            notes.extend(lost);
             notes.extend(fnox_note(
                 payload.get("cwd").and_then(Value::as_str).map(Path::new),
                 fnox::under_proxy(),
@@ -270,12 +278,51 @@ fn handle(
             let prompt = payload.get("prompt").and_then(Value::as_str)?;
             let mut shape = crate::prompt::classify(prompt);
             shape.would_drop = crate::prompt::noise(prompt).map(String::from);
-            shape.dropped = arm.drop && shape.would_drop.is_some();
+            let noise = shape.would_drop.is_some();
+            // A watcher that is gone without its digest is reported first,
+            // and its report must reach the agent, so nothing is held then.
+            let lost = if harness == Harness::Claude {
+                lost_leases(&log)
+            } else {
+                Vec::new()
+            };
+            let covered = log
+                .session
+                .filter(|_| harness == Harness::Claude && !noise)
+                .zip(crate::prompt::coverable(prompt))
+                .and_then(|(session, event)| {
+                    crate::settle::covering(session, &event).map(|(path, pid)| (path, pid, event))
+                });
+            if let Some((_, pid, _)) = &covered {
+                shape.would_drop = Some("covered".into());
+                shape.watcher = Some(*pid);
+            }
+            shape.dropped = match &covered {
+                Some((path, _, event)) => {
+                    arm.settle && lost.is_empty() && crate::settle::hold(path, event, &shape)
+                }
+                None => arm.drop && noise && lost.is_empty(),
+            };
             let dropped = shape.dropped;
             let mut entry = log.entry("prompt");
             entry.prompt = Some(shape);
             log.append(entry);
-            dropped.then(|| json!({ "decision": "block", "reason": DROP_REASON }))
+            if dropped {
+                let reason = if covered.is_some() {
+                    crate::settle::HOLD_REASON
+                } else {
+                    DROP_REASON
+                };
+                return Some(json!({ "decision": "block", "reason": reason }));
+            }
+            (!lost.is_empty()).then(|| {
+                json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "UserPromptSubmit",
+                        "additionalContext": lost.join("\n"),
+                    }
+                })
+            })
         }
         // Without steering no rule runs, but the stop gate still wants the
         // tree a formatting call started from.
@@ -380,6 +427,19 @@ fn handle(
                     let _ = std::fs::remove_file(&path);
                     context
                 });
+            // In the settle arm, a push with nothing watching its PR.
+            let push = (arm.settle
+                && event == "post-tool-use"
+                && call.tool == "Bash"
+                && call.exit_code == Some(0)
+                && !in_background(payload)
+                && call.command.as_deref().is_some_and(crate::settle::pushes)
+                && log.session.is_some_and(|s| !crate::settle::watching(s)))
+            .then(|| crate::settle::PUSH_NOTE.to_string());
+            let held = match (held, push) {
+                (Some(held), Some(push)) => Some(format!("{held}\n{push}")),
+                (held, push) => held.or(push),
+            };
             after_tool(event, held, &warnings)
         }
         // Every harness sends its file edits here, Codex its patches too.
@@ -844,6 +904,28 @@ fn evaluate(engine: &Engine, call: &Call) -> Outcome {
     }
     crate::share::record_gaps(engine);
     outcome
+}
+
+/// Removes the session's leases whose watchers are gone, each recorded as a
+/// `lease-lost`, and returns what to tell the agent about the events held
+/// for them.
+fn lost_leases(log: &Log<'_>) -> Vec<String> {
+    let Some(session) = log.session else {
+        return Vec::new();
+    };
+    let mut notes = Vec::new();
+    for lost in crate::settle::lost(session) {
+        let mut entry = log.entry("lease-lost");
+        entry.settle = Some(ledger::Settle {
+            result: "lease-lost".into(),
+            held: lost.held as u64,
+            watcher: Some(lost.pid),
+            ..ledger::Settle::default()
+        });
+        log.append(entry);
+        notes.extend(lost.note);
+    }
+    notes
 }
 
 /// How `harness` waits for a long command in one call, for the primer. Claude

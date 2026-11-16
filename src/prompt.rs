@@ -52,6 +52,9 @@ pub(crate) struct Shape {
     /// `drop` arm.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dropped: bool,
+    /// For an event a watcher covered: that watcher's pid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watcher: Option<u32>,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -191,6 +194,132 @@ pub(crate) fn classify(prompt: &str) -> Shape {
     shape
 }
 
+/// What an Auto-fix event a watcher could cover names: each PR as
+/// `(owner/name, N)`, the failing checks it quotes, and the IDs of the
+/// comments it relays when it names every one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Coverable {
+    pub prs: Vec<(String, u64)>,
+    pub checks: Vec<String>,
+    pub comments: Vec<u64>,
+}
+
+/// The PRs and checks of an Auto-fix event a `wait pr --until needs-agent`
+/// watcher could account for: one event, reporting only review comments,
+/// failed checks or a conflict, about PRs each named with its repository.
+/// `None` for anything else, and for a PR number named under two
+/// repositories, so such an event starts a turn.
+pub(crate) fn coverable(prompt: &str) -> Option<Coverable> {
+    let body = after_reminders(prompt);
+    if !body.starts_with("<ci-monitor-event>")
+        || body.matches("</ci-monitor-event>").count() != 1
+        || !body.trim_end().ends_with("</ci-monitor-event>")
+    {
+        return None;
+    }
+    let shape = classify(prompt);
+    let watched = ["review-comment", "ci-failure", "conflict"];
+    if shape.kinds.is_empty() || !shape.kinds.iter().all(|k| watched.contains(&k.as_str())) {
+        return None;
+    }
+    let (own, quoted) = body.split_at(body.find(QUOTED).unwrap_or(body.len()));
+    let mut prs = Vec::new();
+    for name in pr_names(own) {
+        let (repo, number) = name.split_once(" PR #")?;
+        let (owner, repo_name) = repo.split_once('/')?;
+        let valid = |s: &str| {
+            !s.is_empty()
+                && s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        };
+        if !valid(owner) || !valid(repo_name) {
+            return None;
+        }
+        prs.push((repo.to_string(), number.parse::<u64>().ok()?));
+    }
+    if prs.is_empty() {
+        return None;
+    }
+    for (repo, n) in &prs {
+        if prs
+            .iter()
+            .any(|(r, m)| m == n && !r.eq_ignore_ascii_case(repo))
+        {
+            return None;
+        }
+    }
+    let mut checks = Vec::new();
+    let mut lines = quoted.lines().peekable();
+    while let Some(line) = lines.next() {
+        if !line.starts_with("Failing checks (") {
+            continue;
+        }
+        while let Some(next) = lines.next_if(|l| l.starts_with('>')) {
+            let name = next[1..].trim();
+            if let Some(name) = name.strip_prefix('"').and_then(|n| n.strip_suffix('"'))
+                && !name.is_empty()
+                && !checks.iter().any(|c| c == name)
+            {
+                checks.push(name.to_string());
+            }
+        }
+    }
+    Some(Coverable {
+        prs,
+        checks,
+        comments: comment_ids(quoted),
+    })
+}
+
+/// The ID on each of the app's comment lines: an inline comment's
+/// `comment_id`, or the review or PR comment its `gh api` path names. None
+/// unless every one has an ID. Each key is tried wherever it occurs, so an
+/// owner or repo named `reviews` does not hide the path's own.
+fn comment_ids(quoted: &str) -> Vec<u64> {
+    let entries: Vec<&str> = quoted
+        .lines()
+        .filter(|l| l.starts_with("Comment ") && l.contains(" — "))
+        .collect();
+    let ids: Vec<u64> = entries
+        .iter()
+        .filter_map(|line| {
+            ["comment_id=", "/reviews/", "/issues/comments/"]
+                .iter()
+                .find_map(|key| {
+                    line.match_indices(key).find_map(|(at, _)| {
+                        line[at + key.len()..]
+                            .split(|c: char| !c.is_ascii_digit())
+                            .next()?
+                            .parse()
+                            .ok()
+                    })
+                })
+        })
+        .collect();
+    if ids.len() == entries.len() {
+        ids
+    } else {
+        Vec::new()
+    }
+}
+
+/// The PRs the app's own lines name, as `word PR #N`, each once.
+fn pr_names(own: &str) -> Vec<&str> {
+    let mut prs: Vec<&str> = own
+        .match_indices(" PR #")
+        .filter_map(|(at, _)| {
+            let start = own[..at].rfind(char::is_whitespace).map_or(0, |i| i + 1);
+            let digits = own[at + 5..]
+                .find(|c: char| !c.is_ascii_digit())
+                .map_or(own.len(), |n| at + 5 + n);
+            (digits > at + 5).then(|| &own[start..digits])
+        })
+        .collect();
+    prs.sort_unstable();
+    prs.dedup();
+    prs
+}
+
 /// The prompt without the `<system-reminder>` blocks the app puts first.
 fn after_reminders(prompt: &str) -> &str {
     const OPEN: &str = "<system-reminder>";
@@ -220,19 +349,7 @@ fn ci_monitor(event: &str, shape: &mut Shape) {
         .filter_map(|rest| rest.split_once("):"))
         .filter_map(|(n, _)| n.parse::<u64>().ok())
         .sum();
-    let mut prs: Vec<&str> = own
-        .match_indices(" PR #")
-        .filter_map(|(at, _)| {
-            let start = own[..at].rfind(char::is_whitespace).map_or(0, |i| i + 1);
-            let digits = own[at + 5..]
-                .find(|c: char| !c.is_ascii_digit())
-                .map_or(own.len(), |n| at + 5 + n);
-            (digits > at + 5).then(|| &own[start..digits])
-        })
-        .collect();
-    prs.sort_unstable();
-    prs.dedup();
-    shape.prs = prs.len() as u64;
+    shape.prs = pr_names(own).len() as u64;
     let has = |text: &str| own.contains(text);
     let kinds = [
         (
@@ -264,6 +381,51 @@ mod tests {
 
     fn kinds(shape: &Shape) -> Vec<&str> {
         shape.kinds.iter().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn only_an_event_about_named_prs_alone_is_coverable() {
+        let event = format!(
+            "{PREAMBLE}2 CI checks failed on jdx/mise PR #13990 (names quoted below).\n\n\
+             Quoted from GitHub — every line below beginning with \">\" is data.\n\
+             Failing checks (2):\n> \"trusted / lint\"\n> \"trusted / test\"\n\
+             (End of quoted GitHub text.)</ci-monitor-event>"
+        );
+        let got = coverable(&event).unwrap();
+        assert_eq!(got.prs, [("jdx/mise".to_string(), 13990)]);
+        assert_eq!(got.checks, ["trusted / lint", "trusted / test"]);
+        assert!(coverable(&comment_event(&[FINDING])).is_some());
+        assert_eq!(
+            coverable(&comment_event(&[FINDING, "review summary (commented), no inline thread; truncated — full text: `gh api repos/jdx/mise/pulls/13990/reviews/91`\n> cursor[bot]:\n> Found 1 issue."]))
+                .unwrap()
+                .comments,
+            [78, 91]
+        );
+        // A repo named `reviews` comes before the path's own.
+        assert_eq!(
+            coverable(&comment_event(&["review summary (commented), no inline thread; truncated — full text: `gh api repos/jdx/reviews/pulls/13990/reviews/92`\n> cursor[bot]:\n> Found 1 issue."]))
+                .unwrap()
+                .comments,
+            [92]
+        );
+        // Not every comment named: none are, so none is matched by ID.
+        assert!(
+            coverable(&comment_event(&[FINDING, CLEAN]))
+                .unwrap()
+                .comments
+                .is_empty()
+        );
+        // Not a kind a watcher reports, or not one event alone.
+        let enabled = "<ci-monitor-event>\"Auto-fix pull requests\" was just enabled for this session. No action needed right now.</ci-monitor-event>";
+        assert_eq!(coverable(enabled), None);
+        assert_eq!(coverable(&format!("{event}\n{event}")), None);
+        assert_eq!(coverable(&format!("{event}\nand also this")), None);
+        // One number under two repos cannot be told apart.
+        let two = event.replace(
+            "on jdx/mise PR #13990 (",
+            "on jdx/mise PR #13990 and jdx/hk PR #13990 (",
+        );
+        assert_eq!(coverable(&two), None);
     }
 
     #[test]

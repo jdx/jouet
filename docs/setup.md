@@ -356,6 +356,7 @@ sequences = false # JOUET_COST_SEQUENCES: record local session-linked jouet test
 [experiment]
 control_share = 50 # JOUET_EXPERIMENT_CONTROL_SHARE: percent of sessions that keep the old behaviour of each toggle under test (see `jouet stats`); 0 turns the arms off
 drop_share = 0 # JOUET_EXPERIMENT_DROP_SHARE: percent of Claude Code sessions in which Auto-fix events that are only bot noise are blocked before the agent sees them; 0, the default, turns this arm off
+settle_share = 0 # JOUET_EXPERIMENT_SETTLE_SHARE: percent of Claude Code sessions in which an Auto-fix event about a PR the session's `jouet wait pr --until needs-agent` watcher covers waits for its digest instead of starting a turn; 0, the default, turns this arm off
 
 [test]
 baseline = "auto" # JOUET_TEST_BASELINE: auto compares a failing run with the merge base on its own (see `jouet test`), off only with --baseline

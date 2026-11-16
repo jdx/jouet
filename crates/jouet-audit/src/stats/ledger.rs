@@ -39,6 +39,9 @@ pub struct LedgerEntry {
     pub arm: std::collections::BTreeMap<String, String>,
     /// For a `prompt`: what started the turn.
     pub prompt: Option<super::LedgerPrompt>,
+    /// For a `settle` or `lease-lost`: what a watcher did with the events
+    /// held for it.
+    pub settle: Option<super::LedgerSettle>,
 }
 
 /// What a rule decided about a call.

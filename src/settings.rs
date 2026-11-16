@@ -62,15 +62,27 @@ pub(crate) struct ExperimentSettings {
     /// Percent of Claude Code sessions, 0 to 100, in which the desktop app's Auto-fix events that are only noise (the notice that Auto-fix was turned on, and bot comments that are only a rate-limit or review-in-progress notice, a review with no findings, a perf report with no regression, or thanks, by `jouet wait pr --until needs-agent`'s rules) are blocked before the agent sees them; 0, the default, turns this arm off, though every session still records which events it would drop
     #[usage(env = "JOUET_EXPERIMENT_DROP_SHARE", default = 0)]
     pub drop_share: u64,
+    /// Percent of Claude Code sessions, 0 to 100, in which an Auto-fix event about a PR that one of the session's own `jouet wait pr --until needs-agent` watchers covers waits for that watcher's digest instead of starting a turn; 0, the default, turns this arm off, though every session still records which events it would hold
+    #[usage(env = "JOUET_EXPERIMENT_SETTLE_SHARE", default = 0)]
+    pub settle_share: u64,
 }
 
 impl Settings {
-    /// The arm `session` is in, by `[experiment] control_share` and
-    /// `drop_share`.
+    /// The arm `session` is in, by the `[experiment]` shares.
     pub(crate) fn arm(&self, session: Option<&str>) -> crate::experiment::Arm {
         session.map_or_else(Default::default, |s| {
-            crate::experiment::Arm::of(s, self.experiment.control_share, self.experiment.drop_share)
+            crate::experiment::Arm::of(s, self.experiment.shares())
         })
+    }
+}
+
+impl ExperimentSettings {
+    pub(crate) fn shares(&self) -> crate::experiment::Shares {
+        crate::experiment::Shares {
+            control: self.control_share,
+            drop: self.drop_share,
+            settle: self.settle_share,
+        }
     }
 }
 
