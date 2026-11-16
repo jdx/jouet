@@ -6,3 +6,7 @@
 JOUET_SESSION_ID = { value = "", force = true }
 CLAUDE_CODE_SESSION_ID = { value = "", force = true }
 CODEX_THREAD_ID = { value = "", force = true }
+# A rule past its time budget is skipped, so on a slow runner a test of what a
+# rule decides sees nothing. Tests get a budget no run reaches; those of the
+# budget itself set their own.
+JOUET_RULES_BUDGET_MS = "30000"

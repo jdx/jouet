@@ -425,7 +425,7 @@ mod tests {
             jouet_rules::Options {
                 has_command: Box::new(|_| true),
                 disabled: Vec::new(),
-                budget: jouet_rules::Budget::default(),
+                budget: crate::rules::test_budget(),
                 cache_dir: None,
             },
         );

@@ -1,7 +1,18 @@
 use super::*;
 
+/// A budget no test run reaches, for tests that expect a rule to decide:
+/// under the default one, a slow runner skips the rule. Tests of the budget
+/// itself set their own.
+pub(crate) fn generous() -> Budget {
+    Budget {
+        time: Duration::from_secs(30),
+        probes: Duration::from_secs(30),
+        ..Budget::default()
+    }
+}
+
 fn engine(sources: Vec<Source>) -> Engine {
-    engine_with(sources, Budget::default(), Vec::new())
+    engine_with(sources, generous(), Vec::new())
 }
 
 fn engine_with(sources: Vec<Source>, budget: Budget, disabled: Vec<String>) -> Engine {
@@ -166,7 +177,7 @@ fn disabled_rules_and_missing_commands_do_not_run() {
         Options {
             has_command: Box::new(|path| path != ["wait", "ci"]),
             disabled: vec!["git-stash".into()],
-            budget: Budget::default(),
+            budget: generous(),
             cache_dir: None,
         },
     );
@@ -464,7 +475,7 @@ fn the_settings_cannot_turn_off_an_enforced_rule() {
             vec![source(Origin::Enforced(PathBuf::from(
                 "/etc/jouet/rules/org.toml",
             )))],
-            Budget::default(),
+            generous(),
             disabled.clone(),
         );
         let org = engine.rule("org").unwrap();
@@ -479,7 +490,7 @@ fn the_settings_cannot_turn_off_an_enforced_rule() {
             vec![source(Origin::Plugin(PathBuf::from(
                 "/plugins/x/rules/org.toml",
             )))],
-            Budget::default(),
+            generous(),
             disabled,
         );
         assert_eq!(engine.rule("org").unwrap().state, State::Disabled);
@@ -531,7 +542,7 @@ fn a_damaged_cache_entry_is_recompiled() {
         Options {
             has_command: Box::new(|_| true),
             disabled: Vec::new(),
-            budget: Budget::default(),
+            budget: generous(),
             cache_dir: Some(dir.path().to_path_buf()),
         },
     );
@@ -577,7 +588,7 @@ fn a_users_rule_warns_unless_its_header_says_deny() {
 
     let mut repo = user_raw("team", &format!("--- why: x\n{code}"));
     repo.origin = Origin::Repo(PathBuf::from("team.luau"));
-    let engine = engine_with(vec![repo], Budget::default(), Vec::new());
+    let engine = engine_with(vec![repo], generous(), Vec::new());
     assert_eq!(engine.rule("team").unwrap().mode, Mode::Deny);
 }
 
@@ -951,7 +962,7 @@ fn a_missing_primitive_is_recorded_as_a_gap() {
             "fine",
             "return { check = function(c) local _ = jouet.git; return nil end }",
         )],
-        Budget::default(),
+        generous(),
         Vec::new(),
     );
     fine.evaluate(&bash("ls"));

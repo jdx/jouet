@@ -188,7 +188,10 @@ pub(crate) fn update<T>(path: &Path, change: impl FnOnce(&mut State) -> T) -> st
 /// which rules exist. A repository's rules are left out: winding writes
 /// only user rules.
 pub(crate) fn user_engine(rules_dir: &Path) -> Engine {
-    user_engine_with_budget(rules_dir, jouet_rules::Budget::default())
+    user_engine_with_budget(
+        rules_dir,
+        crate::rules::budget(&crate::settings::Settings::load()),
+    )
 }
 
 pub(crate) fn user_engine_with_budget(rules_dir: &Path, budget: jouet_rules::Budget) -> Engine {

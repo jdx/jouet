@@ -227,7 +227,7 @@ fn load(draft: &Draft) -> jouet_rules::Engine {
         jouet_rules::Options {
             has_command: Box::new(|_| true),
             disabled: Vec::new(),
-            budget: jouet_rules::Budget::default(),
+            budget: crate::rules::budget(&crate::settings::Settings::load()),
             cache_dir: None,
         },
     );

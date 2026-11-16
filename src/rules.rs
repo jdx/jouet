@@ -4,6 +4,31 @@
 use crate::sources::{self, Kind, Set};
 use jouet_rules::{Budget, Engine, Options, Origin, Probes, RuleDir};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+/// Each rule's limits per check: `rules.budget_ms` of its own time, and four
+/// times that for the probes it waits on. A rule past them is skipped, so a
+/// loaded machine lets calls through rather than holding them.
+pub(crate) fn budget(settings: &crate::settings::Settings) -> Budget {
+    let time = Duration::from_millis(settings.rules.budget_ms);
+    Budget {
+        time,
+        probes: time.saturating_mul(4),
+        ..Budget::default()
+    }
+}
+
+/// A budget no test run reaches, for tests that expect a rule to decide:
+/// under the default one, a slow runner skips the rule and the call goes
+/// through. Tests of the budget itself set their own.
+#[cfg(test)]
+pub(crate) fn test_budget() -> Budget {
+    Budget {
+        time: Duration::from_secs(30),
+        probes: Duration::from_secs(30),
+        ..Budget::default()
+    }
+}
 
 pub(crate) struct Loaded {
     pub engine: Engine,
@@ -89,12 +114,12 @@ pub(crate) fn load_with(cwd: &Path, how: &Load) -> Loaded {
         Options {
             has_command: Box::new(crate::spec::has_command),
             disabled: settings.rules.disabled(settings.arm(how.session)),
-            budget: Budget::default(),
+            budget: budget(&settings),
             cache_dir: jouet_output::paths::cache_dir().map(|d| d.join("luau")),
         },
     );
     if !how.ungated {
-        gate(&mut engine, &sets);
+        gate(&mut engine, &sets, settings.rules.budget_ms);
     }
     // In a hook the GitHub probes wait for `rules.network`.
     engine.set_probes(probes(cwd, settings.rules.network));
@@ -107,8 +132,9 @@ pub(crate) fn load_with(cwd: &Path, how: &Load) -> Loaded {
 
 /// Turns off each rule from outside, a repository's, a plugin's or the
 /// system's, that does not pass its examples. Which ones do not is cached
-/// by the set's hash and this jouet's version, so a hook runs them once.
-fn gate(engine: &mut Engine, sets: &[Set]) {
+/// by the set's hash, this jouet's version and the rule budget, so a hook
+/// runs them once and a raised budget runs again the ones that ran out.
+fn gate(engine: &mut Engine, sets: &[Set], budget_ms: u64) {
     for set in sets
         .iter()
         .filter(|s| s.kind != Kind::User && s.status.runs())
@@ -116,7 +142,7 @@ fn gate(engine: &mut Engine, sets: &[Set]) {
         let Some(digest) = &set.digest else {
             continue;
         };
-        let file = proven_file(digest);
+        let file = proven_file(digest, budget_ms);
         let cached: Option<Vec<(String, String)>> = file
             .as_ref()
             .and_then(|f| std::fs::read(f).ok())
@@ -132,17 +158,20 @@ fn gate(engine: &mut Engine, sets: &[Set]) {
     }
 }
 
-fn proven_file(digest: &str) -> Option<PathBuf> {
+fn proven_file(digest: &str, budget_ms: u64) -> Option<PathBuf> {
     jouet_output::paths::cache_dir().map(|d| {
-        d.join("proven")
-            .join(format!("{}-{digest}.json", env!("CARGO_PKG_VERSION")))
+        d.join("proven").join(format!(
+            "{}-{digest}-{budget_ms}ms.json",
+            env!("CARGO_PKG_VERSION")
+        ))
     })
 }
 
 /// Records that the rules of the set with this hash pass their examples,
 /// so the next hook need not run them; failing to is harmless.
 pub(crate) fn remember_proven(digest: &str) {
-    remember(proven_file(digest).as_deref(), &[]);
+    let budget_ms = crate::settings::Settings::load().rules.budget_ms;
+    remember(proven_file(digest, budget_ms).as_deref(), &[]);
 }
 
 fn remember(file: Option<&Path>, failing: &[(String, String)]) {
@@ -153,5 +182,20 @@ fn remember(file: Option<&Path>, failing: &[(String, String)]) {
             let _ = std::fs::create_dir_all(dir);
         }
         let _ = std::fs::write(file, bytes);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_raised_budget_checks_the_examples_again() {
+        let (Some(small), Some(large)) = (proven_file("abc", 250), proven_file("abc", 2_000))
+        else {
+            return;
+        };
+        assert_ne!(small, large);
+        assert_eq!(proven_file("abc", 250), Some(small));
     }
 }

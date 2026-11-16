@@ -1,4 +1,5 @@
 use super::*;
+use crate::tests::generous;
 use crate::{Budget, Call, Engine, Event, Options, Origin, Source};
 use serde_json::json;
 use std::path::Path;
@@ -99,7 +100,7 @@ fn git_state_reads_the_branch_its_upstream_and_the_work_tree() {
             local s = jouet.git.state()
             return `{s.branch} {s.upstream} +{s.ahead} -{s.behind} dirty={s.dirty} untracked={s.untracked} changed={s.changed} detached={s.detached}`
         end)()"#,
-        Budget::default(),
+        generous(),
     );
     e.set_probes(Probes::new(Some(work.clone()), None, false));
     assert_eq!(
@@ -112,7 +113,7 @@ fn git_state_reads_the_branch_its_upstream_and_the_work_tree() {
             local sub, args = jouet.git(jouet.parse("git -C x push -f")[1])
             return `{sub} {args[1]}`
         end)()"#,
-        Budget::default(),
+        generous(),
     );
     assert_eq!(said(&e), "push -f");
 }
@@ -141,7 +142,7 @@ fn repo_names_the_root_the_github_remote_and_a_linked_worktree() {
         local r = jouet.repo()
         return `{r.repo} {r.owner} {r.name} {r.linked_worktree} {r.worktrees} {r.root}`
     end)()"#;
-    let e = engine(expr, Budget::default());
+    let e = engine(expr, generous());
     e.set_probes(Probes::new(Some(work.clone()), None, false));
     let root = work.canonicalize().unwrap();
     assert_eq!(
@@ -160,7 +161,7 @@ fn repo_names_the_root_the_github_remote_and_a_linked_worktree() {
         local w, l = jouet.repo("work"), jouet.repo("linked")
         return `{here} {w.linked_worktree} {w.worktrees} {l.linked_worktree} {w.root}`
     end)()"#,
-        Budget::default(),
+        generous(),
     );
     e.set_probes(Probes::new(Some(dir.path().into()), None, false));
     assert_eq!(said(&e), format!("nil false 2 true {}", root.display()));
@@ -168,7 +169,7 @@ fn repo_names_the_root_the_github_remote_and_a_linked_worktree() {
     let outside = tempfile::tempdir().unwrap();
     let e = engine(
         "(function() local r, err = jouet.repo(); return `{r} {err}` end)()",
-        Budget::default(),
+        generous(),
     );
     e.set_probes(Probes::new(Some(outside.path().into()), None, false));
     assert!(
@@ -205,7 +206,7 @@ fn last_run_reads_the_newest_record_of_a_kind_from_the_ledger() {
         local any = jouet.ci.last_run()
         return `{t.kind} {t.exit_code} {t.ok} {t.ts} {t.duration_ms} {t.shape} | {any.kind} {any.ts}`
     end)()"#;
-    let e = engine(expr, Budget::default());
+    let e = engine(expr, generous());
     let probes = Probes::new(None, Some(ledger.path().into()), false);
     e.set_probes(probes.clone().with_repo_key(Some(ours.into())));
     // The run in another repository (ts 5) is passed over; the lint run is
@@ -217,7 +218,7 @@ fn last_run_reads_the_newest_record_of_a_kind_from_the_ledger() {
 
     let e = engine(
         r#"(function() local r, err = jouet.ci.last_run("build"); return `{r} {err}` end)()"#,
-        Budget::default(),
+        generous(),
     );
     e.set_probes(Probes::new(None, Some(ledger.path().into()), false));
     assert_eq!(said(&e), "nil nil");
@@ -225,7 +226,7 @@ fn last_run_reads_the_newest_record_of_a_kind_from_the_ledger() {
     let none = tempfile::tempdir().unwrap();
     e.set_probes(Probes::new(None, Some(none.path().join("missing")), false));
     assert_eq!(said(&e), "nil nil");
-    let e = engine(r#"jouet.ci.last_run("deploy")"#, Budget::default());
+    let e = engine(r#"jouet.ci.last_run("deploy")"#, generous());
     e.set_probes(Probes::new(None, None, false));
     assert!(said(&e).contains("kind must be"));
 }
@@ -234,7 +235,7 @@ fn last_run_reads_the_newest_record_of_a_kind_from_the_ledger() {
 fn env_reads_only_the_allowlist() {
     let e = engine(
         r#"(function() local ok = pcall(jouet.env, "CI"); return tostring(ok) end)()"#,
-        Budget::default(),
+        generous(),
     );
     assert_eq!(said(&e), "true");
     for name in [
@@ -243,7 +244,7 @@ fn env_reads_only_the_allowlist() {
         "AWS_SECRET_ACCESS_KEY",
         "HOME",
     ] {
-        let e = engine(&format!("jouet.env({name:?})"), Budget::default());
+        let e = engine(&format!("jouet.env({name:?})"), generous());
         assert!(said(&e).contains("not on the allowlist"), "{name}");
     }
 }
@@ -276,7 +277,7 @@ fn pr_probes_answer_from_github_once_per_call() {
             local missing, err = jouet.pr.next("404")
             return `{s.number} {s.state} {s.checks.pass} {n.action} {again.number} {other.number} {missing} {err}`
         end)()"#,
-        Budget::default(),
+        generous(),
     );
     e.set_probes(probes);
     assert_eq!(said(&e), "7 open 3 ready_to_merge 7 9 nil nil");
@@ -291,7 +292,7 @@ fn pr_probes_are_off_without_the_network_and_say_so() {
     let probes = Probes::new(None, None, false).with_github(|_| panic!("no network in hooks"));
     let e = engine(
         "(function() local s, err = jouet.pr.status(); return `{s} {err}` end)()",
-        Budget::default(),
+        generous(),
     );
     e.set_probes(probes);
     assert!(said(&e).starts_with("nil network probes are off in hooks"));
@@ -364,7 +365,7 @@ fn the_probes_share_one_budget_per_check() {
 fn without_probes_set_up_every_probe_says_why() {
     let e = engine(
         "(function() local s, err = jouet.git.state(); return `{s} {err}` end)()",
-        Budget::default(),
+        generous(),
     );
     assert_eq!(said(&e), "nil probes are not available here");
 }
@@ -399,7 +400,7 @@ fn fired_counts_a_rules_earlier_warnings_and_denials_in_one_session() {
         local fresh = jouet.session.fired("piped-test-output", "s-1", "b2")
         return `{mine} {spelled} {other} {agent} {fresh}`
     end)()"#;
-    let e = engine(expr, Budget::default());
+    let e = engine(expr, generous());
     e.set_probes(Probes::new(None, Some(ledger.path().into()), false));
     assert_eq!(said(&e), "2 2 0 1 0");
 
@@ -407,7 +408,7 @@ fn fired_counts_a_rules_earlier_warnings_and_denials_in_one_session() {
     let none = tempfile::tempdir().unwrap();
     let e = engine(
         r#"(function() local n, err = jouet.session.fired("x", "s-1"); return `{n} {err}` end)()"#,
-        Budget::default(),
+        generous(),
     );
     e.set_probes(Probes::new(None, Some(none.path().join("missing")), false));
     assert_eq!(said(&e), "nil nil");
@@ -434,11 +435,11 @@ fn last_run_filters_by_scope_and_reports_the_tree() {
             local partial = jouet.ci.last_run(nil, "partial")
             return `{last.scope} {last.tree} | {full.scope} {full.tree} {full.ts} | {partial.ts}`
         end)()"#,
-        Budget::default(),
+        generous(),
     );
     e.set_probes(Probes::new(None, Some(ledger.path().into()), false));
     assert_eq!(said(&e), "partial t2 | full t1 2 | 3");
-    let e = engine(r#"jouet.ci.last_run("test", "most")"#, Budget::default());
+    let e = engine(r#"jouet.ci.last_run("test", "most")"#, generous());
     e.set_probes(Probes::new(None, None, false));
     assert!(said(&e).contains("scope must be"));
 }
@@ -486,7 +487,7 @@ fn test_adapters_come_from_the_detector_the_binary_gives() {
         if not found then return `nil {err}` end
         return table.concat(found, ",")
     end)()"#;
-    let e = engine(expr, Budget::default());
+    let e = engine(expr, generous());
     let work = tempfile::tempdir().unwrap();
     let probes = Probes::new(Some(work.path().into()), None, false);
     e.set_probes(probes.clone());

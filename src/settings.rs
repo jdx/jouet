@@ -235,6 +235,9 @@ pub(crate) struct RuleSettings {
     /// hook never waits on the network
     #[usage(env = "JOUET_RULES_NETWORK", default = false)]
     pub network: bool,
+    /// Milliseconds of its own Luau each rule may run per check before it is skipped, which lets the call through; the git and GitHub probes it waits on get four times this
+    #[usage(env = "JOUET_RULES_BUDGET_MS", default = 50)]
+    pub budget_ms: u64,
 }
 
 impl RuleSettings {
@@ -412,6 +415,8 @@ mod tests {
         let s = Settings::load_from(&env(&[]), None);
         assert!(!s.share.contribute);
         assert_eq!(s.hooks.budget_ms, 500);
+        assert_eq!(s.rules.budget_ms, 50);
+        assert_eq!(crate::rules::budget(&s).probes.as_millis(), 200);
         let s = Settings::load_from(&env(&[("JOUET_SHARE_CONTRIBUTE", "1")]), None);
         assert!(s.share.contribute);
     }
