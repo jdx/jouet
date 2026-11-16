@@ -123,7 +123,7 @@ REAL jdx/jouet  1 real, 9 following
 REAL trusted / test-macos (macos)  step "Run mise run test"
   failed: a_command_is_rerun_until_it_exits_as_expected  at tests/wait.rs:436:5
   - fails only on macos: `a_command_is_rerun_until_it_exits_as_expected` passed on linux on this commit (trusted / test)
-  - most likely a macos difference (a command, path or tool that behaves differently there), which a rerun repeats; it is flaky only if the same job passes on this commit
+  - most likely a macos difference (a command, path or tool that behaves differently there); if this job passes when this commit runs again, it was flaky instead
     Run mise run test
     ... 567 lines skipped
     [test:cargo] test a_log_wait_from_the_start_reads_what_is_there ... ok
@@ -138,7 +138,7 @@ REAL trusted / test-macos (macos)  step "Run mise run test"
 
 cancelled after trusted / test-macos failed (cause not verified): trusted / release-build (x86_64-unknown-linux-musl, ubuntu-latest), trusted / release-build (aarch64-unknown-linux-gnu, ubuntu-latest), trusted / release-build (x86_64-pc-windows-msvc, windows-latest) and 6 more
 
-rerun: refused, a rerun repeats a real failure: trusted / test-macos (real)
+rerun: allowed, reruns every failed job; not a flake or infrastructure: trusted / test-macos (real): jouet ci explain --run 41193844808 --repo jdx/jouet --rerun
 GitHub: 11 requests, 0 from the cache
 ```
 
@@ -166,7 +166,7 @@ REAL trusted / test, trusted / release-build (x86_64-unknown-linux-musl, ubuntu-
 
 failed after trusted / test failed, with nothing of their own: trusted / final and final
 
-rerun: refused, a rerun repeats a real failure: trusted / test (real), trusted / release-build (x86_64-unknown-linux-musl, ubuntu-latest) (real), trusted / msrv (real) and 8 more
+rerun: allowed, reruns every failed job; not a flake or infrastructure: trusted / test (real), trusted / release-build (x86_64-unknown-linux-musl, ubuntu-latest) (real), trusted / msrv (real) and 8 more: jouet ci explain --run 41193332714 --repo jdx/jouet --rerun
 GitHub: 23 requests, 1 from the cache
 ```
 
@@ -183,9 +183,9 @@ Jobs that failed the same way are reported together and judged once. Jobs that f
 | Verdict | When |
 |---|---|
 | `infrastructure` | The runner was lost or ran out of disk; these count even when tests failed too. Or a network, registry, rate-limit, service or cache failure, when no test or error explains the failure instead. |
-| `real` | A compile or lint error, which fails the same way on every run. Or a test that failed the same way on every attempt on this commit. Or one that passed on this commit only in jobs on other OSes, which is most likely an OS difference. Or one that fails the same way in the latest run on the default branch. When the default branch has the failure too, the evidence says so: *main is broken, not this change*, and whether it has passed since. A compile error is compared with the default branch's failures in every workflow from around the time the run started. |
+| `real` | A compile or lint error, which fails the same way on every run. Or a test that failed the same way on every attempt on this commit. Or one that passed on this commit only in jobs on other OSes, which is most likely an OS difference, unless its output reports a time limit running out. Or one that fails the same way in the latest run on the default branch. When the default branch has the failure too, the evidence says so: *main is broken, not this change*, and whether it has passed since. A compile error is compared with the default branch's failures in every workflow from around the time the run started. |
 | `flaky` | The same job passed on this commit in another attempt or run. Or the failed test passed on this commit in another job on the same OS. Or the same test failed on another branch's commit, and that branch passed later. |
-| `unknown` | Anything else, for example a test that failed once and has not failed in the other runs looked at. The evidence says what was checked. |
+| `unknown` | Anything else, for example a test that failed once and has not failed in the other runs looked at. Or a test that passed only on other OSes when the output reports a time limit running out (a test timeout, or a budget such as a jouet rule's `exceeded its time budget`), which a slow runner hits without any OS difference. The evidence says what was checked. |
 
 Download-server failures include `Could not download ... (HTTP 502)`, `(HTTP 503)` and `(HTTP 504)`, as well as curl's `The requested URL returned error: 504`, such as during a mise-action release download. They are weak evidence: a named test or compile failure still takes precedence.
 
@@ -207,7 +207,7 @@ A failed checks gate repeats the jobs explained above. A branch that is not up t
 
 ## Rerunning
 
-`--rerun` reruns the failed jobs, and the jobs that follow them, through GitHub's rerun-failed-jobs API, or that one job with `--job`, but only when every failed job is flaky or infrastructure. If any failed job is real or unknown, it reruns nothing and exits `4`, naming the jobs. Without `--rerun`, the report gives the command to run when a rerun is allowed.
+`--rerun` reruns the failed jobs, and the jobs that follow them, through GitHub's rerun-failed-jobs API, or that one job with `--job`, whatever their verdicts: a log cannot show that a cause was fixed outside the repository, and a rerun that fails again costs little. The reason names the failed jobs that are not flaky or infrastructure. It refuses, and exits `4`, when nothing failed or a run is still in progress. Without `--rerun`, the report gives the command that reruns.
 
 The built-in rule [`ci-rerun`](/setup#steering-rules) denies `gh run rerun` (bare, `--failed` or `--job`) and `gh api` calls to the rerun endpoints, and points the agent here first. After `gh pr checks` reports a failed check, `ci-failed` points it here too.
 
@@ -231,5 +231,5 @@ The first word of the text result is the worst verdict among the failed jobs: `R
 | `1` | A failure is real or unknown. |
 | `2` | More than one of a PR, `--run` and `--job` was given. |
 | `3` | The PR, run or job does not exist. |
-| `4` | Nothing has failed yet in a run that is still going (`jouet wait run` first), or `--rerun` refused: a failure is real or unknown, nothing failed, or a run is still in progress. |
+| `4` | Nothing has failed yet in a run that is still going (`jouet wait run` first), or `--rerun` refused: nothing failed, or a run is still in progress. |
 | `5` | GitHub could not be reached, or refused the request or the rerun. |
