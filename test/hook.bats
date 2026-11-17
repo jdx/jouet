@@ -625,6 +625,183 @@ stop_reason() {
 	assert_output '{}'
 }
 
+@test "codex raises a failed check once across turns but still blocks a new run after edits" {
+	git init -q repo
+	echo 'fn main() {}' >repo/main.rs
+	git -C repo add main.rs
+	item() {
+		jq -cn --arg id "$1" --arg command "$2" --argjson exit_code "$3" \
+			'{type: "event_msg", payload: {type: "item_completed", item: {id: $id, type: "CommandExecution",
+			  command: ["/bin/zsh", "-lc", $command], exit_code: $exit_code}}}'
+	}
+	codex_once_stop() {
+		jouet hook codex stop <<<"{\"session_id\":\"codex-once\",\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD/repo\",\"stop_hook_active\":false}"
+	}
+	item first 'cargo clippy -- -D warnings' 101 >rollout.jsonl
+	run --separate-stderr codex_once_stop
+	assert_success
+	assert_output --partial '"decision":"block"'
+	# An explanatory reply and later read-only work must not repeat the block.
+	run --separate-stderr codex_once_stop
+	assert_output '{}'
+	item inspect 'git status --short' 0 >>rollout.jsonl
+	run --separate-stderr codex_once_stop
+	assert_output '{}'
+	item unrelated 'cargo test filter' 0 >>rollout.jsonl
+	run --separate-stderr codex_once_stop
+	assert_output '{}'
+	echo 'fn main() { todo!() }' >repo/main.rs
+	run --separate-stderr codex_once_stop
+	assert_output '{}'
+	# A new failed check of edited code still needs to be reported.
+	item second 'cargo clippy -- -D warnings' 101 >>rollout.jsonl
+	run --separate-stderr codex_once_stop
+	assert_output --partial '"decision":"block"'
+	run --separate-stderr codex_once_stop
+	assert_output '{}'
+}
+
+@test "codex stop notices stay isolated by transcript without a session id" {
+	git init -q repo
+	printf '%s\n' '{"type":"event_msg","payload":{"type":"item_completed","item":{"id":"failed","type":"CommandExecution","command":["/bin/zsh","-lc","cargo clippy -- -D warnings"],"exit_code":101}}}' >rollout.jsonl
+	codex_isolated_stop() {
+		jouet hook codex stop <<<"{\"transcript_path\":\"$PWD/$1\",\"cwd\":\"$PWD/repo\",\"stop_hook_active\":false}"
+	}
+	run --separate-stderr codex_isolated_stop rollout.jsonl
+	assert_success
+	assert_output --partial '"decision":"block"'
+	run --separate-stderr codex_isolated_stop rollout.jsonl
+	assert_output '{}'
+	cp rollout.jsonl other.jsonl
+	run --separate-stderr codex_isolated_stop other.jsonl
+	assert_output --partial '"decision":"block"'
+	run --separate-stderr codex_isolated_stop other.jsonl
+	assert_output '{}'
+}
+
+@test "codex notices follow the transcript when the current directory changes" {
+	mkdir a b
+	jq -cn --arg cwd "$PWD/a" '{type: "event_msg", payload: {type: "item_completed",
+		item: {id: "failed", type: "CommandExecution", command: ["shellcheck", "script.sh"], cwd: $cwd, exit_code: 1}}}' >rollout.jsonl
+	codex_moved_stop() {
+		jouet hook codex stop <<<"{\"session_id\":\"same-session\",\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD/$1\",\"stop_hook_active\":false}"
+	}
+	run --separate-stderr codex_moved_stop a
+	assert_output --partial '"decision":"block"'
+	run --separate-stderr codex_moved_stop b
+	assert_output '{}'
+}
+
+@test "codex distinguishes id-less reruns across a shifting transcript tail" {
+	codex_legacy_stop() {
+		jouet hook codex stop <<<"{\"transcript_path\":\"$PWD/$rollout\",\"cwd\":\"$PWD\",\"stop_hook_active\":false}"
+	}
+	for timestamp in '' '2026-11-01T10:00:00.000Z'; do
+		# A transcript is only appended to, so each case gets its own.
+		rollout="rollout${timestamp:+-timed}.jsonl"
+		# Start the bounded reader inside a long line, not at the first event.
+		printf '%10000000s\n' '' >"$rollout"
+		event=$(jq -cn --arg timestamp "$timestamp" '{type: "event_msg", payload: {type: "exec_command_end",
+			command: ["shellcheck", "script.sh"], exit_code: 1}} | if $timestamp == "" then . else .timestamp = $timestamp end')
+		printf '%s\n' "$event" >>"$rollout"
+		run --separate-stderr codex_legacy_stop
+		assert_output --partial '"decision":"block"'
+		printf '%s\n' '{"type":"response_item","payload":{"type":"message"}}' >>"$rollout"
+		run --separate-stderr codex_legacy_stop
+		assert_output '{}'
+		printf '%s\n' "$event" >>"$rollout"
+		run --separate-stderr codex_legacy_stop
+		assert_output --partial '"decision":"block"'
+		run --separate-stderr codex_legacy_stop
+		assert_output '{}'
+	done
+}
+
+@test "codex reports new failed executions even outside a git repository" {
+	item() {
+		jq -cn --arg id "$1" '{type: "event_msg", payload: {type: "item_completed",
+			item: {id: $id, type: "CommandExecution", command: ["shellcheck", "script.sh"], exit_code: 1}}}'
+	}
+	codex_nogit_stop() {
+		jouet hook codex stop <<<"{\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD\",\"stop_hook_active\":false}"
+	}
+	cat >script.sh <<'SH'
+echo $missing
+SH
+	item first >rollout.jsonl
+	run --separate-stderr codex_nogit_stop
+	assert_output --partial '"decision":"block"'
+	run --separate-stderr codex_nogit_stop
+	assert_output '{}'
+	cat >script.sh <<'SH'
+echo $another
+SH
+	item second >>rollout.jsonl
+	run --separate-stderr codex_nogit_stop
+	assert_output --partial '"decision":"block"'
+	run --separate-stderr codex_nogit_stop
+	assert_output '{}'
+}
+
+@test "a passing codex check in another directory does not repeat an old failure" {
+	mkdir a b
+	item() {
+		jq -cn --arg id "$1" --arg cwd "$2" --argjson exit_code "$3" \
+			'{type: "event_msg", payload: {type: "item_completed", item: {id: $id, type: "CommandExecution",
+			  command: ["npx", "jest", "one.test.js"], cwd: $cwd, exit_code: $exit_code}}}'
+	}
+	codex_scoped_stop() {
+		jouet hook codex stop <<<"{\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD\",\"stop_hook_active\":false}"
+	}
+	item failed "$PWD/a" 1 >rollout.jsonl
+	run --separate-stderr codex_scoped_stop
+	assert_output --partial '"decision":"block"'
+	run --separate-stderr codex_scoped_stop
+	assert_output '{}'
+	item passed "$PWD/b" 0 >>rollout.jsonl
+	run --separate-stderr codex_scoped_stop
+	assert_output '{}'
+}
+
+@test "an unavailable codex transcript does not erase a reported failure" {
+	printf '%s\n' '{"type":"event_msg","payload":{"type":"item_completed","item":{"id":"failed","type":"CommandExecution","command":["shellcheck","script.sh"],"exit_code":1}}}' >rollout.jsonl
+	codex_unavailable_stop() {
+		jouet hook codex stop <<<"{\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD\",\"stop_hook_active\":false}"
+	}
+	run --separate-stderr codex_unavailable_stop
+	assert_output --partial '"decision":"block"'
+	mv rollout.jsonl saved.jsonl
+	run --separate-stderr codex_unavailable_stop
+	assert_output '{}'
+	mv saved.jsonl rollout.jsonl
+	run --separate-stderr codex_unavailable_stop
+	assert_output '{}'
+}
+@test "an observed codex block is recorded once, and again for a new failed run" {
+	unset JOUET_HOOKS_GATE
+	export JOUET_EXPERIMENT_CONTROL_SHARE=0
+	item() {
+		jq -cn --arg id "$1" '{type: "event_msg", payload: {type: "item_completed",
+			item: {id: $id, type: "CommandExecution", command: ["shellcheck", "script.sh"], exit_code: 1}}}'
+	}
+	codex_observed_stop() {
+		jouet hook codex stop <<<"{\"session_id\":\"observed\",\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD\",\"stop_hook_active\":false}"
+	}
+	item first >rollout.jsonl
+	run --separate-stderr codex_observed_stop
+	assert_output '{}'
+	run --separate-stderr codex_observed_stop
+	assert_output '{}'
+	item second >>rollout.jsonl
+	run --separate-stderr codex_observed_stop
+	assert_output '{}'
+	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	run jq -c 'select(.event == "stop") | .decisions // [] | map(.action)' "$ledger"
+	assert_line --index 0 '["would-block"]'
+	assert_line --index 1 '[]'
+	assert_line --index 2 '["would-block"]'
+}
+
 @test "a matching baseline comparison clears a wrapped lint failure in a codex transcript" {
 	git init -q repo
 	item() {
@@ -637,11 +814,12 @@ stop_reason() {
 	assert_success
 	assert_output --partial '"decision":"block"'
 	item 'jouet test --baseline --cmd -- env MISE_ENV=bench mise x ruff@0.17.4 -- ruff check --isolated a.py c.py' 0 >>rollout.jsonl
-	run --separate-stderr jouet hook codex stop <<<"{\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD/repo\",\"stop_hook_active\":false}"
+	# Fresh sessions test coverage apart from the failure already reported.
+	run --separate-stderr jouet hook codex stop <<<"{\"session_id\":\"unrelated-baseline\",\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD/repo\",\"stop_hook_active\":false}"
 	assert_success
 	assert_output --partial '"decision":"block"'
 	item 'jouet test --baseline --cmd -- env MISE_ENV=bench mise x ruff@0.17.4 -- ruff check --isolated a.py b.py' 0 >>rollout.jsonl
-	run --separate-stderr jouet hook codex stop <<<"{\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD/repo\",\"stop_hook_active\":false}"
+	run --separate-stderr jouet hook codex stop <<<"{\"session_id\":\"matching-baseline\",\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD/repo\",\"stop_hook_active\":false}"
 	assert_success
 	refute_output --partial '"decision":"block"'
 }
