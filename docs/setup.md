@@ -209,7 +209,7 @@ After a failed `cargo test`, the agent's next stop is blocked with this reason:
 The last test run failed (`cargo test` exited 101). Fix it and run it again before you finish, or say plainly why it cannot pass. If the failures are not from your change, `jouet test --baseline --cmd -- cargo test` runs it at the merge base too, and passes when each failure fails there as well. [jouet: verify]
 ```
 
-It blocks once: if the agent stops again straight away, its answer stands. The rest of this section says how the hook decides.
+It blocks once: if the agent stops again straight away, its answer stands. Codex keeps what it raised by session and transcript, so a later turn, or a change of working directory, does not raise the same failure again. Codex does not record the tree each command saw, so a new failed run of a check raises it again even when the command is the same. The rest of this section says how the hook decides.
 
 #### Observing or blocking
 

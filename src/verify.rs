@@ -87,6 +87,11 @@ pub(crate) struct Run {
     /// The work tree the run saw, when it could be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tree: Option<String>,
+    /// Which run this was when no tree tells runs apart: a Codex
+    /// transcript item's `id` or `call_id`, else where its line starts in
+    /// the transcript.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<String>,
     /// For a failed run whose every failure blames the machine (no D-Bus,
     /// a missing system library, no network): the line that says so. Such
     /// a failure does not hold up finishing; the stop says it in a note.
@@ -196,6 +201,7 @@ impl Run {
             full: record.full,
             selector: record.selector,
             tree: tree.map(str::to_string),
+            execution: None,
             environment: None,
             unrelated: None,
             tests: Vec::new(),
@@ -1332,9 +1338,15 @@ pub(crate) struct Raised {
     /// How many reasons were left for a later stop, past [`MAX_RAISED`].
     #[serde(skip)]
     pub more: usize,
-    /// The keys of the reasons raised now, kept in [`Checks::told`].
+    /// The keys of the reasons raised now, one each, kept in
+    /// [`Checks::told`].
     #[serde(skip)]
     pub told: Vec<String>,
+    /// The keys of the other runs a reason raised now stands for, when
+    /// they read as one: kept in [`Checks::told`] too, but not counted as
+    /// reasons.
+    #[serde(skip)]
+    pub covered: Vec<String>,
     /// The unverifiable commands whose failure these reasons raise, which
     /// are then answered (see [`Checks::answered`]).
     #[serde(skip)]
@@ -1345,24 +1357,35 @@ pub(crate) struct Raised {
 const MAX_RAISED: usize = 5;
 
 /// What [`Checks::told`] keeps a reason by: what it is about and the run,
-/// by its command, exit code and tree, and not the message, which names
-/// the runs since; so only a newer run of it is a new key.
+/// by its command, exit code, tree and execution, and not the message,
+/// which names the runs since; so only a newer run of it is a new key.
 fn told_key(about: &str, run: &Run) -> String {
-    format!(
+    let mut key = format!(
         "{about}\u{0}{}\u{0}{}\u{0}{}",
         run.command,
         run.exit_code,
         run.tree.as_deref().unwrap_or("")
-    )
+    );
+    if let Some(execution) = &run.execution {
+        key.push('\0');
+        key.push_str(execution);
+    }
+    key
 }
 
-/// A failure as [`Checks::noted`] keeps it: its command and tree.
+/// A failure as [`Checks::noted`] keeps it: its command, tree and
+/// execution.
 fn noted_key(failed: &Run) -> String {
-    format!(
+    let mut key = format!(
         "{}\u{0}{}",
         failed.command,
         failed.tree.as_deref().unwrap_or("")
-    )
+    );
+    if let Some(execution) = &failed.execution {
+        key.push('\0');
+        key.push_str(execution);
+    }
+    key
 }
 
 /// A command as a message shows it: cut to 80 characters.
@@ -1606,6 +1629,18 @@ impl State {
         records: impl IntoIterator<Item = Record>,
         tree: Option<&str>,
     ) {
+        self.record_execution(root, records, tree, None);
+    }
+
+    /// Adds runs as [`State::record`] does, each marked as the run
+    /// `execution` names (see [`Run::execution`]).
+    pub(crate) fn record_execution(
+        &mut self,
+        root: &str,
+        records: impl IntoIterator<Item = Record>,
+        tree: Option<&str>,
+        execution: Option<&str>,
+    ) {
         // The runner under `mise run TASK`, read from the tasks only for a
         // partial run, the kind a name above can cover.
         let mut tasks = None;
@@ -1627,7 +1662,7 @@ impl State {
         self.trees
             .entry(root.to_string())
             .or_default()
-            .record_nested(records, tree);
+            .record_nested(records, tree, execution);
     }
 
     /// Notes who is running something in the work tree at `root`: the
@@ -1788,10 +1823,12 @@ impl State {
             // The keys go to `told`; the kept copy is what a file reads back.
             checks.raised = Some(Raised {
                 told: Vec::new(),
+                covered: Vec::new(),
                 ..raised.clone()
             });
             checks.answered.extend(raised.answering.iter().cloned());
             checks.told.extend(raised.told.iter().cloned());
+            checks.told.extend(raised.covered.iter().cloned());
         }
     }
 
@@ -1919,6 +1956,29 @@ impl State {
             .unwrap_or_default()
     }
 
+    /// Adds what the stop said in `said`'s work trees (the reasons it
+    /// raised, the machine failures it noted) to this state's. When
+    /// `every`, each tree's goes to the same tree, made if need be; else all
+    /// of it goes to each tree this state has runs in, since a Codex run
+    /// with no directory of its own moves with the session's, and its keys
+    /// name the run.
+    pub(crate) fn add_said(&mut self, said: &State, every: bool) {
+        if every {
+            for (root, from) in &said.trees {
+                let checks = self.trees.entry(root.clone()).or_default();
+                checks.told.extend(from.told.iter().cloned());
+                checks.noted.extend(from.noted.iter().cloned());
+            }
+            return;
+        }
+        for checks in self.trees.values_mut() {
+            for from in said.trees.values() {
+                checks.told.extend(from.told.iter().cloned());
+                checks.noted.extend(from.noted.iter().cloned());
+            }
+        }
+    }
+
     pub(crate) fn save(&self, path: &Path) -> std::io::Result<()> {
         let dir = path.parent().unwrap_or(Path::new("."));
         std::fs::create_dir_all(dir)?;
@@ -1943,7 +2003,7 @@ impl Checks {
     /// Adds runs that ran against `tree`, through no task.
     #[cfg(test)]
     pub(crate) fn record(&mut self, records: impl IntoIterator<Item = Record>, tree: Option<&str>) {
-        self.record_nested(records.into_iter().map(|r| (r, None)), tree);
+        self.record_nested(records.into_iter().map(|r| (r, None)), tree, None);
     }
 
     /// Adds runs that ran against `tree`, each with the nesting of a runner
@@ -1952,6 +2012,7 @@ impl Checks {
         &mut self,
         records: impl IntoIterator<Item = (Record, Option<Nesting>)>,
         tree: Option<&str>,
+        execution: Option<&str>,
     ) {
         for (record, nesting) in records {
             // A run is something new to judge the next stop by.
@@ -1960,6 +2021,7 @@ impl Checks {
             let kind = record.kind;
             let mut run = Run::new(record, tree);
             run.nesting = run.nesting.or(nesting);
+            run.execution = execution.map(str::to_string);
             let failures = self.failures.entry(kind).or_default();
             // `jouet test` records its own run, and the harness's hook the same
             // call after it: the same failure at the same tree keeps what
@@ -2113,22 +2175,35 @@ impl Checks {
         // not at the next stop after files change, nor at one ending a turn
         // that never touched them. A new run of it is a new key.
         let mut new: Vec<String> = Vec::new();
-        let mut keys: Vec<String> = Vec::new();
+        let mut keyed: Vec<(String, String)> = Vec::new();
         for (reason, key) in reasons {
             if self.told.contains(&key) {
                 continue;
             }
             if !raised.contains(&reason) && !new.contains(&reason) {
-                new.push(reason);
-                keys.push(key);
+                new.push(reason.clone());
             }
+            keyed.push((reason, key));
         }
         if new.is_empty() {
             return None;
         }
         let more = new.len().saturating_sub(MAX_RAISED);
         let new: Vec<String> = new.into_iter().take(MAX_RAISED).collect();
-        keys.truncate(MAX_RAISED);
+        // Every run a reason raised now stands for is told, not only the
+        // first: Codex reads back only the keys, not the reasons. The
+        // first key of each is the one the ledger counts.
+        let mut keys: Vec<String> = Vec::new();
+        let mut covered: Vec<String> = Vec::new();
+        let mut counted: Vec<&String> = Vec::new();
+        for (reason, key) in &keyed {
+            if new.contains(reason) && !counted.contains(&reason) {
+                counted.push(reason);
+                keys.push(key.clone());
+            } else if new.contains(reason) || raised.contains(reason) {
+                covered.push(key.clone());
+            }
+        }
         let answering = self
             .failures
             .iter()
@@ -2144,6 +2219,7 @@ impl Checks {
             more,
             answering,
             told: keys,
+            covered,
         })
     }
 
@@ -2458,6 +2534,10 @@ const TRANSCRIPT_TAIL: u64 = 8 * 1024 * 1024;
 pub(crate) struct Ran {
     pub command: String,
     pub exit_code: i32,
+    /// Which run it was (see [`Run::execution`]): the item's `id` or
+    /// `call_id`, else `offset:N`, where its line starts in the file, which
+    /// stays put as the transcript grows.
+    pub id: Option<String>,
     /// The command's own working directory, when recorded by Codex.
     pub cwd: Option<String>,
     /// When, from the line's `timestamp`, in seconds since the Unix epoch.
@@ -2483,15 +2563,24 @@ pub(crate) fn codex_commands(path: &Path) -> Vec<Ran> {
     if file.seek(SeekFrom::Start(start)).is_err() || file.read_to_end(&mut bytes).is_err() {
         return Vec::new();
     }
-    let text = String::from_utf8_lossy(&bytes);
-    let mut lines = text.lines();
+    let mut lines = bytes.split_inclusive(|b| *b == b'\n');
+    let mut offset = start;
     if start > 0 {
         // Starts mid-line.
-        lines.next();
+        offset += lines.next().map_or(0, |line| line.len() as u64);
     }
     lines
-        .filter(|line| line.contains("CommandExecution") || line.contains("exec_command_end"))
-        .filter_map(codex_command)
+        .filter_map(|line| {
+            let at = offset;
+            offset += line.len() as u64;
+            let line = String::from_utf8_lossy(line);
+            if !line.contains("CommandExecution") && !line.contains("exec_command_end") {
+                return None;
+            }
+            let mut ran = codex_command(line.trim_end())?;
+            ran.id.get_or_insert_with(|| format!("offset:{at}"));
+            Some(ran)
+        })
         .collect()
 }
 
@@ -2594,6 +2683,11 @@ fn codex_command(line: &str) -> Option<Ran> {
     Some(Ran {
         command: script,
         exit_code,
+        id: event
+            .get("id")
+            .or_else(|| event.get("call_id"))
+            .and_then(|id| id.as_str())
+            .map(str::to_string),
         output,
         cwd: event
             .get("cwd")
@@ -4846,22 +4940,25 @@ mod tests {
             r#"{"type":"event_msg","payload":{"type":"exec_command_end","command":["ls"],"exit_code":0}}"#.to_string(),
         ];
         std::fs::write(&path, lines.join("\n")).unwrap();
-        let ran = |command: &str, exit_code, at| Ran {
+        let ran = |command: &str, exit_code, at, offset: usize| Ran {
             command: command.into(),
             exit_code,
+            id: Some(format!("offset:{offset}")),
             at,
             output: None,
             cwd: None,
         };
+        let ls_at = lines[..3].iter().map(|l| l.len() + 1).sum();
         assert_eq!(
             codex_commands(&path),
             [
                 ran(
                     "cargo test",
                     101,
-                    jouet_output::time::parse_utc("2026-11-01T10:00:00Z")
+                    jouet_output::time::parse_utc("2026-11-01T10:00:00Z"),
+                    0
                 ),
-                ran("ls", 0, None)
+                ran("ls", 0, None, ls_at)
             ]
         );
         assert!(codex_commands(&dir.path().join("missing")).is_empty());

@@ -1674,6 +1674,23 @@ fn session_state_path(payload: &Value) -> Option<PathBuf> {
     verify::state_path(payload.get("session_id")?.as_str()?)
 }
 
+/// Where a Codex session keeps what its stops have said, by its session and
+/// transcript: its runs are read again from the transcript at each stop,
+/// but what was raised and noted is not in it.
+fn codex_state_path(payload: &Value) -> Option<PathBuf> {
+    use sha2::{Digest, Sha256};
+    let transcript = std::path::absolute(payload.get("transcript_path")?.as_str()?).ok()?;
+    let session = payload
+        .get("session_id")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let hash: String = Sha256::digest(format!("{session}\0{}", transcript.display()).as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    verify::state_path(&format!("codex-{hash}"))
+}
+
 /// The stop gate: jouet's verify and, when setup merged it, hk's own stop
 /// hook, as one decision. hk is not run when the session's last hk check
 /// passed at the tree as it is now.
@@ -1725,6 +1742,17 @@ fn stop(harness: Harness, payload: &Value, gate: Option<bool>, hk_stop: &[String
             .and_then(|commands| Some(codex_state(&load(payload)?, payload, commands))),
     }
     .unwrap_or_default();
+    // A Codex session's runs are rebuilt above; what its stops already said
+    // about them is kept apart, by the run each is about.
+    let said_path = match harness {
+        Harness::Codex => codex_state_path(payload),
+        _ => session_state_path(payload),
+    };
+    if harness == Harness::Codex
+        && let Some(path) = &said_path
+    {
+        state.add_said(&State::load(path), false);
+    }
     state.prune_gone();
     // Failures blamed on the machine hold nothing up; the person hears of
     // each once.
@@ -1740,10 +1768,13 @@ fn stop(harness: Harness, payload: &Value, gate: Option<bool>, hk_stop: &[String
                 .collect::<Vec<_>>()
                 .join("\n"),
         );
-        if harness != Harness::Codex
-            && let Some(path) = session_state_path(payload)
-        {
-            let _ = verify::update(&path, State::noted);
+        if let Some(path) = &said_path {
+            if harness == Harness::Codex {
+                state.noted();
+                let _ = verify::update(path, |said| said.add_said(&state, true));
+            } else {
+                let _ = verify::update(path, State::noted);
+            }
         }
     }
     let tree = std::cell::OnceCell::new();
@@ -1793,13 +1824,13 @@ fn stop(harness: Harness, payload: &Value, gate: Option<bool>, hk_stop: &[String
         None
     };
     // Kept so the next turn's stop, at the same tree with no run since,
-    // does not raise it again. Codex's runs are read again from the
-    // transcript at each stop, so there is nothing to keep it with.
+    // does not raise it again. For Codex, only its `told` keys are read
+    // back (see `State::add_said`): a run replayed from the transcript
+    // would not clear the rest.
     if let Some(block) = &block
-        && harness != Harness::Codex
-        && let Some(path) = session_state_path(payload)
+        && let Some(path) = &said_path
     {
-        let _ = verify::update(&path, |state| state.raise(block));
+        let _ = verify::update(path, |state| state.raise(block));
     }
     // Observed, a reason is kept as raised all the same, so each is
     // recorded once, where the gate would have blocked for it.
@@ -1936,6 +1967,7 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
     for verify::Ran {
         command,
         exit_code,
+        id,
         at: when,
         output,
         cwd: command_cwd,
@@ -1986,7 +2018,7 @@ fn codex_state(engine: &Engine, payload: &Value, commands: Vec<verify::Ran>) -> 
                     .or_default()
                     .push(record.command.clone());
             }
-            state.record(&root, [record], None);
+            state.record_execution(&root, [record], None, id.as_deref());
             if let Some(cause) = &cause {
                 state.mark_environment(&root, &recorded, cause);
             }
@@ -2266,6 +2298,7 @@ mod tests {
         verify::Ran {
             command: command.into(),
             exit_code,
+            id: None,
             at: None,
             output: None,
             cwd: None,
