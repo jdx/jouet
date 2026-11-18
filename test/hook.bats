@@ -723,6 +723,10 @@ stop_reason() {
 	assert_output --partial '"decision":"block"'
 	run --separate-stderr codex_same_stop
 	assert_output '{}'
+	# Shown once, so counted once.
+	run jq -c 'select(.event == "stop") | .decisions // [] | map(.action + ":" + .scope)' "$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	assert_line --index 0 '["block:failed-lint"]'
+	assert_line --index 1 '[]'
 }
 
 @test "codex distinguishes id-less reruns across a shifting transcript tail" {

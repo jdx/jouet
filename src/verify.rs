@@ -1338,9 +1338,15 @@ pub(crate) struct Raised {
     /// How many reasons were left for a later stop, past [`MAX_RAISED`].
     #[serde(skip)]
     pub more: usize,
-    /// The keys of the reasons raised now, kept in [`Checks::told`].
+    /// The keys of the reasons raised now, one each, kept in
+    /// [`Checks::told`].
     #[serde(skip)]
     pub told: Vec<String>,
+    /// The keys of the other runs a reason raised now stands for, when
+    /// they read as one: kept in [`Checks::told`] too, but not counted as
+    /// reasons.
+    #[serde(skip)]
+    pub covered: Vec<String>,
     /// The unverifiable commands whose failure these reasons raise, which
     /// are then answered (see [`Checks::answered`]).
     #[serde(skip)]
@@ -1817,10 +1823,12 @@ impl State {
             // The keys go to `told`; the kept copy is what a file reads back.
             checks.raised = Some(Raised {
                 told: Vec::new(),
+                covered: Vec::new(),
                 ..raised.clone()
             });
             checks.answered.extend(raised.answering.iter().cloned());
             checks.told.extend(raised.told.iter().cloned());
+            checks.told.extend(raised.covered.iter().cloned());
         }
     }
 
@@ -2183,12 +2191,19 @@ impl Checks {
         let more = new.len().saturating_sub(MAX_RAISED);
         let new: Vec<String> = new.into_iter().take(MAX_RAISED).collect();
         // Every run a reason raised now stands for is told, not only the
-        // first: Codex reads back only the keys, not the reasons.
-        let keys = keyed
-            .into_iter()
-            .filter(|(reason, _)| new.contains(reason) || raised.contains(reason))
-            .map(|(_, key)| key)
-            .collect();
+        // first: Codex reads back only the keys, not the reasons. The
+        // first key of each is the one the ledger counts.
+        let mut keys: Vec<String> = Vec::new();
+        let mut covered: Vec<String> = Vec::new();
+        let mut counted: Vec<&String> = Vec::new();
+        for (reason, key) in &keyed {
+            if new.contains(reason) && !counted.contains(&reason) {
+                counted.push(reason);
+                keys.push(key.clone());
+            } else if new.contains(reason) || raised.contains(reason) {
+                covered.push(key.clone());
+            }
+        }
         let answering = self
             .failures
             .iter()
@@ -2204,6 +2219,7 @@ impl Checks {
             more,
             answering,
             told: keys,
+            covered,
         })
     }
 
