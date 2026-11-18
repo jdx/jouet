@@ -1948,20 +1948,26 @@ impl State {
             .unwrap_or_default()
     }
 
-    /// Adds what the stop said in each of `said`'s work trees (the reasons
-    /// it raised, the machine failures it noted) to this state's: to every
-    /// tree when `every`, else to those this state has runs in.
+    /// Adds what the stop said in `said`'s work trees (the reasons it
+    /// raised, the machine failures it noted) to this state's. When
+    /// `every`, each tree's goes to the same tree, made if need be; else all
+    /// of it goes to each tree this state has runs in, since a Codex run
+    /// with no directory of its own moves with the session's, and its keys
+    /// name the run.
     pub(crate) fn add_said(&mut self, said: &State, every: bool) {
-        for (root, from) in &said.trees {
-            let checks = if every {
-                self.trees.entry(root.clone()).or_default()
-            } else if let Some(checks) = self.trees.get_mut(root) {
-                checks
-            } else {
-                continue;
-            };
-            checks.told.extend(from.told.iter().cloned());
-            checks.noted.extend(from.noted.iter().cloned());
+        if every {
+            for (root, from) in &said.trees {
+                let checks = self.trees.entry(root.clone()).or_default();
+                checks.told.extend(from.told.iter().cloned());
+                checks.noted.extend(from.noted.iter().cloned());
+            }
+            return;
+        }
+        for checks in self.trees.values_mut() {
+            for from in said.trees.values() {
+                checks.told.extend(from.told.iter().cloned());
+                checks.noted.extend(from.noted.iter().cloned());
+            }
         }
     }
 
@@ -2161,22 +2167,28 @@ impl Checks {
         // not at the next stop after files change, nor at one ending a turn
         // that never touched them. A new run of it is a new key.
         let mut new: Vec<String> = Vec::new();
-        let mut keys: Vec<String> = Vec::new();
+        let mut keyed: Vec<(String, String)> = Vec::new();
         for (reason, key) in reasons {
             if self.told.contains(&key) {
                 continue;
             }
             if !raised.contains(&reason) && !new.contains(&reason) {
-                new.push(reason);
-                keys.push(key);
+                new.push(reason.clone());
             }
+            keyed.push((reason, key));
         }
         if new.is_empty() {
             return None;
         }
         let more = new.len().saturating_sub(MAX_RAISED);
         let new: Vec<String> = new.into_iter().take(MAX_RAISED).collect();
-        keys.truncate(MAX_RAISED);
+        // Every run a reason raised now stands for is told, not only the
+        // first: Codex reads back only the keys, not the reasons.
+        let keys = keyed
+            .into_iter()
+            .filter(|(reason, _)| new.contains(reason) || raised.contains(reason))
+            .map(|(_, key)| key)
+            .collect();
         let answering = self
             .failures
             .iter()

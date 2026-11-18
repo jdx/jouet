@@ -692,6 +692,39 @@ stop_reason() {
 	assert_output '{}'
 }
 
+@test "a codex failure with no directory of its own is not raised again in another repository" {
+	git init -q a
+	git init -q b
+	echo change >b/new.txt
+	printf '%s\n' '{"type":"event_msg","payload":{"type":"item_completed","item":{"id":"failed","type":"CommandExecution","command":["/bin/zsh","-lc","cargo clippy -- -D warnings"],"exit_code":101}}}' >rollout.jsonl
+	codex_repo_stop() {
+		jouet hook codex stop <<<"{\"session_id\":\"moving\",\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD/$1\",\"stop_hook_active\":false}"
+	}
+	run --separate-stderr codex_repo_stop a
+	assert_output --partial '"decision":"block"'
+	run --separate-stderr codex_repo_stop b
+	assert_output '{}'
+}
+
+@test "two codex failures that read as one reason are not raised again" {
+	long=$(printf 'x%.0s' {1..100})
+	item() {
+		jq -cn --arg id "$1" --arg command "$2" --argjson exit_code "$3" '{type: "event_msg", payload: {type: "item_completed",
+			item: {id: $id, type: "CommandExecution", command: ["/bin/zsh", "-lc", $command], exit_code: $exit_code}}}'
+	}
+	codex_same_stop() {
+		jouet hook codex stop <<<"{\"session_id\":\"same-text\",\"transcript_path\":\"$PWD/rollout.jsonl\",\"cwd\":\"$PWD\",\"stop_hook_active\":false}"
+	}
+	# Cut to the same text, and neither the last run, both read as one reason.
+	item one "shellcheck $long one.sh" 1 >rollout.jsonl
+	item two "shellcheck $long two.sh" 1 >>rollout.jsonl
+	item three "shellcheck other.sh" 0 >>rollout.jsonl
+	run --separate-stderr codex_same_stop
+	assert_output --partial '"decision":"block"'
+	run --separate-stderr codex_same_stop
+	assert_output '{}'
+}
+
 @test "codex distinguishes id-less reruns across a shifting transcript tail" {
 	codex_legacy_stop() {
 		jouet hook codex stop <<<"{\"transcript_path\":\"$PWD/$rollout\",\"cwd\":\"$PWD\",\"stop_hook_active\":false}"
