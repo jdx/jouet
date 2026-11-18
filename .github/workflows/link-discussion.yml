@@ -1,11 +1,7 @@
 name: link-discussion
 
 on:
-  # A merged pull request from a fork only gets a write token under
-  # pull_request_target, which the action needs to comment on the discussion.
-  # It reads the pull request body and never checks out or runs its code.
-  # jactionlint ignore=dangerous-triggers
-  pull_request_target:
+  pull_request:
     types: [closed]
 
 concurrency:
