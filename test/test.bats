@@ -649,7 +649,8 @@ ran() {
 		for i in $(seq 60); do printf 'X%d = %d\n' "$i" "$i"; done
 	} >src/calc/fmt.py
 	run --separate-stderr jouet hook claude stop <<<"$stop"
-	run jq -r '.reason' <<<"$output"
+	assert_output ""
+	run jq -r '.trees[].raised.reasons[]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
 	assert_output --partial "Files changed after the last test run passed (\`jouet test --affected\`)"
 }
 

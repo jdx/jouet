@@ -204,6 +204,25 @@ stop_reason() {
 		jouet hook claude stop | jq -r '.reason // empty'
 }
 
+# A stop in ./repo: what it raised, as the ledger records each reason
+# (`would-block:changed-after-pass`), then the text it blocked with, if any.
+stop_raised() {
+	local out
+	out=$(jq -cn --arg cwd "$PWD/repo" '{session_id: "s1", cwd: $cwd, stop_hook_active: false}' |
+		jouet hook claude stop)
+	jq -s -r '[.[] | select(.event == "stop")] | last | .decisions // [] | .[] | .action + ":" + .scope' \
+		"$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	jq -r '.reason // empty' <<<"$out"
+}
+
+# The reasons kept as raised in the work tree at $1, blocking or only
+# observed.
+raised_in() {
+	local root
+	root=$(cd "$1" && pwd -P)
+	jq -r --arg r "$root" '.trees[$r].raised.reasons // [] | .[]' "$XDG_STATE_HOME/jouet/sessions/s1.json"
+}
+
 @test "an environment-wrapped affected test clears its own failure" {
 	git init -q repo
 	echo 'fn main() {}' >repo/main.rs
@@ -285,27 +304,41 @@ stop_reason() {
 	assert_output 0
 }
 
-@test "a change after the last passing test run asks for a test run once" {
+@test "a change after the last passing test run is recorded once and never blocks" {
 	git init -q repo
 	echo 'fn main() {}' >repo/main.rs
 	git -C repo add main.rs
 
 	ran 'cargo test --workspace' 0
 	ran 'cargo test --workspace wait_github' 0
-	run stop_reason
+	run stop_raised
 	assert_output ""
 
+	# Set to block (as every test here is), the gate still only records it.
 	echo 'fn main() { todo!() }' >repo/main.rs
-	run stop_reason
+	run stop_raised
+	assert_output 'would-block:changed-after-pass'
+	run raised_in repo
 	assert_output --partial 'Files changed after the last test run passed ('
 	assert_output --partial 'cargo test --workspace wait_github'
-	# The agent's answer stands after one nudge.
-	run --separate-stderr jouet hook claude stop <<<'{"session_id":"s1","stop_hook_active":true}'
+	# Raised once: the next stop records nothing new.
+	run stop_raised
 	assert_output ""
 	# Part of the suite passing at the files now is enough: CI runs the rest.
 	ran 'cargo test --workspace wait_github' 0
-	run stop_reason
+	echo 'fn main() { todo!(); }' >repo/main.rs
+	ran 'cargo test --workspace wait_github' 0
+	run stop_raised
 	assert_output ""
+
+	# Beside a failure, only the failure blocks, and each is recorded.
+	ran 'cargo clippy --workspace' 101
+	echo 'fn main() { todo!("x") }' >repo/main.rs
+	run stop_raised
+	assert_line --index 0 'block:failed-lint'
+	assert_line --index 1 'would-block:changed-after-pass'
+	assert_line --index 2 --partial 'The last lint run failed'
+	refute_output --partial 'Files changed after'
 }
 
 @test "a clean merge after a passing run requires a check of the combined tree" {
@@ -330,11 +363,11 @@ stop_reason() {
 	g merge -q --no-edit main
 	run bash -c 'test "$(cat repo/main.rs)$(cat repo/lib.rs)" != 22'
 	assert_failure
-	run stop_reason
-	assert_output --partial 'Files changed after the last test run passed ('
-	# A later passing check at the combined tree clears the gate.
+	run stop_raised
+	assert_output 'would-block:changed-after-pass'
+	# A later passing check at the combined tree clears it.
 	ran 'cargo test --workspace' 0
-	run stop_reason
+	run stop_raised
 	assert_output ""
 }
 
@@ -353,18 +386,18 @@ stop_reason() {
 	about_to 'cargo fmt --all && git status --short'
 	echo 'fn main() { }' >repo/main.rs
 	ran 'cargo fmt --all && git status --short' 0
-	run stop_reason
+	run stop_raised
 	assert_output ""
 	# An edit afterwards is still a change.
 	echo 'fn main() { todo!() }' >repo/main.rs
-	run stop_reason
-	assert_output --partial 'Files changed after the last test run passed ('
+	run stop_raised
+	assert_output 'would-block:changed-after-pass'
 	# With steering off, no rule runs before a call, but the tree is kept.
 	ran 'cargo test --workspace wait_github' 0
 	JOUET_HOOKS_STEER=false about_to 'cargo fmt --all'
 	echo 'fn main() { todo!(); }' >repo/main.rs
 	ran 'cargo fmt --all' 0
-	run stop_reason
+	run stop_raised
 	assert_output ""
 }
 
@@ -377,7 +410,7 @@ stop_reason() {
 		'{session_id: "s1", cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git status --short"}}' |
 		jouet hook claude pre-tool-use >/dev/null
 	ran 'git status --short' 0
-	run stop_reason
+	run stop_raised
 	assert_output ""
 	jq -cn --arg cwd "$PWD/repo" \
 		'{session_id: "s1", cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git status --short"}}' |
@@ -385,8 +418,8 @@ stop_reason() {
 	# Another process can edit while status is running; that is not formatting.
 	echo 'fn main() { todo!() }' >repo/main.rs
 	ran 'git status --short' 0
-	run stop_reason
-	assert_output --partial 'Files changed after the last test run passed ('
+	run stop_raised
+	assert_output 'would-block:changed-after-pass'
 }
 
 @test "Codex skips formatting snapshots for standalone status calls" {
@@ -524,14 +557,16 @@ stop_reason() {
 	# part of the suite after it asks for nothing.
 	ran "cd $PWD/other && cargo test --workspace" 0
 	ran "cd $PWD/other && bats test/a.bats" 0
-	run stop_reason
+	run stop_raised
 	assert_output ""
 
-	# After the tree there changes with no run since, it asks for one,
-	# naming the tree.
+	# After the tree there changes with no run since, the change is raised
+	# there.
 	echo 'fn main() { todo!() }' >other/main.rs
-	run stop_reason
-	assert_output --partial "In $(cd other && pwd -P): Files changed after the last test run passed"
+	run stop_raised
+	assert_output 'would-block:changed-after-pass'
+	run raised_in other
+	assert_output --partial 'Files changed after the last test run passed'
 
 	# A cd it cannot follow records nothing, in either tree.
 	ran "cd $PWD/other && cargo test --workspace" 0
@@ -559,13 +594,15 @@ stop_reason() {
 	root=$(cd other && pwd -P)
 	jq --arg r "$root" --argjson t "$(($(date +%s) - 7200))" '.trees[$r].last_run = $t' "$state" >"$state.new"
 	mv "$state.new" "$state"
-	run stop_reason
+	run stop_raised
 	assert_output ""
 
-	# With something left uncommitted there, it is asked about.
+	# With something left uncommitted there, it is raised.
 	echo 'fn main() { todo!() }' >other/main.rs
-	run stop_reason
-	assert_output --partial "In $root: Files changed after the last test run passed"
+	run stop_raised
+	assert_output 'would-block:changed-after-pass'
+	run raised_in other
+	assert_output --partial 'Files changed after the last test run passed'
 }
 
 @test "a whole-tree lint warns while the tree has changes, not on a clean checkout" {
@@ -1157,11 +1194,7 @@ claude_payload() {
 		".cwd = \"$PWD/scratch\" | .tool_name = \"Bash\" | .tool_input = {command: \"cargo test --workspace\"} | del(.tool_response)" |
 		jouet hook claude post-tool-use
 	echo 'x = 2' >scratch/a.py
-	stop() {
-		claude_payload stop ".cwd = \"$PWD/repo\"" | jouet hook claude stop | jq -r '.reason // empty'
-	}
-
-	run stop
+	run stop_raised
 	assert_output ""
 
 	# Once the lead runs something there, the tree is the lead's too.
@@ -1169,9 +1202,10 @@ claude_payload() {
 		'{session_id: "s1", cwd: $cwd, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: {command: "cargo test --workspace"}}' |
 		jouet hook claude post-tool-use
 	echo 'x = 3' >scratch/a.py
-	run stop
-	# macOS puts the test directory under /private/tmp.
-	assert_output --regexp "^In (/private)?$PWD/scratch: Files changed after the last test run passed"
+	run stop_raised
+	assert_output 'would-block:changed-after-pass'
+	run raised_in scratch
+	assert_output --partial 'Files changed after the last test run passed'
 }
 
 @test "session-start names the project's checks from a trusted .jouet/project.toml" {
