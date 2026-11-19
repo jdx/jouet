@@ -494,20 +494,21 @@ fn handle(
             };
             let mut entry = log.entry("stop");
             // One decision per reason, each named: a `block` where the gate
-            // stopped the agent, a `would-block` where it only observed.
-            let action = if gate == Some(true) {
-                "block"
-            } else {
-                "would-block"
-            };
-            entry
-                .decisions
-                .extend(reasons.into_iter().map(|reason| ledger::Decision {
+            // stopped the agent, a `would-block` where it only observed,
+            // as it always does for some reasons (`verify::observes`).
+            entry.decisions.extend(reasons.into_iter().map(|reason| {
+                ledger::Decision {
                     rule: "verify".into(),
-                    action: action.into(),
+                    action: if gate == Some(true) && !verify::observes(&reason) {
+                        "block"
+                    } else {
+                        "would-block"
+                    }
+                    .into(),
                     scope: Some(reason),
                     revision: None,
-                }));
+                }
+            }));
             if hk_blocked {
                 entry.decisions.push(ledger::Decision {
                     rule: "verify".into(),
@@ -1833,9 +1834,12 @@ fn stop(harness: Harness, payload: &Value, gate: Option<bool>, hk_stop: &[String
         let _ = verify::update(path, |state| state.raise(block));
     }
     // Observed, a reason is kept as raised all the same, so each is
-    // recorded once, where the gate would have blocked for it.
+    // recorded once, where the gate would have blocked for it. A reason
+    // that only observes (`verify::observes`) leaves the text empty.
     let reasons = block.as_ref().map(verify::Block::about).unwrap_or_default();
-    let jouet = block.map(|b| b.reason).filter(|_| gate == Some(true));
+    let jouet = block
+        .map(|b| b.reason)
+        .filter(|reason| gate == Some(true) && !reason.is_empty());
     let hk_passed = state.checks(&home).is_some_and(|c| c.hk_passed_at(now));
     let hk = if hk_stop.is_empty() || hk_passed {
         None

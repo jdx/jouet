@@ -541,6 +541,25 @@ mod tests {
     }
 
     #[test]
+    fn a_review_still_running_beside_a_clean_summary_is_in_progress() {
+        // The shape of two events the drop arm would have dropped, where the
+        // turn went on to work: CodeRabbit still processing, and Greptile's
+        // summary scoring the PR 5/5. Neither says what to change.
+        let processing = "PR comment, no inline thread; truncated — full text: `gh api x`\n> coderabbitai[bot]:\n> &lt;!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n> &lt;!-- This is an auto-generated comment: review in progress by coderabbit.ai -->\n>\n> &gt; [!NOTE]\n> &gt; Currently processing new changes in this PR. This may take a few minutes, please wait...";
+        let scored = "PR comment, no inline thread; truncated — full text: `gh api y`\n> greptile-apps[bot]:\n> &lt;h3>Greptile Summary&lt;/h3>\n> &lt;!-- greptile_summary -->\n>\n> This PR moves the release job onto the shared workflow.\n>\n> &lt;h3>Confidence Score: 5/5&lt;/h3>\n>\n> - Safe to merge.";
+        assert_eq!(
+            noise(&comment_event(&[processing, scored])),
+            Some("in_progress")
+        );
+        // The work came with the next event, which carried the finding: it
+        // passes.
+        let summary = "review summary (commented), no inline thread\n> coderabbitai[bot]:\n> **Actionable comments posted: 1**";
+        let finding = "comment_id=79, inline thread\n> coderabbitai[bot] on .github/workflows/release.yml:12:\n> _⚠️ Potential issue_ | _🟠 Major_\n>\n> The job no longer passes the token to the shared workflow.";
+        assert_eq!(noise(&comment_event(&[summary, finding])), None);
+        assert_eq!(noise(&comment_event(&[processing, finding])), None);
+    }
+
+    #[test]
     fn each_app_event_is_told_from_a_users_prompt_by_how_it_opens() {
         let class = |prompt: &str| classify(prompt).class;
         let reminder =

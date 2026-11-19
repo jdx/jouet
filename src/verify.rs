@@ -1351,6 +1351,10 @@ pub(crate) struct Raised {
     /// are then answered (see [`Checks::answered`]).
     #[serde(skip)]
     pub answering: Vec<String>,
+    /// The reasons raised now that only observe ([`observes`]): kept as
+    /// raised and recorded, but never put to the agent.
+    #[serde(skip)]
+    pub observed: Vec<String>,
 }
 
 /// The most reasons one stop raises; the rest wait for the next.
@@ -1400,7 +1404,9 @@ fn shown(command: &str) -> String {
 /// something to raise.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Block {
-    /// The reasons, each tree's named when it is not the session's own.
+    /// The reasons that block, each tree's named when it is not the
+    /// session's own; empty when every reason raised now only observes
+    /// ([`observes`]).
     pub reason: String,
     /// What to keep in each tree's checks once the stop is blocked, by
     /// root.
@@ -1417,14 +1423,30 @@ impl Block {
         self.raised
             .iter()
             .flat_map(|(_, raised)| &raised.told)
-            .filter_map(|key| key.split('\u{0}').next())
-            .map(|about| match about {
-                "untested" => "changed-after-pass".to_string(),
-                "hk-partial" | "hk-changed" => about.to_string(),
-                kind => format!("failed-{kind}"),
-            })
+            .map(String::as_str)
+            .map(about)
             .collect()
     }
+}
+
+/// What the reason kept by `key` ([`told_key`]) is about, as
+/// [`Block::about`] names it.
+fn about(key: &str) -> String {
+    match key.split('\u{0}').next().unwrap_or_default() {
+        "untested" => "changed-after-pass".to_string(),
+        about @ ("hk-partial" | "hk-changed") => about.to_string(),
+        kind => format!("failed-{kind}"),
+    }
+}
+
+/// Whether a reason, as [`Block::about`] names it, only observes: it is
+/// recorded as a `would-block` in every session, `[hooks] gate = "block"`
+/// and the experiment's control arm included, and never blocks. Files
+/// changed after a passing test run were followed by a passing check, with
+/// no edit, after nearly every block for them, so each such block cost a
+/// rerun that found nothing.
+pub(crate) fn observes(about: &str) -> bool {
+    about == "changed-after-pass"
 }
 
 /// The `jouet test --baseline` run that compares the failed full run's own
@@ -1729,7 +1751,16 @@ impl State {
                     Some(r) if r.tree.is_some() && r.tree == raised.tree => r.reasons.len(),
                     _ => 0,
                 };
-                let mut reason = raised.reasons[before.min(raised.reasons.len())..].join("\n\n");
+                // Only the reasons that block are put to the agent.
+                let mut reason = raised.reasons[before.min(raised.reasons.len())..]
+                    .iter()
+                    .filter(|r| !raised.observed.contains(r))
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                if reason.is_empty() {
+                    return Some((root.clone(), reason, raised));
+                }
                 if raised.more > 0 {
                     reason.push_str(&format!(
                         "\n\n({} more after these, at the next stop.)",
@@ -1751,6 +1782,7 @@ impl State {
             reason: found
                 .iter()
                 .map(|(_, r, _)| r.as_str())
+                .filter(|r| !r.is_empty())
                 .collect::<Vec<_>>()
                 .join("\n\n"),
             raised: found
@@ -1824,6 +1856,7 @@ impl State {
             checks.raised = Some(Raised {
                 told: Vec::new(),
                 covered: Vec::new(),
+                observed: Vec::new(),
                 ..raised.clone()
             });
             checks.answered.extend(raised.answering.iter().cloned());
@@ -2212,6 +2245,11 @@ impl Checks {
             .filter(|(kind, f)| new.contains(&self.failure_reason(*kind, f)))
             .map(|(_, f)| same_run(&f.command))
             .collect();
+        let observed = keyed
+            .iter()
+            .filter(|(reason, key)| new.contains(reason) && observes(&about(key)))
+            .map(|(reason, _)| reason.clone())
+            .collect();
         raised.extend(new);
         Some(Raised {
             reasons: raised,
@@ -2220,6 +2258,7 @@ impl Checks {
             answering,
             told: keys,
             covered,
+            observed,
         })
     }
 
@@ -3893,6 +3932,38 @@ mod tests {
     }
 
     #[test]
+    fn a_change_after_a_pass_is_raised_but_never_put_to_the_agent() {
+        let mut state = State::default();
+        let at = std::cell::Cell::new("t1");
+        let tree = |_: &str| Some(at.get().to_string());
+        state.record("/home", [test("cargo test", 0, "full")], Some("t1"));
+        at.set("t2");
+        // Alone, it is raised with no text: the gate would only record it.
+        let block = state.block("/home", tree, |_| false, |_| true).unwrap();
+        assert_eq!(block.about(), ["changed-after-pass"]);
+        assert_eq!(block.reason, "");
+        assert!(observes("changed-after-pass"));
+        assert!(!observes("failed-test"));
+        // With a failure, only the failure is put to the agent.
+        state.record(
+            "/home",
+            [record(Kind::Lint, "hk check", 1, "full")],
+            Some("t2"),
+        );
+        let block = state.block("/home", tree, |_| false, |_| true).unwrap();
+        assert_eq!(block.about(), ["failed-lint", "changed-after-pass"]);
+        assert!(
+            block.reason.starts_with("The last lint run failed"),
+            "{}",
+            block.reason
+        );
+        assert!(!block.reason.contains("Files changed"), "{}", block.reason);
+        // Each is kept as raised all the same, so is recorded once.
+        state.raise(&block);
+        assert_eq!(state.block("/home", tree, |_| false, |_| true), None);
+    }
+
+    #[test]
     fn a_pass_of_another_runner_never_widens_to_cover_a_failure() {
         let mut state = Checks::default();
         state.record([test("mise run test", 0, "full")], Some("t1"));
@@ -4411,17 +4482,13 @@ mod tests {
         let ask = |state: &State| {
             state
                 .block("/home", tree, |_| false, |_| true)
-                .map(|b| b.reason)
+                .map(|b| raised(&b))
         };
         let mut state = State::default();
         state.record("/old", [test("cargo test -p a", 0, "-p a")], Some("o1"));
         state.record("/home", [test("cargo test -p b", 0, "-p b")], Some("h1"));
         let ran = state.trees["/old"].last_run.unwrap();
-        let why = ask(&state).unwrap();
-        assert!(
-            why.starts_with("In /old: Files changed after the last test run passed"),
-            "{why}"
-        );
+        assert_eq!(ask(&state).unwrap(), ["/old changed-after-pass"]);
 
         // Within the hour, it is still asked about, clean or not.
         let mut soon = State::load_from(&state);
@@ -4449,7 +4516,7 @@ mod tests {
         assert!(left.trees.contains_key("/home"));
         left.record("/home", [test("cargo test -p b", 1, "-p b")], Some("h1"));
         left.set_aside_settled("/home", later + SETTLED_AFTER, |_| Some(false), |_| true);
-        assert!(ask(&left).unwrap().starts_with("The last test run failed"));
+        assert_eq!(ask(&left).unwrap(), ["/home failed-test"]);
 
         // A state written before jouet kept the time reads as long ago.
         let mut old = State::load_from(&state);
@@ -4463,6 +4530,21 @@ mod tests {
         fn load_from(state: &State) -> State {
             serde_json::from_value(serde_json::to_value(state).unwrap()).unwrap()
         }
+    }
+
+    /// What a block raised now, by tree and as [`Block::about`] names it,
+    /// the reasons that only observe included.
+    fn raised(block: &Block) -> Vec<String> {
+        block
+            .raised
+            .iter()
+            .flat_map(|(root, raised)| {
+                raised
+                    .told
+                    .iter()
+                    .map(move |key| format!("{root} {}", about(key)))
+            })
+            .collect()
     }
 
     #[test]
@@ -4486,17 +4568,12 @@ mod tests {
                 .map(|b| b.reason),
             None
         );
-        // A change in the session's own tree after its last pass blocks,
-        // unnamed.
+        // A change in the session's own tree after its last pass is
+        // raised, and only observed.
         state.record("/home", [test("cargo test -p a", 0, "-p a")], Some("h0"));
-        let why = state
-            .block("/home", tree, |_| false, |_| true)
-            .map(|b| b.reason)
-            .unwrap();
-        assert!(
-            why.starts_with("Files changed after the last test run passed"),
-            "{why}"
-        );
+        let block = state.block("/home", tree, |_| false, |_| true).unwrap();
+        assert_eq!(raised(&block), ["/home changed-after-pass"]);
+        assert_eq!(block.reason, "");
         // A failure in another tree blocks, and names it.
         state.record(
             "/home",
@@ -4531,7 +4608,7 @@ mod tests {
         let block = |state: &State| {
             state
                 .block("/home", tree, |_| false, |_| true)
-                .map(|b| b.reason)
+                .map(|b| raised(&b))
         };
         // A subagent's scratch repository, changed after its pass.
         state.by("/scratch", false);
@@ -4548,16 +4625,11 @@ mod tests {
             [test("cargo test", 101, "full")],
             Some("/home-now"),
         );
-        assert!(
-            block(&state)
-                .unwrap()
-                .starts_with("The last test run failed")
-        );
+        assert_eq!(block(&state).unwrap(), ["/home failed-test"]);
         // Once the lead runs something in the scratch tree, it is the lead's.
         state.record("/home", [test("cargo test", 0, "full")], Some("/home-now"));
         state.by("/scratch", true);
-        let why = block(&state).unwrap();
-        assert!(why.starts_with("In /scratch: Files changed"), "{why}");
+        assert_eq!(block(&state).unwrap(), ["/scratch changed-after-pass"]);
         // A subagent's later run there hands it back, as when the lead
         // checked a subagent's work once and the subagent went on working.
         state.by("/scratch", false);
@@ -4565,11 +4637,7 @@ mod tests {
         assert_eq!(block(&state), None);
         // Until the lead runs something there again.
         state.by("/scratch", true);
-        assert!(
-            block(&state)
-                .unwrap()
-                .starts_with("In /scratch: Files changed")
-        );
+        assert_eq!(block(&state).unwrap(), ["/scratch changed-after-pass"]);
     }
 
     #[test]
@@ -4853,11 +4921,7 @@ mod tests {
         state.record("/home", [test("cargo test -p a", 0, "-p a")], Some("p1"));
         at.set("p2");
         let block = state.block("/home", tree, |_| false, |_| true).unwrap();
-        assert!(
-            block.reason.starts_with("Files changed after"),
-            "{}",
-            block.reason
-        );
+        assert_eq!(raised(&block), ["/home changed-after-pass"]);
         state.raise(&block);
         at.set("p3");
         assert_eq!(state.block("/home", tree, |_| false, |_| true), None);

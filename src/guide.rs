@@ -962,7 +962,7 @@ pub(crate) fn summary(
     }
     if verify {
         out.push_str(
-            "They also stop you finishing while a test, lint or build run failed, or when no test passed since your last change. For an unrelated failure, compare its command with `jouet test --baseline --cmd -- CMD`.\n",
+            "They also stop you finishing while a test, lint or build run failed. For an unrelated failure, compare its command with `jouet test --baseline --cmd -- CMD`.\n",
         );
     }
     out
