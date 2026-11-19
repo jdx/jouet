@@ -441,7 +441,7 @@ In a post-tool-use script, each top-level command has a `status`: the exit statu
 
 `jouet.record("test", command, scope, selector, dir)` records a run with that status; it does nothing when `status` is `nil`, and a kind other than `test`, `lint` or `build` is an error. `scope` is `"full"` when the run covered the whole project and `"partial"` otherwise, and `selector` says what a partial run picked, such as `"-p jouet-edit"`. `dir` is where a `cd` before the command moved it (relative, absolute, or under `~` or `$HOME`), so the run counts for that work tree. A rule that leaves the scope out records a partial run: only a rule that knows a run covered everything says so.
 
-The built-in `checks` rule uses it so jouet can refuse to let an agent finish while a test, lint or build run failed, or after it changed files with no test run passing since ([how](/setup#finishing-on-a-failing-check)). Its `fires` examples can name the scope they expect, as in `{ command = "cargo test -p a", kind = "test", scope = "partial -p a" }`.
+The built-in `checks` rule uses it so jouet can refuse to let an agent finish while a test, lint or build run failed, and record when it changed files with no test run passing since ([how](/setup#finishing-on-a-failing-check)). Its `fires` examples can name the scope they expect, as in `{ command = "cargo test -p a", kind = "test", scope = "partial -p a" }`.
 
 ### Type checking
 

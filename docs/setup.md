@@ -201,7 +201,7 @@ The rules read the command the way a shell does: quoted strings, here-document b
 
 ### Finishing on a failing check
 
-The stop hook keeps an agent from declaring success while a test, lint or build run it made failed, or after it changed files with no test run passing since, in the spirit of "verification before completion". A passing partial run satisfies the hook, so the hook alone does not show that the full suite passed.
+The stop hook keeps an agent from declaring success while a test, lint or build run it made failed, in the spirit of "verification before completion". A passing partial run satisfies the hook, so the hook alone does not show that the full suite passed. Files changed with no test run passing since are only recorded (`changed-after-pass`), and never [block](#observing-or-blocking).
 
 After a failed `cargo test`, the agent's next stop is blocked with this reason:
 
