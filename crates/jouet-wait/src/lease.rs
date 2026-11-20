@@ -13,7 +13,11 @@
 //! instead of starting a turn. When jouet holds one, the hook appends what it
 //! said to the lease's held file, and the watcher accounts for each held
 //! event when it wakes the agent. Anything this cannot read, or a lease that
-//! is not live, lets the event through.
+//! is not live, lets the event through. A lease whose watcher went without
+//! ending it (`Lease::lost`) is removed by the session's next hook, which
+//! reports what was held for it; a watcher that was told to stop first
+//! writes its lease as no longer live (`Lease::leaving`), so it has a moment
+//! in which it covers nothing and is not yet lost.
 
 use serde::{Deserialize, Serialize};
 use std::io::Write as _;
@@ -23,6 +27,12 @@ use std::path::{Path, PathBuf};
 pub const HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(15);
 /// A heartbeat older than this, in seconds, means the watcher is gone.
 pub const STALE: i64 = 90;
+/// How long, in seconds, a watcher that was told to stop may keep the lease
+/// it no longer covers with before a hook takes the lease for lost.
+const LEAVING: i64 = 5;
+/// The file whose lock makes looking for a lease and writing or ending one a
+/// single step.
+const CLAIM_LOCK: &str = "claim.lock";
 
 /// One watcher's lease.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,10 +144,89 @@ impl Lease {
         out
     }
 
+    /// The file a push leaves the commit it pushed in, for the watcher that
+    /// already covers its PR.
+    fn pushed_path(lease: &Path) -> PathBuf {
+        lease.with_extension("pushed")
+    }
+
+    /// Writes the lease under `dir`, unless a live lease of its session
+    /// already covers its PR: `None` then, and that watcher is left `head`,
+    /// the commit this push left checked out, so it does not end on a digest
+    /// about an older one (`retire`). Looking and writing are one step under
+    /// a lock, so of two watchers started at once for one PR (two hooks that
+    /// ran for the same push), exactly one gets the lease.
+    pub fn claim(
+        &self,
+        dir: &Path,
+        now: i64,
+        head: Option<&str>,
+    ) -> std::io::Result<Option<PathBuf>> {
+        let path = Self::path(dir, &self.session, self.pid)
+            .ok_or_else(|| std::io::Error::other("the session ID names no file"))?;
+        std::fs::create_dir_all(dir)?;
+        let lock = std::fs::File::create(dir.join(CLAIM_LOCK))?;
+        lock.lock()?;
+        let covering: Vec<PathBuf> = Self::of_session(dir, &self.session)
+            .into_iter()
+            .filter(|(_, l)| l.pid != self.pid && l.live(now) && l.covers(&self.repo, self.pr))
+            .map(|(path, _)| path)
+            .collect();
+        if covering.is_empty() {
+            self.write(&path)?;
+            return Ok(Some(path));
+        }
+        for watcher in covering {
+            let _ = std::fs::write(Self::pushed_path(&watcher), head.unwrap_or_default());
+        }
+        Ok(None)
+    }
+
+    /// Ends the lease at `path` of a watcher whose digest is about commit
+    /// `head`, and says so; `false`, with the lease left as it is, when a
+    /// push of another commit found the PR watched since (`claim`), so the
+    /// watcher waits again instead of leaving that commit unwatched. `stop`
+    /// ends whatever rewrites the lease. It all happens under the lock a
+    /// claim takes, so no push finds the lease in between. A watcher with no
+    /// digest (no `head`) ends whatever was pushed.
+    pub fn retire(path: &Path, head: Option<&str>, stop: impl FnOnce()) -> bool {
+        let lock = path
+            .parent()
+            .and_then(|dir| std::fs::File::create(dir.join(CLAIM_LOCK)).ok());
+        let _locked = lock.as_ref().map(std::fs::File::lock);
+        let marker = Self::pushed_path(path);
+        if let Ok(pushed) = std::fs::read_to_string(&marker) {
+            let _ = std::fs::remove_file(&marker);
+            if head.is_some_and(|head| head != pushed.trim()) {
+                return false;
+            }
+        }
+        stop();
+        let _ = std::fs::remove_file(path);
+        true
+    }
+
     /// Whether its watcher is still there: the process runs and the
     /// heartbeat is fresh.
     pub fn live(&self, now: i64) -> bool {
         now - self.heartbeat < STALE && crate::os::process_running(self.pid)
+    }
+
+    /// The lease as a watcher that was told to stop writes it: not live from
+    /// `now` on, so it covers no new event, and not lost yet, so no hook
+    /// takes it away while one that was holding an event finishes.
+    #[must_use]
+    pub fn leaving(&self, now: i64) -> Self {
+        Self {
+            heartbeat: now - STALE,
+            ..self.clone()
+        }
+    }
+
+    /// Whether its watcher went without ending its lease: the process is
+    /// gone, or the heartbeat is older than a leaving watcher's gets.
+    pub fn lost(&self, now: i64) -> bool {
+        now - self.heartbeat >= STALE + LEAVING || !crate::os::process_running(self.pid)
     }
 
     /// Whether it covers `repo`'s PR `pr`.
@@ -145,10 +234,11 @@ impl Lease {
         self.pr != 0 && self.pr == pr && self.repo.eq_ignore_ascii_case(repo)
     }
 
-    /// Removes the lease and its held events.
+    /// Removes the lease, its held events and the push left for it.
     pub fn remove(path: &Path) {
         let _ = std::fs::remove_file(path);
         let _ = std::fs::remove_file(Self::held_path(path));
+        let _ = std::fs::remove_file(Self::pushed_path(path));
     }
 }
 
@@ -199,11 +289,93 @@ mod tests {
         assert!(!lease("s", me, 1_000).live(1_000 + STALE));
         // No such process.
         assert!(!lease("s", u32::MAX - 1, 1_000).live(1_000));
+        // Told to stop: it covers nothing from then on, and is lost only
+        // once the process is gone or it has taken too long over it.
+        let leaving = lease("s", me, 1_000).leaving(1_050);
+        assert!(!leaving.live(1_050));
+        assert!(!leaving.lost(1_050 + LEAVING - 1));
+        assert!(leaving.lost(1_050 + LEAVING));
+        assert!(lease("s", u32::MAX - 1, 1_000).leaving(1_050).lost(1_050));
+        assert!(lease("s", u32::MAX - 1, 1_000).lost(1_000));
+        assert!(!lease("s", me, 1_000).lost(1_000 + STALE));
         let l = lease("s", me, 0);
         assert!(l.covers("JDX/jouet", 12));
         assert!(!l.covers("jdx/jouet", 13));
         assert!(!l.covers("jdx/other", 12));
         assert!(!Lease { pr: 0, ..l }.covers("jdx/jouet", 0));
+    }
+
+    #[test]
+    fn only_one_watcher_of_a_session_claims_a_pr() {
+        let dir = tempfile::tempdir().unwrap();
+        let me = std::process::id();
+        // A live watcher: this process.
+        let first = lease("s", me, 1_000);
+        let path = first.claim(dir.path(), 1_000, None).unwrap().unwrap();
+        assert_eq!(Lease::read(&path), Some(first.clone()));
+        // Claiming again is the same watcher, not a second one.
+        assert!(first.claim(dir.path(), 1_000, None).unwrap().is_some());
+        let second = lease("s", me + 1, 1_000);
+        assert_eq!(second.claim(dir.path(), 1_000, None).unwrap(), None);
+        assert_eq!(Lease::of_session(dir.path(), "s").len(), 1);
+        // Another PR, another session, or once the first has gone stale.
+        let other_pr = Lease {
+            pr: 13,
+            ..second.clone()
+        };
+        assert!(other_pr.claim(dir.path(), 1_000, None).unwrap().is_some());
+        assert!(
+            lease("t", me + 1, 1_000)
+                .claim(dir.path(), 1_000, None)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            second
+                .claim(dir.path(), 1_000 + STALE, None)
+                .unwrap()
+                .is_some()
+        );
+        assert!(lease("../", 1, 0).claim(dir.path(), 0, None).is_err());
+    }
+
+    #[test]
+    fn a_watcher_does_not_end_on_a_digest_about_a_commit_older_than_the_last_push() {
+        let dir = tempfile::tempdir().unwrap();
+        let me = std::process::id();
+        let watcher = lease("s", me, 1_000);
+        let path = watcher
+            .claim(dir.path(), 1_000, Some("aaa"))
+            .unwrap()
+            .unwrap();
+        let stopped = std::cell::Cell::new(0);
+        let stop = || stopped.set(stopped.get() + 1);
+        // A push of `bbb` finds the PR watched, as the watcher ends on `aaa`.
+        let push = lease("s", me + 1, 1_000);
+        assert_eq!(push.claim(dir.path(), 1_000, Some("bbb")).unwrap(), None);
+        assert!(!Lease::retire(&path, Some("aaa"), stop));
+        assert!(path.exists());
+        assert_eq!(stopped.get(), 0);
+        // Once for a push: the next digest ends it, whatever it is about.
+        assert!(Lease::retire(&path, Some("aaa"), stop));
+        assert!(!path.exists());
+        assert_eq!(stopped.get(), 1);
+
+        // A push of the commit the digest is about, and a watcher with no
+        // digest, end as they would have.
+        let path = watcher.claim(dir.path(), 1_000, None).unwrap().unwrap();
+        assert_eq!(push.claim(dir.path(), 1_000, Some("bbb")).unwrap(), None);
+        assert!(Lease::retire(&path, Some("bbb"), stop));
+        let path = watcher.claim(dir.path(), 1_000, None).unwrap().unwrap();
+        assert_eq!(push.claim(dir.path(), 1_000, Some("ccc")).unwrap(), None);
+        assert!(Lease::retire(&path, None, stop));
+        assert!(!path.exists());
+        // What a push left goes with the lease.
+        let path = watcher.claim(dir.path(), 1_000, None).unwrap().unwrap();
+        assert_eq!(push.claim(dir.path(), 1_000, None).unwrap(), None);
+        assert!(Lease::pushed_path(&path).exists());
+        Lease::remove(&path);
+        assert!(!Lease::pushed_path(&path).exists());
     }
 
     #[test]

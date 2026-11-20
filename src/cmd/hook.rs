@@ -144,7 +144,7 @@ const RUN_ONCE: Duration = Duration::from_secs(5);
 /// `tool_use_id`, a subagent's `agent_id`, a prompt's `prompt_id`, or a session start's transcript, which cannot start twice
 /// within [`RUN_ONCE`] otherwise. A stop has no such id, and two stops of a
 /// short turn can look the same, so each is answered.
-fn first_run(harness: Harness, event: &str, payload: &Value) -> bool {
+pub(crate) fn first_run(harness: Harness, event: &str, payload: &Value) -> bool {
     use std::hash::{Hash, Hasher};
     let key = match event {
         "session-start" => "transcript_path",
@@ -427,19 +427,6 @@ fn handle(
                     let _ = std::fs::remove_file(&path);
                     context
                 });
-            // In the settle arm, a push with nothing watching its PR.
-            let push = (arm.settle
-                && event == "post-tool-use"
-                && call.tool == "Bash"
-                && call.exit_code == Some(0)
-                && !in_background(payload)
-                && call.command.as_deref().is_some_and(crate::settle::pushes)
-                && log.session.is_some_and(|s| !crate::settle::watching(s)))
-            .then(|| crate::settle::PUSH_NOTE.to_string());
-            let held = match (held, push) {
-                (Some(held), Some(push)) => Some(format!("{held}\n{push}")),
-                (held, push) => held.or(push),
-            };
             after_tool(event, held, &warnings)
         }
         // Every harness sends its file edits here, Codex its patches too.
@@ -810,6 +797,7 @@ impl Log<'_> {
         entry.exit_code = call.exit_code;
         entry.duration_ms = payload.get("duration_ms").and_then(Value::as_u64);
         entry.background = in_background(payload);
+        entry.push = crate::settle::pushed(payload, call);
         entry.output_bytes = output_bytes(payload);
         entry.tree = tree;
         entry.decisions = records.iter().map(decision).collect();
@@ -1208,7 +1196,7 @@ struct Ran {
 
 /// Whether the call asked to run in the background (Claude Code's
 /// `run_in_background`, Gemini's renamed to it).
-fn in_background(payload: &Value) -> bool {
+pub(crate) fn in_background(payload: &Value) -> bool {
     payload
         .get("tool_input")
         .and_then(|i| i.get("run_in_background"))

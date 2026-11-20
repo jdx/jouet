@@ -36,6 +36,7 @@ use std::time::{Duration, Instant};
 /// Lines of each comment the digest shows.
 const BODY_LINES: usize = 20;
 
+#[derive(Clone)]
 pub struct Options {
     /// How long nothing may change before the PR counts as settled.
     pub quiet: Duration,
@@ -53,6 +54,9 @@ pub struct Options {
     /// The wait between polls once the PR has settled with nothing for the
     /// agent, instead of the usual back-off.
     pub settled_interval: Option<Duration>,
+    /// jouet starts the next watcher itself after a push, so the digest
+    /// does not tell the agent to.
+    pub restarts: bool,
 }
 
 /// A held event, and what became of it.
@@ -436,6 +440,11 @@ impl Doc {
         self.result
     }
 
+    /// The commit the digest is about; empty when the PR could not be read.
+    pub fn head_sha(&self) -> &str {
+        &self.head_sha
+    }
+
     /// `owner/name#N`.
     pub fn pr(&self) -> String {
         format!("{}#{}", self.repo, self.pr)
@@ -466,6 +475,14 @@ impl SettleWait {
             last_poll_settled: false,
             held: Vec::new(),
         }
+    }
+
+    /// Counts the time this wait took from `start`: it goes on from a round
+    /// that began then.
+    #[must_use]
+    pub fn started(mut self, start: Instant) -> Self {
+        self.start = start;
+        self
     }
 
     fn doc(
@@ -758,7 +775,9 @@ impl Watch for SettleWait {
             let _ = writeln!(out, "  left out as bot noise: {}", classes.join(", "));
         }
         out.push_str(&held_text(&doc.held));
-        if doc.result != "closed" {
+        if doc.result != "closed" && self.options.restarts {
+            out.push_str("  next: jouet watches this PR again after your next push\n");
+        } else if doc.result != "closed" {
             let _ = writeln!(
                 out,
                 "  next: jouet wait pr {} --until needs-agent --since {}",
