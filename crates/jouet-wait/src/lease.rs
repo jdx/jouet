@@ -13,7 +13,11 @@
 //! instead of starting a turn. When jouet holds one, the hook appends what it
 //! said to the lease's held file, and the watcher accounts for each held
 //! event when it wakes the agent. Anything this cannot read, or a lease that
-//! is not live, lets the event through.
+//! is not live, lets the event through. A lease whose watcher went without
+//! ending it (`Lease::lost`) is removed by the session's next hook, which
+//! reports what was held for it; a watcher that was told to stop first
+//! writes its lease as no longer live (`Lease::leaving`), so it has a moment
+//! in which it covers nothing and is not yet lost.
 
 use serde::{Deserialize, Serialize};
 use std::io::Write as _;
@@ -23,6 +27,9 @@ use std::path::{Path, PathBuf};
 pub const HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(15);
 /// A heartbeat older than this, in seconds, means the watcher is gone.
 pub const STALE: i64 = 90;
+/// How long, in seconds, a watcher that was told to stop may keep the lease
+/// it no longer covers with before a hook takes the lease for lost.
+const LEAVING: i64 = 5;
 /// The file whose lock makes looking for a lease and writing or ending one a
 /// single step.
 const CLAIM_LOCK: &str = "claim.lock";
@@ -205,6 +212,23 @@ impl Lease {
         now - self.heartbeat < STALE && crate::os::process_running(self.pid)
     }
 
+    /// The lease as a watcher that was told to stop writes it: not live from
+    /// `now` on, so it covers no new event, and not lost yet, so no hook
+    /// takes it away while one that was holding an event finishes.
+    #[must_use]
+    pub fn leaving(&self, now: i64) -> Self {
+        Self {
+            heartbeat: now - STALE,
+            ..self.clone()
+        }
+    }
+
+    /// Whether its watcher went without ending its lease: the process is
+    /// gone, or the heartbeat is older than a leaving watcher's gets.
+    pub fn lost(&self, now: i64) -> bool {
+        now - self.heartbeat >= STALE + LEAVING || !crate::os::process_running(self.pid)
+    }
+
     /// Whether it covers `repo`'s PR `pr`.
     pub fn covers(&self, repo: &str, pr: u64) -> bool {
         self.pr != 0 && self.pr == pr && self.repo.eq_ignore_ascii_case(repo)
@@ -265,6 +289,15 @@ mod tests {
         assert!(!lease("s", me, 1_000).live(1_000 + STALE));
         // No such process.
         assert!(!lease("s", u32::MAX - 1, 1_000).live(1_000));
+        // Told to stop: it covers nothing from then on, and is lost only
+        // once the process is gone or it has taken too long over it.
+        let leaving = lease("s", me, 1_000).leaving(1_050);
+        assert!(!leaving.live(1_050));
+        assert!(!leaving.lost(1_050 + LEAVING - 1));
+        assert!(leaving.lost(1_050 + LEAVING));
+        assert!(lease("s", u32::MAX - 1, 1_000).leaving(1_050).lost(1_050));
+        assert!(lease("s", u32::MAX - 1, 1_000).lost(1_000));
+        assert!(!lease("s", me, 1_000).lost(1_000 + STALE));
         let l = lease("s", me, 0);
         assert!(l.covers("JDX/jouet", 12));
         assert!(!l.covers("jdx/jouet", 13));

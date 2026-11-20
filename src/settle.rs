@@ -70,8 +70,12 @@ pub(crate) fn lost(session: &str) -> Vec<Lost> {
 fn lost_in(dir: &Path, session: &str, now: i64) -> Vec<Lost> {
     Lease::of_session(dir, session)
         .into_iter()
-        .filter(|(_, l)| !l.live(now))
+        .filter(|(_, l)| l.lost(now))
         .map(|(path, l)| {
+            // The lease goes first: a hook that held an event while it was
+            // there has written it by now, and one that writes later finds
+            // no lease and lets its event through (`hold`).
+            let _ = std::fs::remove_file(&path);
             let held = lease::held(&path);
             Lease::remove(&path);
             Lost {
@@ -240,6 +244,17 @@ mod tests {
         // Removed, so the next hook says nothing; the live one stays.
         assert!(lost_in(dir.path(), "s1", 1_010).is_empty());
         assert!(live.exists());
+        // So does the lease of a watcher that was told to stop and is still
+        // running: it covers nothing, and is not taken away under a hook
+        // that is holding an event for it.
+        lease_at("s1", me, 1_000)
+            .leaving(1_010)
+            .write(&live)
+            .unwrap();
+        assert!(covering_in(dir.path(), "s1", &event(&[("jdx/jouet", 12)]), 1_010).is_none());
+        assert!(lost_in(dir.path(), "s1", 1_011).is_empty());
+        assert!(live.exists());
+        assert_eq!(lost_in(dir.path(), "s1", 1_100).len(), 1);
     }
 
     #[test]

@@ -610,12 +610,9 @@ fn leave(path: &Path, lease: &Lease) {
     // A lease that is not live holds no new event, and it is still there
     // for a hook that was holding one as it went stale, which has the grace
     // to finish. Removing it first would leave that event with no lease if
-    // the process were killed meanwhile.
-    let stale = Lease {
-        heartbeat: 0,
-        ..lease.clone()
-    };
-    let _ = stale.write(path);
+    // the process were killed meanwhile. No hook takes it for lost while
+    // this process runs (`Lease::leaving`).
+    let _ = lease.leaving(jouet_output::time::now()).write(path);
     std::thread::sleep(HOLD_GRACE);
     if lease::held(path).is_empty() {
         Lease::remove(path);
