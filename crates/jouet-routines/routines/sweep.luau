@@ -44,12 +44,14 @@ return {
 				table.insert(lines, `{item.id}  {place}  {author or "?"}: {item.says}`)
 			end
 		end
-		local header = `{#items} unresolved thread{if #items == 1 then "" else "s"} on {pr.repo}#{pr.number}`
+		-- A PR on another forge keeps its host, so the reference parses back to it.
+		local ref = if pr.host then `{pr.host}/{pr.repo}#{pr.number}` else `{pr.repo}#{pr.number}`
+		local header = `{#items} unresolved thread{if #items == 1 then "" else "s"} on {ref}`
 		print(header)
 		for _, line in lines do
 			print(line)
 		end
-		return joue.object({ pr = `{pr.repo}#{pr.number}`, threads = items }, { "pr", "threads" })
+		return joue.object({ pr = ref, threads = items }, { "pr", "threads" })
 	end,
 
 	examples = {
@@ -75,12 +77,12 @@ return {
 			args = { "gitlab.com/group/sub/project!4266" },
 			fixture = "fixtures/sweep-gitlab.json",
 			output = {
-				"2 unresolved threads on group/sub/project#4266",
+				"2 unresolved threads on gitlab.com/group/sub/project#4266",
 				"1126  internal/oauth/flow.go:42  reviewer: Should this reject an empty client ID too?",
 				"1150  internal/oauth/client.go:?  maintainer: Rename this before it ships",
 			},
 			json = {
-				pr = "group/sub/project#4266",
+				pr = "gitlab.com/group/sub/project#4266",
 				threads = { { id = 1126, outdated = false }, { id = 1150, outdated = true } },
 			},
 			requests = { "GET /projects/group%2Fsub%2Fproject/merge_requests/4266/discussions" },
