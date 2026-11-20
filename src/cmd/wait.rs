@@ -368,7 +368,9 @@ fn settle_rounds(
             timeout: timing.timeout.saturating_sub(started.elapsed()),
             interval: timing.interval,
         };
-        let mut w = SettleWait::new(Target::Number(repo.clone(), number), options.clone());
+        // The digest says how long the whole wait took, not its last round.
+        let mut w =
+            SettleWait::new(Target::Number(repo.clone(), number), options.clone()).started(started);
         let mut reporter = reporter(w.label());
         let waited = remote::wait(&mut w, remote, &round, &mut reporter);
         let Some(path) = path else {

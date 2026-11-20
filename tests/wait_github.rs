@@ -1809,6 +1809,17 @@ mod watch {
             digest.contains("FAIL lint") && !digest.contains("FAIL unit"),
             "{digest}"
         );
+        // Each round waited the quiet window, and the digest counts both.
+        let took = digest
+            .lines()
+            .next()
+            .and_then(|line| line.rsplit_once('('))
+            .map_or("", |(_, took)| took.trim_end_matches(')'));
+        let seconds = took.strip_suffix('s').and_then(|s| s.parse::<u64>().ok());
+        assert!(
+            took.contains('m') || seconds.is_some_and(|s| s >= 4),
+            "{digest}"
+        );
         assert!(leases(dir).is_empty() && !pushed.exists());
         assert_eq!(results(dir, "settle"), ["needs_agent"]);
     }

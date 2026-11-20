@@ -477,6 +477,14 @@ impl SettleWait {
         }
     }
 
+    /// Counts the time this wait took from `start`: it goes on from a round
+    /// that began then.
+    #[must_use]
+    pub fn started(mut self, start: Instant) -> Self {
+        self.start = start;
+        self
+    }
+
     fn doc(
         &self,
         result: &'static str,
