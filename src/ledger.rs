@@ -68,8 +68,10 @@ pub(crate) struct Entry {
     /// `slow-hook` (a hook over its time budget; `tool` names its event),
     /// `fix` (hk's fixers run on edited files; `tool` names the edit tool),
     /// `edit` (the harness edited a file; `tool` names the edit tool),
-    /// `prompt` (a turn started; `prompt` says by what), or `deprecated`
-    /// (a command used something on its way out).
+    /// `prompt` (a turn started; `prompt` says by what), `watch` (a push
+    /// in the settle arm reached `jouet watch`; `settle.result` says what
+    /// became of it), or `deprecated` (a command used something on its way
+    /// out).
     pub event: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
@@ -86,6 +88,11 @@ pub(crate) struct Entry {
     /// `jouet-run` says how long it ran.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub background: bool,
+    /// For a `post-tool-use`: the call pushed a branch or opened a PR (see
+    /// `crate::settle::pushed`), which is when jouet starts a PR watcher in
+    /// the settle arm.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub push: bool,
     /// For a `post-tool-use`: how many bytes of output the call gave the
     /// agent, when the harness says (Claude Code's `tool_response`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -116,9 +123,11 @@ pub(crate) struct Entry {
     /// `crate::prompt`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<crate::prompt::Shape>,
-    /// For a `settle` (a `jouet wait pr --until needs-agent` watcher of the
-    /// session ended) or a `lease-lost` (a hook found one gone without its
-    /// digest): what it did with the Auto-fix events held for it.
+    /// For a `settle` (a PR watcher of the session ended: `jouet wait pr
+    /// --until needs-agent`, or the one `jouet watch` starts after a push)
+    /// or a `lease-lost` (a hook found one gone without its digest): what
+    /// it did with the Auto-fix events held for it. For a `watch`: whether
+    /// a watcher started.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settle: Option<Settle>,
 }
@@ -126,9 +135,14 @@ pub(crate) struct Entry {
 /// What a watcher's lease came to.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Settle {
-    /// `needs_agent`, `closed`, `timeout`, `parked` (closed with nothing
-    /// held, so it waited without waking the agent), `error` or
-    /// `lease-lost`.
+    /// For a `settle`: `needs_agent`, `closed`, `timeout`, `parked` (closed
+    /// with nothing held, so it waited without waking the agent), `error`
+    /// or `stopped` (its session ended, or it was told to stop, before its
+    /// digest; events held for it are left for a `lease-lost`). For a
+    /// `lease-lost`: `lease-lost`. For a `watch`: `started`, `watching` (a
+    /// live watcher of the session has the PR), `no-pr` (the branch has
+    /// none), `foreground` (the harness would have run the watcher in the
+    /// foreground) or `error`.
     pub result: String,
     /// The events held for it.
     #[serde(default)]
@@ -142,6 +156,9 @@ pub(crate) struct Settle {
     /// The watcher's pid, which the events held for it name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub watcher: Option<u32>,
+    /// For a `settle`: it woke the agent with its digest.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub woke: bool,
 }
 
 impl Entry {

@@ -62,7 +62,7 @@ pub(crate) struct ExperimentSettings {
     /// Percent of Claude Code sessions, 0 to 100, in which the desktop app's Auto-fix events that are only noise (the notice that Auto-fix was turned on, and bot comments that are only a rate-limit or review-in-progress notice, a review with no findings, a perf report with no regression, or thanks, by `jouet wait pr --until needs-agent`'s rules) are blocked before the agent sees them; 0, the default, turns this arm off, though every session still records which events it would drop
     #[usage(env = "JOUET_EXPERIMENT_DROP_SHARE", default = 0)]
     pub drop_share: u64,
-    /// Percent of Claude Code sessions, 0 to 100, in which an Auto-fix event about a PR that one of the session's own `jouet wait pr --until needs-agent` watchers covers waits for that watcher's digest instead of starting a turn; 0, the default, turns this arm off, though every session still records which events it would hold
+    /// Percent of Claude Code sessions, 0 to 100, in which an Auto-fix event about a PR that one of the session's own `jouet wait pr --until needs-agent` watchers covers waits for that watcher's digest instead of starting a turn, and in which jouet starts that watcher itself after a push; 0, the default, turns this arm off, though every session still records which events it would hold
     #[usage(env = "JOUET_EXPERIMENT_SETTLE_SHARE", default = 0)]
     pub settle_share: u64,
 }

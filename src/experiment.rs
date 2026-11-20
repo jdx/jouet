@@ -26,8 +26,9 @@
 //! settle_share` percent of Claude Code sessions (`new`) have an Auto-fix
 //! event about a PR that a `jouet wait pr --until needs-agent` watcher of
 //! theirs covers held for that watcher's digest instead of starting a turn
-//! (see `crate::settle`); every session records the events it would hold.
-//! It is 0, off, by default.
+//! (see `crate::settle`), and get that watcher started by jouet after a
+//! push (`crate::cmd::watch`); every session records the events it would
+//! hold and its pushes. It is 0, off, by default.
 
 use std::collections::BTreeMap;
 

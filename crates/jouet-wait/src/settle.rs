@@ -53,6 +53,9 @@ pub struct Options {
     /// The wait between polls once the PR has settled with nothing for the
     /// agent, instead of the usual back-off.
     pub settled_interval: Option<Duration>,
+    /// jouet starts the next watcher itself after a push, so the digest
+    /// does not tell the agent to.
+    pub restarts: bool,
 }
 
 /// A held event, and what became of it.
@@ -758,7 +761,9 @@ impl Watch for SettleWait {
             let _ = writeln!(out, "  left out as bot noise: {}", classes.join(", "));
         }
         out.push_str(&held_text(&doc.held));
-        if doc.result != "closed" {
+        if doc.result != "closed" && self.options.restarts {
+            out.push_str("  next: jouet watches this PR again after your next push\n");
+        } else if doc.result != "closed" {
             let _ = writeln!(
                 out,
                 "  next: jouet wait pr {} --until needs-agent --since {}",

@@ -39,8 +39,10 @@ pub struct LedgerEntry {
     pub arm: std::collections::BTreeMap<String, String>,
     /// For a `prompt`: what started the turn.
     pub prompt: Option<super::LedgerPrompt>,
+    /// For a `post-tool-use`: the call pushed a branch or opened a PR.
+    pub push: bool,
     /// For a `settle` or `lease-lost`: what a watcher did with the events
-    /// held for it.
+    /// held for it. For a `watch`: what became of a push in the settle arm.
     pub settle: Option<super::LedgerSettle>,
 }
 

@@ -68,6 +68,8 @@ struct World {
     /// The PR's review threads and conversation comments, as GraphQL nodes.
     review_threads: Vec<Value>,
     conversation: Vec<Value>,
+    /// The branch has no pull request.
+    no_pr: bool,
 }
 
 impl Default for World {
@@ -92,6 +94,7 @@ impl Default for World {
             graphql_mergeable: "UNKNOWN",
             review_threads: Vec::new(),
             conversation: Vec::new(),
+            no_pr: false,
         }
     }
 }
@@ -205,6 +208,7 @@ fn respond(
             }
             response
         }
+        ["pulls"] if world.no_pr => ok(json!([])),
         ["pulls"] => ok(json!([{ "number": 7 }])),
         ["pulls", "7", "files"] => ok(Value::Array(
             world
@@ -1388,4 +1392,379 @@ fn needs_agent_timing_out_unsettled_keeps_since_for_the_next_wait() {
     let doc = json_doc(&out);
     assert_eq!(doc["state"], "the PR had not settled");
     assert_eq!(doc["next_since"], since);
+}
+
+/// `jouet watch`: the watcher a background hook starts after a push. It
+/// answers with its exit code alone: 2 with the digest on stderr wakes the
+/// agent, 0 says nothing.
+#[cfg(unix)]
+mod watch {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// A stand-in for the Claude Code process `CLAUDE_PID` names, killed
+    /// when the test ends.
+    struct Claude(Child);
+
+    impl Claude {
+        /// An interactive session: nothing on its command line says it
+        /// prints and exits.
+        fn interactive() -> Self {
+            Self(Command::new("sleep").arg("300").spawn().unwrap())
+        }
+
+        /// `claude -p hello`: a one-shot run, which runs the hook in the
+        /// foreground. The shell waits on its stdin, so it has no child.
+        fn one_shot() -> Self {
+            Self(
+                Command::new("sh")
+                    .args(["-c", "read line", "claude", "-p", "hello"])
+                    .stdin(Stdio::piped())
+                    .spawn()
+                    .unwrap(),
+            )
+        }
+
+        fn pid(&self) -> String {
+            self.0.id().to_string()
+        }
+    }
+
+    impl Drop for Claude {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    /// A checkout of jdx/demo on the branch `feat`, and a directory holding
+    /// only the programs the watcher runs, so no `gh` is on its PATH.
+    fn checkout(dir: &Path) -> PathBuf {
+        for args in [
+            &["init", "-q", "-b", "feat"][..],
+            &["remote", "add", "origin", "https://github.com/jdx/demo.git"],
+        ] {
+            let done = Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .status()
+                .unwrap();
+            assert!(done.success(), "git {args:?}");
+        }
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let path = std::env::var_os("PATH").unwrap();
+        for tool in ["git", "ps"] {
+            let Some(found) = std::env::split_paths(&path)
+                .map(|p| p.join(tool))
+                .find(|p| p.is_file())
+            else {
+                continue;
+            };
+            let script = bin.join(tool);
+            std::fs::write(
+                &script,
+                format!("#!/bin/sh\nexec '{}' \"$@\"\n", found.display()),
+            )
+            .unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        bin
+    }
+
+    /// What Claude Code gives a PostToolUse hook for a Bash call in session
+    /// `s1`.
+    fn payload(dir: &Path, id: &str, command: &str) -> Value {
+        json!({
+            "session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Bash",
+            "tool_use_id": id, "cwd": dir, "tool_input": { "command": command },
+            "tool_response": { "stdout": "", "stderr": "", "interrupted": false },
+        })
+    }
+
+    /// `jouet watch` as the hook entry runs it, in the settle arm of a
+    /// Claude Code new enough, with `payload` on stdin.
+    fn start(fake: &Fake, dir: &Path, claude: &Claude, payload: &Value, args: &[&str]) -> Child {
+        let mut cmd = command(fake, dir, &[&["watch", "claude"], args].concat());
+        cmd.env("PATH", dir.join("bin"))
+            .env("HOME", dir.join("home"))
+            .env("XDG_CONFIG_HOME", dir.join("config"))
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("JOUET_ENTIRE", "false")
+            .env("JOUET_EXPERIMENT_SETTLE_SHARE", "100")
+            .env("AI_AGENT", "claude-code_2-1-318_harness")
+            .env("CLAUDE_PID", claude.pid())
+            .stdin(Stdio::piped());
+        for var in ["JOUET_HOOKS", "JOUET_HOOKS_LEDGER", "JOUET_SESSION_ID"] {
+            cmd.env_remove(var);
+        }
+        let mut child = cmd.spawn().expect("jouet should start");
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(payload.to_string().as_bytes()).unwrap();
+        child
+    }
+
+    fn run(fake: &Fake, dir: &Path, claude: &Claude, payload: &Value, args: &[&str]) -> Output {
+        start(fake, dir, claude, payload, args)
+            .wait_with_output()
+            .unwrap()
+    }
+
+    /// The leases under `dir`'s state, without their held files.
+    fn leases(dir: &Path) -> Vec<PathBuf> {
+        std::fs::read_dir(dir.join("state/jouet/watch"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect()
+    }
+
+    /// The lease of the watcher that just started.
+    fn lease(dir: &Path) -> PathBuf {
+        for _ in 0..500 {
+            if let [lease] = leases(dir).as_slice() {
+                return lease.clone();
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        panic!("no watcher took a lease");
+    }
+
+    /// Holds an Auto-fix event for the watcher of `lease`, as the prompt
+    /// hook does.
+    fn hold(lease: &Path) {
+        let line = json!({ "at": 1_700_000_000, "prs": ["jdx/demo#7"], "kinds": ["ci-failure"], "checks": ["unit"] });
+        std::fs::write(lease.with_extension("held"), format!("{line}\n")).unwrap();
+    }
+
+    /// What the ledger's entries of `event` recorded, in order.
+    fn recorded(dir: &Path, event: &str) -> Vec<Value> {
+        std::fs::read_to_string(dir.join("state/jouet/ledger/ledger.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .map(|l| serde_json::from_str::<Value>(l).unwrap())
+            .filter(|e| e["event"] == event)
+            .map(|e| e["settle"].clone())
+            .collect()
+    }
+
+    fn results(dir: &Path, event: &str) -> Vec<String> {
+        recorded(dir, event)
+            .iter()
+            .map(|s| s["result"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    const FAST: [&str; 4] = ["--interval", "100ms", "--quiet-for", "2s"];
+
+    #[test]
+    fn a_push_starts_a_watcher_that_wakes_the_agent_with_the_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        checkout(dir);
+        let claude = Claude::interactive();
+        let mut world = World::default();
+        world.checks.insert(
+            SHA_A,
+            vec![check(101, "unit", "completed", Some("failure"))],
+        );
+        let fake = serve(world);
+        let push = payload(dir, "t1", "git push -u origin feat");
+        let child = start(&fake, dir, &claude, &push, &FAST);
+        let lease = lease(dir);
+        // An Auto-fix event about the PR arrives while the watcher waits.
+        hold(&lease);
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+        assert_eq!(stdout(&out), "");
+        let digest = stderr(&out);
+        assert!(digest.contains("unit"), "{digest}");
+        assert!(digest.contains("cargo nextest"), "{digest}");
+        assert!(
+            digest.contains("held for this wait (jouet kept these Auto-fix events"),
+            "{digest}"
+        );
+        assert!(
+            digest.contains("next: jouet watches this PR again after your next push"),
+            "{digest}"
+        );
+        assert!(leases(dir).is_empty() && !lease.with_extension("held").exists());
+        assert_eq!(results(dir, "watch"), ["started"]);
+        let [settle] = recorded(dir, "settle").try_into().unwrap();
+        assert_eq!(
+            (&settle["result"], &settle["held"], &settle["woke"]),
+            (&json!("needs_agent"), &json!(1), &json!(true)),
+            "{settle}"
+        );
+    }
+
+    #[test]
+    fn anything_but_a_push_that_worked_in_the_settle_arm_exits_0_and_says_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        checkout(dir);
+        let claude = Claude::interactive();
+        let fake = serve(World::default());
+        let quiet = |out: &Output, what: &str| {
+            assert_eq!(out.status.code(), Some(0), "{what}: {}", stderr(out));
+            assert_eq!(
+                (stdout(out), stderr(out)),
+                (String::new(), String::new()),
+                "{what}"
+            );
+            assert!(leases(dir).is_empty(), "{what}");
+        };
+        // Calls that are no push, or one that did not work or is not over.
+        let mut failed = payload(dir, "t2", "git push");
+        failed["hook_event_name"] = json!("PostToolUseFailure");
+        let mut background = payload(dir, "t3", "git push");
+        background["tool_input"]["run_in_background"] = json!(true);
+        let mut no_session = payload(dir, "t4", "git push");
+        no_session.as_object_mut().unwrap().remove("session_id");
+        for (what, payload) in [
+            ("not a push", payload(dir, "t1", "git status")),
+            ("a failed push", failed),
+            ("a background push", background),
+            ("no session", no_session),
+        ] {
+            quiet(&run(&fake, dir, &claude, &payload, &FAST), what);
+        }
+        let push = |id: &str| payload(dir, id, "gh pr create --fill");
+        // A harness that cannot be woken, and a flag that does not parse.
+        let mut codex = command(&fake, dir, &["watch", "codex"]);
+        codex.stdin(Stdio::piped());
+        let mut child = codex.spawn().unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(push("t5").to_string().as_bytes()).unwrap();
+        drop(stdin);
+        quiet(&child.wait_with_output().unwrap(), "codex");
+        let out = run(&fake, dir, &claude, &push("t6"), &["--quiet-for", "soon"]);
+        quiet(&out, "a bad flag");
+        // Outside the settle arm, which is where every session is by default.
+        let mut off = command(&fake, dir, &["watch", "claude"]);
+        off.env("PATH", dir.join("bin"))
+            .env("XDG_CONFIG_HOME", dir.join("config"))
+            .env("AI_AGENT", "claude-code_2-1-318_harness")
+            .env("CLAUDE_PID", claude.pid())
+            .env_remove("JOUET_EXPERIMENT_SETTLE_SHARE")
+            .stdin(Stdio::piped());
+        let mut child = off.spawn().unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(push("t7").to_string().as_bytes()).unwrap();
+        drop(stdin);
+        quiet(&child.wait_with_output().unwrap(), "outside the arm");
+        assert_eq!(fake.total(), 0, "none of these asked GitHub anything");
+        assert_eq!(results(dir, "watch"), [""; 0]);
+
+        // A push in the arm that gets no watcher says why in the ledger. A
+        // one-shot run would hold the hook in the foreground.
+        let one_shot = Claude::one_shot();
+        quiet(&run(&fake, dir, &one_shot, &push("t8"), &FAST), "one-shot");
+        // The same call's second hook entry does nothing at all.
+        quiet(&run(&fake, dir, &one_shot, &push("t8"), &FAST), "again");
+        fake.set(|w| w.no_pr = true);
+        quiet(&run(&fake, dir, &claude, &push("t9"), &FAST), "no PR");
+        assert_eq!(results(dir, "watch"), ["foreground", "no-pr"]);
+    }
+
+    #[test]
+    fn a_pr_has_one_watcher_and_one_told_to_stop_gives_its_lease_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        checkout(dir);
+        let claude = Claude::interactive();
+        let mut world = World::default();
+        world
+            .checks
+            .insert(SHA_A, vec![check(101, "unit", "in_progress", None)]);
+        let fake = serve(world);
+        let stop = |child: &Child| {
+            // SAFETY: a signal to a child this test started and still owns.
+            let sent = unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+            assert_eq!(sent, 0);
+        };
+        let first = start(&fake, dir, &claude, &payload(dir, "t1", "git push"), &FAST);
+        let lease_path = lease(dir);
+        // A second push while the first's watcher is there.
+        let out = run(&fake, dir, &claude, &payload(dir, "t2", "git push"), &FAST);
+        assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+        assert_eq!(stderr(&out), "");
+        assert_eq!(results(dir, "watch"), ["started", "watching"]);
+        assert_eq!(leases(dir), std::slice::from_ref(&lease_path));
+        // The session closes: Claude Code stops its hooks with SIGTERM.
+        stop(&first);
+        let out = first.wait_with_output().unwrap();
+        assert_eq!(out.status.code(), None, "it dies of the signal");
+        assert_eq!(stderr(&out), "");
+        assert!(leases(dir).is_empty());
+        assert_eq!(results(dir, "settle"), ["stopped"]);
+
+        // One stopped with an event held leaves it for the next hook to
+        // report (`lease-lost`).
+        let third = start(&fake, dir, &claude, &payload(dir, "t3", "git push"), &FAST);
+        let lease_path = lease(dir);
+        hold(&lease_path);
+        stop(&third);
+        third.wait_with_output().unwrap();
+        assert!(lease_path.exists() && lease_path.with_extension("held").exists());
+    }
+
+    #[test]
+    fn a_watcher_at_its_time_limit_wakes_the_agent_only_with_what_it_held() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        checkout(dir);
+        let claude = Claude::interactive();
+        let mut world = World::default();
+        world
+            .checks
+            .insert(SHA_A, vec![check(101, "unit", "in_progress", None)]);
+        let fake = serve(world);
+        let limit = ["--interval", "100ms", "--timeout", "2s"];
+        let out = run(&fake, dir, &claude, &payload(dir, "t1", "git push"), &limit);
+        assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+        assert_eq!(stderr(&out), "");
+        assert!(leases(dir).is_empty());
+
+        let child = start(&fake, dir, &claude, &payload(dir, "t2", "git push"), &limit);
+        let lease_path = lease(dir);
+        hold(&lease_path);
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+        let digest = stderr(&out);
+        assert!(digest.contains("held for this wait"), "{digest}");
+        assert!(digest.contains("ci-failure on jdx/demo#7"), "{digest}");
+        assert!(leases(dir).is_empty() && !lease_path.with_extension("held").exists());
+        let settles = recorded(dir, "settle");
+        assert_eq!(results(dir, "settle"), ["timeout", "timeout"]);
+        assert_eq!(
+            (
+                &settles[0]["woke"],
+                &settles[1]["woke"],
+                &settles[1]["held"]
+            ),
+            (&Value::Null, &json!(true), &json!(1))
+        );
+    }
+
+    #[test]
+    fn a_watcher_that_cannot_reach_github_exits_0() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        checkout(dir);
+        let claude = Claude::interactive();
+        let fake = serve(World::default());
+        fake.set(|w| w.rate_limit_for = Some(3600));
+        let out = run(&fake, dir, &claude, &payload(dir, "t1", "git push"), &FAST);
+        assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+        assert_eq!((stdout(&out), stderr(&out)), (String::new(), String::new()));
+        assert!(leases(dir).is_empty());
+        assert_eq!(results(dir, "watch"), ["error"]);
+    }
 }

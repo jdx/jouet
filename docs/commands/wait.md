@@ -164,7 +164,39 @@ In the settle arm of [`jouet stats`](/commands/stats#experiment-arms), off by de
     2026-11-15T10:09:40Z review-comment on jdx/jouet#12: its comments were left out as bot noise
 ```
 
-A PR that closes with held events wakes the agent. A PR that closes with nothing held records `parked` and stays quiet until the session ends or the timeout. Anything that keeps the wait from writing its lease leaves a plain wait, and an event jouet cannot match to one live lease starts a turn as before. When a watcher ends without its digest, the session's next hook says what was held for it and how to start the wait again. In the settle arm, a push with no watcher running gets a note to start one.
+A PR that closes with held events wakes the agent. A PR that closes with nothing held records `parked` and stays quiet until the session ends or the timeout. Anything that keeps the wait from writing its lease leaves a plain wait, and an event jouet cannot match to one live lease starts a turn as before. When a watcher ends without its digest, the session's next hook says what was held for it and how to start the wait again.
+
+#### The watcher jouet starts after a push {#push-watcher}
+
+In the settle arm, on Claude Code, the agent does not start the wait: jouet does. `jouet setup claude` installs a second `PostToolUse` entry that runs `jouet watch claude` in the background (Claude Code's `asyncRewake` hook option). For every session outside the arm it exits at once. In the arm, after a foreground `git push`, `gh pr create` or `stack submit` that exited 0, it:
+
+1. finds the PR of the branch checked out where the command ran, and does nothing more when there is none, or when a live watcher of the session already has that PR;
+2. takes the lease and waits as `jouet wait pr --until needs-agent` does, for up to `24h`, counting comments as new from the push on;
+3. exits `2` with the digest on stderr when the PR needs the agent, or when it ends for any other reason (settled with nothing to do, closed, the time limit) with events held. Claude Code then starts one turn with the digest, whether the session was idle or working.
+
+What the agent is woken with, here from jouet's own tests (a fake GitHub, so the times are short); the first line is the entry's `rewakeMessage`:
+
+```text
+jouet watched the PR you pushed to and reports: NEEDS_AGENT jdx/demo#7 @ aaaaaaa: 1 failed check (2s)
+
+FAIL unit  step "cargo nextest"
+  https://github.com/jdx/demo/actions/runs/900/job/101
+  Run cargo nextest run
+  thread 'trust_root' panicked at src/config.rs:812:9:
+  assertion `left == right` failed
+  error: test run failed, 1 of 2210 tests failed
+  ##[error]Process completed with exit code 100.
+  full log: /home/you/.local/state/jouet/logs/jdx-demo-job-101.log
+  held for this wait (jouet kept these Auto-fix events from starting a turn):
+    2023-11-14T22:13:20Z ci-failure on jdx/demo#7: unit: shown above
+  next: jouet watches this PR again after your next push
+```
+
+A watcher that ends with nothing held and nothing for the agent says nothing. One that fails (no token, GitHub unreachable, a lease it cannot write) exits `0` and gives its lease back, so no event is held with nothing left to report it. When the session closes, Claude Code stops the watcher with SIGTERM: it removes its lease, or leaves it when events are held, for the next hook of the session to report.
+
+What it does not cover: a push to another directory's repository (`git -C dir push`), a push of a branch other than the one checked out, every PR but the current branch's after a `stack submit`, a push run with `run_in_background`, and a one-shot run (`claude -p PROMPT`), where Claude Code runs the hook in the foreground and the wait would hold the run. It needs Claude Code 2.1.318 or later, the oldest version it was tried with, and reads the Claude Code process's command line to tell a one-shot run, which it cannot do on Windows. Each of these leaves the push with no watcher, and Auto-fix events about the PR start turns as before.
+
+`jouet watch` is not a command to run by hand; it reads the hook's JSON on stdin, and is the one hook entry of jouet's that exits `2`.
 
 ## Local conditions {#local-subjects}
 

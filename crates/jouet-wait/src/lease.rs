@@ -134,6 +134,26 @@ impl Lease {
         out
     }
 
+    /// Writes the lease under `dir`, unless a live lease of its session
+    /// already covers its PR: `None` then. Looking and writing are one step
+    /// under a lock, so of two watchers started at once for one PR (two
+    /// hooks that ran for the same push), exactly one gets the lease.
+    pub fn claim(&self, dir: &Path, now: i64) -> std::io::Result<Option<PathBuf>> {
+        let path = Self::path(dir, &self.session, self.pid)
+            .ok_or_else(|| std::io::Error::other("the session ID names no file"))?;
+        std::fs::create_dir_all(dir)?;
+        let lock = std::fs::File::create(dir.join("claim.lock"))?;
+        lock.lock()?;
+        let covered = Self::of_session(dir, &self.session)
+            .iter()
+            .any(|(_, l)| l.pid != self.pid && l.live(now) && l.covers(&self.repo, self.pr));
+        if covered {
+            return Ok(None);
+        }
+        self.write(&path)?;
+        Ok(Some(path))
+    }
+
     /// Whether its watcher is still there: the process runs and the
     /// heartbeat is fresh.
     pub fn live(&self, now: i64) -> bool {
@@ -204,6 +224,35 @@ mod tests {
         assert!(!l.covers("jdx/jouet", 13));
         assert!(!l.covers("jdx/other", 12));
         assert!(!Lease { pr: 0, ..l }.covers("jdx/jouet", 0));
+    }
+
+    #[test]
+    fn only_one_watcher_of_a_session_claims_a_pr() {
+        let dir = tempfile::tempdir().unwrap();
+        let me = std::process::id();
+        // A live watcher: this process.
+        let first = lease("s", me, 1_000);
+        let path = first.claim(dir.path(), 1_000).unwrap().unwrap();
+        assert_eq!(Lease::read(&path), Some(first.clone()));
+        // Claiming again is the same watcher, not a second one.
+        assert!(first.claim(dir.path(), 1_000).unwrap().is_some());
+        let second = lease("s", me + 1, 1_000);
+        assert_eq!(second.claim(dir.path(), 1_000).unwrap(), None);
+        assert_eq!(Lease::of_session(dir.path(), "s").len(), 1);
+        // Another PR, another session, or once the first has gone stale.
+        let other_pr = Lease {
+            pr: 13,
+            ..second.clone()
+        };
+        assert!(other_pr.claim(dir.path(), 1_000).unwrap().is_some());
+        assert!(
+            lease("t", me + 1, 1_000)
+                .claim(dir.path(), 1_000)
+                .unwrap()
+                .is_some()
+        );
+        assert!(second.claim(dir.path(), 1_000 + STALE).unwrap().is_some());
+        assert!(lease("../", 1, 0).claim(dir.path(), 0).is_err());
     }
 
     #[test]

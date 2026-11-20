@@ -864,17 +864,29 @@ fn settle_arms_text(s: &mut String, arms: &[stats::SettleArm]) {
     }
     let _ = writeln!(
         s,
-        "\nsettle arm (new: jouet holds Auto-fix events for the session's `jouet wait pr` watcher):"
+        "\nsettle arm (new: jouet starts a PR watcher after a push and holds Auto-fix events for it):"
     );
+    let counts = |by: &std::collections::BTreeMap<String, u64>| {
+        let each: Vec<String> = by.iter().map(|(what, n)| format!("{n} {what}")).collect();
+        each.join(", ")
+    };
     for a in arms {
         let _ = write!(
             s,
-            "  {}: {} sessions, {} covered by a watcher, {} held",
-            a.arm, a.sessions, a.covered, a.held
+            "  {}: {} sessions, {} pushes",
+            a.arm, a.sessions, a.pushes
         );
+        if !a.watchers.is_empty() {
+            let _ = write!(s, " (watchers: {})", counts(&a.watchers));
+        }
+        let _ = write!(s, ", {} covered by a watcher, {} held", a.covered, a.held);
         if !a.settles.is_empty() {
-            let results: Vec<String> = a.settles.iter().map(|(r, n)| format!("{n} {r}")).collect();
-            let _ = write!(s, "; watchers ended: {}", results.join(", "));
+            let _ = write!(
+                s,
+                "; watchers ended: {}; {} wakes",
+                counts(&a.settles),
+                a.wakes
+            );
         }
         if a.held > 0 {
             let _ = write!(
@@ -1192,9 +1204,12 @@ mod tests {
                 stats::SettleArm {
                     arm: "new".into(),
                     sessions: 2,
+                    pushes: 6,
+                    watchers: [("started".to_string(), 4), ("watching".to_string(), 2)].into(),
+                    wakes: 2,
                     covered: 5,
                     held: 4,
-                    settles: [("needs_agent".to_string(), 2)].into(),
+                    settles: [("needs_agent".to_string(), 2), ("timeout".to_string(), 1)].into(),
                     accounted: 3,
                     silent_drops: 0,
                     lease_lost: 1,
@@ -1213,8 +1228,8 @@ mod tests {
         assert_eq!(
             s.lines().skip(2).collect::<Vec<_>>(),
             [
-                "  new: 2 sessions, 5 covered by a watcher, 4 held; watchers ended: 2 needs_agent; 3 accounted for, 0 silent drops, 1 lease-lost (1 held), 0 orphaned holds; median 10m from the first hold to the wake",
-                "  off: 3 sessions, 7 covered by a watcher, 0 held",
+                "  new: 2 sessions, 6 pushes (watchers: 4 started, 2 watching), 5 covered by a watcher, 4 held; watchers ended: 2 needs_agent, 1 timeout; 2 wakes; 3 accounted for, 0 silent drops, 1 lease-lost (1 held), 0 orphaned holds; median 10m from the first hold to the wake",
+                "  off: 3 sessions, 0 pushes, 7 covered by a watcher, 0 held",
             ]
         );
     }

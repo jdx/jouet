@@ -1,12 +1,13 @@
-//! The hooks' side of a `jouet wait pr --until needs-agent` watcher's lease
-//! (see `jouet_wait::lease`).
+//! The hooks' side of a PR watcher's lease (see `jouet_wait::lease`).
 //!
-//! In the `settle` arm (`crate::experiment`), an Auto-fix event about the PR
-//! one live watcher of the session covers is held for that watcher's digest
-//! instead of starting a turn. Every session records, as `would_drop =
-//! "covered"`, the events it would hold. A watcher that ends without its
-//! digest leaves its lease behind; the next hook of its session reports the
-//! events held for it, records a `lease-lost` entry, and removes it.
+//! In the `settle` arm (`crate::experiment`), jouet starts a watcher itself
+//! after a push (`jouet watch`, see `crate::cmd::watch`), and an Auto-fix
+//! event about the PR one live watcher of the session covers is held for
+//! that watcher's digest instead of starting a turn. Every session records,
+//! as `would_drop = "covered"`, the events it would hold. A watcher that
+//! ends without its digest leaves its lease behind; the next hook of its
+//! session reports the events held for it, records a `lease-lost` entry,
+//! and removes it.
 
 use crate::prompt::{Coverable, Shape};
 use jouet_wait::lease::{self, Held, Lease};
@@ -14,11 +15,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 /// Why a covered event did not start a turn.
-pub(crate) const HOLD_REASON: &str = "jouet held this Auto-fix event for the `jouet wait pr --until needs-agent` watcher running in this session, which reports it in its digest when the PR settles; set `[experiment] settle_share = 0` in jouet's config to stop.";
-
-/// What tells an agent that pushed with nothing watching its PR to start a
-/// watcher.
-pub(crate) const PUSH_NOTE: &str = "jouet: nothing in this session watches the PR yet. Start `jouet wait pr --until needs-agent` as a background Bash command (run in the background, its output not piped), then end the turn: it wakes you once the PR settles, with the Auto-fix events jouet held for it.";
+pub(crate) const HOLD_REASON: &str = "jouet held this Auto-fix event for the PR watcher running in this session (the one jouet started after a push, or a `jouet wait pr --until needs-agent`), which reports it in its digest when the PR settles; set `[experiment] settle_share = 0` in jouet's config to stop.";
 
 fn now() -> i64 {
     jouet_output::time::now()
@@ -85,7 +82,9 @@ fn lost_in(dir: &Path, session: &str, now: i64) -> Vec<Lost> {
         .collect()
 }
 
-fn lost_note(lease: &Lease, held: &[Held]) -> Option<String> {
+/// What to tell the agent about the events held for a watcher that ended
+/// without its digest; nothing when none were.
+pub(crate) fn lost_note(lease: &Lease, held: &[Held]) -> Option<String> {
     let first = held.iter().map(|h| h.at).min()?;
     // The watcher's own --since, so a restart sees the comments it did:
     // they were posted before their events were held.
@@ -122,21 +121,30 @@ fn lost_note(lease: &Lease, held: &[Held]) -> Option<String> {
     Some(note)
 }
 
-/// Whether a session has a live watcher.
-pub(crate) fn watching(session: &str) -> bool {
-    let now = now();
-    lease::dir().is_some_and(|dir| {
-        Lease::of_session(&dir, session)
-            .iter()
-            .any(|(_, l)| l.live(now))
-    })
-}
+/// The word pairs of a command that pushes a branch or opens a PR.
+pub(crate) const PUSH_WORDS: [[&str; 2]; 3] =
+    [["git", "push"], ["pr", "create"], ["stack", "submit"]];
 
 /// Whether a shell command pushes a branch or opens a PR.
 pub(crate) fn pushes(command: &str) -> bool {
     let words: Vec<&str> = command.split_whitespace().collect();
-    let has = |pair: [&str; 2]| words.windows(2).any(|w| w == pair);
-    has(["git", "push"]) || has(["pr", "create"]) || has(["stack", "submit"])
+    PUSH_WORDS
+        .iter()
+        .any(|pair| words.windows(2).any(|w| w == pair))
+}
+
+/// Whether a hook's payload reports a push that worked: a foreground Bash
+/// call that exited 0 and pushed a branch or opened a PR.
+pub(crate) fn pushed(payload: &serde_json::Value, call: &jouet_rules::Call) -> bool {
+    let background = payload
+        .pointer("/tool_input/run_in_background")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
+    matches!(call.event, Some(jouet_rules::Event::PostToolUse))
+        && call.tool == "Bash"
+        && call.exit_code == Some(0)
+        && !background
+        && call.command.as_deref().is_some_and(pushes)
 }
 
 #[cfg(test)]
