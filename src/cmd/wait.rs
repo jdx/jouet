@@ -304,26 +304,15 @@ fn settle_watch(
         options.lease.clone_from(&path);
         options.settled_interval = Some(SETTLED_INTERVAL);
     }
-    let mut beat = path.clone().map(|path| Heartbeat::start(path, lease));
-    let (w, mut reporter, waited) = loop {
-        let round = Timing {
-            timeout: timing.timeout.saturating_sub(started.elapsed()),
-            interval: timing.interval,
-        };
-        let mut w = SettleWait::new(Target::Number(repo.clone(), number), options.clone());
-        let mut reporter = reporter(w.label());
-        let waited = remote::wait(&mut w, &mut remote, &round, &mut reporter);
-        let Some(path) = &path else {
-            break (w, reporter, waited);
-        };
-        // A push that came as this wait was ending found the PR watched,
-        // so jouet started no watcher for it: its commit is waited on here.
-        let head = waited.as_ref().ok().map(settle::Doc::head_sha);
-        let stop = || beat.take().into_iter().for_each(Heartbeat::stop);
-        if Lease::retire(path, head, stop) {
-            break (w, reporter, waited);
-        }
-    };
+    let (w, mut reporter, waited) = settle_rounds(
+        &mut remote,
+        &repo,
+        number,
+        &options,
+        timing,
+        path.as_deref().map(|path| (path, lease)),
+        reporter,
+    );
     let (exit, doc) = remote::report(&w, waited, &mut reporter);
     let Some(path) = path else {
         return exit;
@@ -355,6 +344,42 @@ fn settle_watch(
         }
     }
     exit
+}
+
+/// Waits for the PR to settle, in rounds under `timing`'s one time limit,
+/// and returns the last round, not yet reported. With a lease, its heartbeat
+/// runs until the last round ends, and a round that ends on a commit older
+/// than one a push left this watcher is followed by another: that push
+/// found the PR watched, so jouet started no watcher for it.
+fn settle_rounds(
+    remote: &mut Remote,
+    repo: &Repo,
+    number: u64,
+    options: &settle::Options,
+    timing: &Timing,
+    lease: Option<(&Path, Lease)>,
+    reporter: impl Fn(String) -> Reporter,
+) -> (SettleWait, Reporter, Result<settle::Doc, Stop>) {
+    let started = Instant::now();
+    let path = lease.as_ref().map(|(path, _)| *path);
+    let mut beat = lease.map(|(path, lease)| Heartbeat::start(path.to_path_buf(), lease));
+    loop {
+        let round = Timing {
+            timeout: timing.timeout.saturating_sub(started.elapsed()),
+            interval: timing.interval,
+        };
+        let mut w = SettleWait::new(Target::Number(repo.clone(), number), options.clone());
+        let mut reporter = reporter(w.label());
+        let waited = remote::wait(&mut w, remote, &round, &mut reporter);
+        let Some(path) = path else {
+            return (w, reporter, waited);
+        };
+        let head = waited.as_ref().ok().map(settle::Doc::head_sha);
+        let stop = || beat.take().into_iter().for_each(Heartbeat::stop);
+        if Lease::retire(path, head, stop) {
+            return (w, reporter, waited);
+        }
+    }
 }
 
 /// Gives a watcher's lease back and returns the events held for it. No hook
@@ -440,37 +465,32 @@ impl PushWatch {
     /// the events held for it.
     pub(crate) fn run(mut self, tuning: &Tuning) -> Option<String> {
         let number = self.lease.pr;
-        let timeout = tuning.timeout.unwrap_or(LEASE_TIMEOUT);
-        let started = Instant::now();
-        let mut beat = Some(Heartbeat::start(self.path.clone(), self.lease.clone()));
-        let (w, reporter, doc) = loop {
-            let options = settle::Options {
-                quiet: tuning.quiet.unwrap_or(DEFAULT_QUIET),
-                quiet_short: tuning.quiet.is_none().then_some(SHORT_QUIET),
-                acks: Acks::Loose,
-                since: self.lease.since,
-                log_lines: Some(DEFAULT_LOG_LINES),
-                confirm_conflict: jouet_wait::CONFLICT_CONFIRM,
-                lease: Some(self.path.clone()),
-                settled_interval: Some(SETTLED_INTERVAL),
-                restarts: true,
-            };
-            let timing = Timing {
-                timeout: timeout.saturating_sub(started.elapsed()),
-                interval: tuning.interval.unwrap_or(DEFAULT_INTERVAL),
-            };
-            let mut w = SettleWait::new(Target::Number(self.repo.clone(), number), options);
-            // Quiet: what this process prints is what the agent is woken with.
-            let mut reporter = Reporter::new(Mode::Agent, false, false, true, w.label());
-            let doc = remote::wait(&mut w, &mut self.remote, &timing, &mut reporter).ok();
-            // A push that came as this wait was ending found the PR watched
-            // and started no watcher, so its commit is waited on here.
-            let head = doc.as_ref().map(settle::Doc::head_sha);
-            let stop = || beat.take().into_iter().for_each(Heartbeat::stop);
-            if Lease::retire(&self.path, head, stop) {
-                break (w, reporter, doc);
-            }
+        let options = settle::Options {
+            quiet: tuning.quiet.unwrap_or(DEFAULT_QUIET),
+            quiet_short: tuning.quiet.is_none().then_some(SHORT_QUIET),
+            acks: Acks::Loose,
+            since: self.lease.since,
+            log_lines: Some(DEFAULT_LOG_LINES),
+            confirm_conflict: jouet_wait::CONFLICT_CONFIRM,
+            lease: Some(self.path.clone()),
+            settled_interval: Some(SETTLED_INTERVAL),
+            restarts: true,
         };
+        let timing = Timing {
+            timeout: tuning.timeout.unwrap_or(LEASE_TIMEOUT),
+            interval: tuning.interval.unwrap_or(DEFAULT_INTERVAL),
+        };
+        let (w, reporter, waited) = settle_rounds(
+            &mut self.remote,
+            &self.repo,
+            number,
+            &options,
+            &timing,
+            Some((&self.path, self.lease.clone())),
+            // Quiet: what this process prints is what the agent is woken with.
+            |label| Reporter::new(Mode::Agent, false, false, true, label),
+        );
+        let doc = waited.ok();
         let held = give_back(&self.path);
         let reported = doc.as_ref().map_or(&[][..], |d| &d.held[..]);
         let result = doc.as_ref().map_or("error", settle::Doc::result);
