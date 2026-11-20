@@ -31,8 +31,13 @@ pub struct Forgejo {
 
 impl Forgejo {
     pub fn new(host: &str) -> Self {
+        Self::with_rest(Rest::new(Forge::Forgejo, host))
+    }
+
+    /// A Forgejo reached through `rest`, such as a test's fake server.
+    pub fn with_rest(rest: Rest) -> Self {
         Self {
-            rest: Rest::new(Forge::Forgejo, host),
+            rest,
             viewer: None,
             version: None,
         }

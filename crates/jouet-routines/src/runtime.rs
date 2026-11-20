@@ -142,9 +142,10 @@ impl Ctx {
         RefMut::map(self.client.borrow_mut(), |client| {
             client.get_or_insert_with(|| match &self.world.borrow().github {
                 crate::world::Github::Env => Client::from_env(),
-                crate::world::Github::Fake { url, token } => {
-                    Client::from_env().with_api_url(url).with_token(token)
-                }
+                crate::world::Github::Fake { url, token } => Client::from_env()
+                    .with_api_url(url)
+                    .with_token(token)
+                    .with_forges_at(url),
             })
         })
     }

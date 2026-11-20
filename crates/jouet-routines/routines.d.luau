@@ -44,6 +44,8 @@ declare github: {
 		repo: { string }?,
 		settle: number?,
 	}?) -> { prs: { Json }, not_found: { string }?, incomplete: { Json }?, entire: Json? },
+	-- A PR's review threads on any forge: a PR from `prs`, OWNER/REPO#N or a URL.
+	threads: (pr: Json) -> { repo: string, number: number, threads: { Json } },
 	-- github.write
 	mutate: (query: string, variables: { [string]: Json }?) -> Json,
 	request: (method: string, path: string, body: Json?) -> { status: number, body: Json },

@@ -9,14 +9,16 @@
 //! - `github.request(method, path, body)`: a REST write.
 //! - `github.prs{...}`: the PRs `pr status` and `pr next` select, with their
 //!   status and attention codes.
+//! - `github.threads(pr)`: a PR's review threads, read from whichever forge
+//!   it is on, as `pr threads` reads them.
 
 use super::{field, primitive, strings};
 use crate::Fail;
 use crate::capability::Capability::{GithubRead, GithubWrite};
 use crate::runtime::{Ctx, from_lua, to_lua};
 use jouet_github::pr::select::{self, Checkout, Selection};
-use jouet_github::pr::target::Repo;
-use jouet_github::{Failure, Method, Rest, next_page};
+use jouet_github::pr::target::{Arg, Repo, Target};
+use jouet_github::{Failure, Method, Rest, host, next_page};
 use jouet_output::exit::Exit;
 use mlua::{Lua, Table, Value};
 use serde_json::json;
@@ -32,6 +34,33 @@ fn remote(message: impl Into<String>) -> mlua::Error {
 
 fn failure(f: Failure) -> mlua::Error {
     remote(f.message())
+}
+
+/// The PR `github.threads` is given: a PR from `github.prs` (its `repo`,
+/// `host` and `number`), or `REPO#N` or a PR's URL.
+fn threads_target(pr: &Value) -> mlua::Result<Target> {
+    let usage = || {
+        mlua::Error::runtime(
+            "github.threads: give it a PR from github.prs, `OWNER/REPO#N` or a PR's URL",
+        )
+    };
+    match pr {
+        Value::Table(t) => {
+            let repo: String = t.get::<Option<String>>("repo")?.ok_or_else(usage)?;
+            let number: u64 = t.get::<Option<u64>>("number")?.ok_or_else(usage)?;
+            let repo = match t.get::<Option<String>>("host")? {
+                Some(host) => Repo::on(&host, &repo),
+                None => Repo::parse(&repo),
+            }
+            .ok_or_else(usage)?;
+            Ok(Target::Number(repo, number))
+        }
+        Value::String(s) => match Arg::parse(&s.to_str()?) {
+            Arg::InRepo(repo, n) => Ok(Target::Number(repo, n)),
+            _ => Err(usage()),
+        },
+        _ => Err(usage()),
+    }
 }
 
 /// A REST response as a table: `status`, `etag`, `next` (the next page's
@@ -267,6 +296,32 @@ pub(super) fn install(lua: &Lua, globals: &Table, ctx: &Rc<Ctx>) -> mlua::Result
                     select::lookups(&selection).map_err(|(exit, e)| Fail::new(exit, e).raise())?;
                 let report = select::fetch(&mut ctx.client(), lookups, settle).map_err(remote)?;
                 let value = serde_json::to_value(&report).map_err(mlua::Error::runtime)?;
+                to_lua(lua, &value)
+            },
+        )?,
+    )?;
+    github.set(
+        "threads",
+        primitive(
+            lua,
+            ctx,
+            Some(GithubRead),
+            "github.threads",
+            |lua, ctx, pr: Value| {
+                let target = threads_target(&pr)?;
+                let repo = target.repo().clone();
+                let found = host::with(&repo, &mut ctx.client(), |host| {
+                    host.threads(&target, false, &[])
+                })
+                .map_err(remote)?;
+                let Some(found) = found else {
+                    return Err(Fail::new(Exit::NotFound, format!("no PR {target}")).raise());
+                };
+                let value = json!({
+                    "repo": found.repo.to_string(),
+                    "number": found.number,
+                    "threads": found.threads(),
+                });
                 to_lua(lua, &value)
             },
         )?,

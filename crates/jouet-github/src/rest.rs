@@ -94,6 +94,15 @@ impl Rest {
         &self.host
     }
 
+    /// The same client, sending to `url` without a token: a test's fake
+    /// server standing in for the host. No real token is ever sent there.
+    pub fn with_fake_api(mut self, url: &str) -> Self {
+        self.api_url = url.trim_end_matches('/').to_string();
+        self.sources = Vec::new();
+        self.token = None;
+        self
+    }
+
     /// The web server's root: the API root without its `/api/v4` or
     /// `/api/v1`, else `https://HOST`.
     pub fn web_root(&self) -> String {

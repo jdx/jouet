@@ -2,7 +2,8 @@
 //!
 //! - `github`: GraphQL and REST through jouet-github's client (auth,
 //!   retries, ETags, rate limits), pagination, and `github.prs`, the PR
-//!   selection and status `pr status` and `pr next` use.
+//!   selection and status `pr status` and `pr next` use, and
+//!   `github.threads`, the review threads `pr threads` reads, on any forge.
 //! - `git`: the work tree's state, diffs, history and refs. Read-only.
 //! - `wait`: `jouet wait`'s engine, for CI, PRs, runs, files, logs, ports
 //!   and URLs.

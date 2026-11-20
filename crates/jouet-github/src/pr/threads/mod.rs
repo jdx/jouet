@@ -84,6 +84,11 @@ impl PrThreads {
     pub fn viewer(&self) -> &str {
         &self.viewer
     }
+
+    /// Every review thread, resolved or not, in the order the forge lists them.
+    pub fn threads(&self) -> &[Thread] {
+        &self.threads
+    }
 }
 
 /// Which side of the diff a thread's lines are on.
