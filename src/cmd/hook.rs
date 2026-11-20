@@ -1196,7 +1196,7 @@ struct Ran {
 
 /// Whether the call asked to run in the background (Claude Code's
 /// `run_in_background`, Gemini's renamed to it).
-fn in_background(payload: &Value) -> bool {
+pub(crate) fn in_background(payload: &Value) -> bool {
     payload
         .get("tool_input")
         .and_then(|i| i.get("run_in_background"))

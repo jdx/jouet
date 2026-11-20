@@ -19,8 +19,8 @@ use std::collections::BTreeMap;
 #[serde(default)]
 pub struct LedgerSettle {
     /// `needs_agent`, `closed`, `timeout`, `parked`, `error`, `stopped` or
-    /// `lease-lost`. For a `watch`: `started`, `watching`, `no-pr`,
-    /// `foreground` or `error`.
+    /// `lease-lost`. For a `watch`: `started`, `watching`, `no-pr` (nothing
+    /// to watch), `foreground` or `error`.
     pub result: String,
     pub held: u64,
     pub accounted: u64,

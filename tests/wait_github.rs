@@ -1716,6 +1716,42 @@ mod watch {
     }
 
     #[test]
+    fn a_push_that_finds_the_pr_watched_leaves_its_commit_for_that_watcher() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        checkout(dir);
+        let claude = Claude::interactive();
+        let mut world = World::default();
+        world
+            .checks
+            .insert(SHA_A, vec![check(101, "unit", "in_progress", None)]);
+        let fake = serve(world);
+        let first = start(&fake, dir, &claude, &payload(dir, "t1", "git push"), &FAST);
+        let lease_path = lease(dir);
+        let pushed = lease_path.with_extension("pushed");
+        assert!(!pushed.exists());
+        let out = run(&fake, dir, &claude, &payload(dir, "t2", "git push"), &FAST);
+        assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+        assert_eq!(results(dir, "watch"), ["started", "watching"]);
+        // The checkout has no commit, so what was pushed is not the commit
+        // the first watcher's digest is about: it waits once more, then
+        // wakes the agent as it would have.
+        assert_eq!(std::fs::read_to_string(&pushed).unwrap(), "");
+        fake.set(|w| {
+            w.checks.insert(
+                SHA_A,
+                vec![check(101, "unit", "completed", Some("failure"))],
+            );
+        });
+        let out = first.wait_with_output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+        let digest = stderr(&out);
+        assert_eq!(digest.matches("NEEDS_AGENT").count(), 1, "{digest}");
+        assert!(leases(dir).is_empty() && !pushed.exists());
+        assert_eq!(results(dir, "settle"), ["needs_agent"]);
+    }
+
+    #[test]
     fn a_watcher_at_its_time_limit_wakes_the_agent_only_with_what_it_held() {
         let dir = tempfile::tempdir().unwrap();
         let dir = dir.path();

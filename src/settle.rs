@@ -47,7 +47,8 @@ pub(crate) fn hold(lease_path: &Path, event: &Coverable, shape: &Shape) -> bool 
         comment_ids: event.comments.clone(),
     };
     // The watcher removes its lease before it reads the held file a last
-    // time, so a lease still there means the watcher will see this one.
+    // time, so a lease still there means the watcher will see this one, or
+    // has left the lease for the next hook to report it.
     lease::hold(lease_path, &held).is_ok() && lease_path.exists()
 }
 
@@ -136,14 +137,10 @@ pub(crate) fn pushes(command: &str) -> bool {
 /// Whether a hook's payload reports a push that worked: a foreground Bash
 /// call that exited 0 and pushed a branch or opened a PR.
 pub(crate) fn pushed(payload: &serde_json::Value, call: &jouet_rules::Call) -> bool {
-    let background = payload
-        .pointer("/tool_input/run_in_background")
-        .and_then(serde_json::Value::as_bool)
-        == Some(true);
     matches!(call.event, Some(jouet_rules::Event::PostToolUse))
         && call.tool == "Bash"
         && call.exit_code == Some(0)
-        && !background
+        && !crate::cmd::hook::in_background(payload)
         && call.command.as_deref().is_some_and(pushes)
 }
 

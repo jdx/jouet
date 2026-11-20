@@ -140,8 +140,9 @@ pub(crate) struct Settle {
     /// or `stopped` (its session ended, or it was told to stop, before its
     /// digest; events held for it are left for a `lease-lost`). For a
     /// `lease-lost`: `lease-lost`. For a `watch`: `started`, `watching` (a
-    /// live watcher of the session has the PR), `no-pr` (the branch has
-    /// none), `foreground` (the harness would have run the watcher in the
+    /// live watcher of the session has the PR), `no-pr` (nothing to
+    /// watch: the branch has no PR, or no branch of a repository jouet can
+    /// read is checked out), `foreground` (the harness would have run the watcher in the
     /// foreground) or `error`.
     pub result: String,
     /// The events held for it.

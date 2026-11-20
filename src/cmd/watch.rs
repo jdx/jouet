@@ -45,6 +45,8 @@ pub(crate) fn run(args: &WatchArgs) -> ExitCode {
 
 /// What to wake the agent with, if anything.
 fn watch(args: &WatchArgs) -> Option<String> {
+    // The hook runs as the push returns: what is posted from here on is new.
+    let pushed_at = jouet_output::time::now();
     if args.harness.as_deref().and_then(Harness::parse) != Some(Harness::Claude) {
         return None;
     }
@@ -86,7 +88,7 @@ fn watch(args: &WatchArgs) -> Option<String> {
         settings.entire.enabled,
         std::time::Duration::from_millis(settings.entire.timeout_ms),
     );
-    match PushWatch::claim(session) {
+    match PushWatch::claim(session, pushed_at) {
         Ok(watcher) => {
             record(&settings, session, "started");
             watcher.run(&tuning)
@@ -124,7 +126,7 @@ fn record(settings: &Settings, session: &str, outcome: &str) {
 /// nothing in the hook's environment says which it is. So this reads the
 /// command line of the Claude Code process, which `CLAUDE_PID` names: a run
 /// that prints and takes no streamed input is one-shot. Anything it cannot
-/// read counts as the foreground.
+/// read, or cannot tell for sure, counts as the foreground.
 fn backgrounded() -> bool {
     let agent = jouet_git::agent::Agent::from_env();
     let recent = agent.id.as_deref() == Some("claude-code")
@@ -138,7 +140,7 @@ fn backgrounded() -> bool {
             .ok()
             .and_then(|pid| pid.trim().parse().ok())
             .and_then(command_line)
-            .is_some_and(|argv| !one_shot(&argv))
+            .is_some_and(|(argv, exact)| !one_shot(&argv, exact))
 }
 
 /// `2.1.318` as numbers.
@@ -148,15 +150,17 @@ fn version(text: &str) -> Option<[u64; 3]> {
     parts.next().is_none().then_some(version)
 }
 
-/// The arguments process `pid` was started with.
-fn command_line(pid: u32) -> Option<Vec<String>> {
+/// The arguments process `pid` was started with, and whether they are told
+/// apart exactly. Where there is no `/proc` (macOS), `ps` prints them joined
+/// by spaces, so a word of the prompt cannot be told from a flag.
+fn command_line(pid: u32) -> Option<(Vec<String>, bool)> {
     if let Ok(raw) = std::fs::read(format!("/proc/{pid}/cmdline")) {
         let argv: Vec<String> = raw
             .split(|b| *b == 0)
             .filter(|arg| !arg.is_empty())
             .map(|arg| String::from_utf8_lossy(arg).into_owned())
             .collect();
-        return (!argv.is_empty()).then_some(argv);
+        return (!argv.is_empty()).then_some((argv, true));
     }
     let out = std::process::Command::new("ps")
         .args(["-o", "args=", "-p", &pid.to_string()])
@@ -169,13 +173,15 @@ fn command_line(pid: u32) -> Option<Vec<String>> {
         .split_whitespace()
         .map(str::to_string)
         .collect();
-    (!argv.is_empty()).then_some(argv)
+    (!argv.is_empty()).then_some((argv, false))
 }
 
 /// Whether a Claude Code command line is a one-shot run: it prints (`-p`,
 /// `--print`) and is not fed its input as a stream, as the SDK and the
-/// desktop app feed it.
-fn one_shot(argv: &[String]) -> bool {
+/// desktop app feed it. When the arguments are not `exact`, what looks like
+/// the stream flag may be words of the prompt (`claude -p "fix
+/// --input-format stream-json"`), so a run that prints counts as one-shot.
+fn one_shot(argv: &[String], exact: bool) -> bool {
     let prints = argv.iter().skip(1).any(|arg| {
         arg == "--print"
             || arg.strip_prefix('-').is_some_and(|flags| {
@@ -186,7 +192,7 @@ fn one_shot(argv: &[String]) -> bool {
         .windows(2)
         .any(|pair| pair[0] == "--input-format" && pair[1] == "stream-json")
         || argv.iter().any(|arg| arg == "--input-format=stream-json");
-    prints && !streams
+    prints && !(exact && streams)
 }
 
 #[cfg(test)]
@@ -199,23 +205,36 @@ mod tests {
 
     #[test]
     fn only_a_printing_run_without_streamed_input_is_one_shot() {
-        assert!(one_shot(&argv("claude -p hello")));
-        assert!(one_shot(&argv("node cli.js --print hello")));
-        assert!(one_shot(&argv("claude -pc")));
-        assert!(one_shot(&argv(
-            "claude -p hello --output-format stream-json"
-        )));
+        assert!(one_shot(&argv("claude -p hello"), true));
+        assert!(one_shot(&argv("node cli.js --print hello"), true));
+        assert!(one_shot(&argv("claude -pc"), true));
+        assert!(one_shot(
+            &argv("claude -p hello --output-format stream-json"),
+            true
+        ));
         // An interactive session, the SDK and the desktop app.
-        assert!(!one_shot(&argv("claude")));
-        assert!(!one_shot(&argv("claude --resume abc --model opus")));
-        assert!(!one_shot(&argv(
-            "claude -p --input-format stream-json --output-format stream-json"
-        )));
-        assert!(!one_shot(&argv(
-            "ccd-cli --output-format stream-json --verbose --input-format=stream-json"
-        )));
-        // The program's own name is not a flag.
-        assert!(!one_shot(&argv("-p")));
+        let sdk = argv("claude -p --input-format stream-json --output-format stream-json");
+        let desktop =
+            argv("ccd-cli --output-format stream-json --verbose --input-format=stream-json");
+        for exact in [true, false] {
+            assert!(!one_shot(&argv("claude"), exact));
+            assert!(!one_shot(&argv("claude --resume abc --model opus"), exact));
+            assert!(!one_shot(&desktop, exact));
+            // The program's own name is not a flag.
+            assert!(!one_shot(&argv("-p"), exact));
+        }
+        assert!(!one_shot(&sdk, true));
+        // The stream flag is one argument of the prompt here, which only
+        // exact arguments show.
+        let prompt = ["claude", "-p", "fix --input-format stream-json handling"].map(String::from);
+        assert!(one_shot(&prompt, true));
+        // Joined by spaces, that run and the SDK's look alike, so both count
+        // as one-shot.
+        assert!(one_shot(
+            &argv("claude -p fix --input-format stream-json handling"),
+            false
+        ));
+        assert!(one_shot(&sdk, false));
     }
 
     #[test]
@@ -230,8 +249,9 @@ mod tests {
 
     #[test]
     fn a_process_s_command_line_is_read() {
-        let argv = command_line(std::process::id()).unwrap();
+        let (argv, exact) = command_line(std::process::id()).unwrap();
         assert!(!argv.is_empty());
+        assert_eq!(exact, std::path::Path::new("/proc/self/cmdline").exists());
         assert_eq!(command_line(u32::MAX - 1), None);
     }
 }

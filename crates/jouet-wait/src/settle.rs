@@ -439,6 +439,11 @@ impl Doc {
         self.result
     }
 
+    /// The commit the digest is about; empty when the PR could not be read.
+    pub fn head_sha(&self) -> &str {
+        &self.head_sha
+    }
+
     /// `owner/name#N`.
     pub fn pr(&self) -> String {
         format!("{}#{}", self.repo, self.pr)

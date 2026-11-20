@@ -170,7 +170,7 @@ A PR that closes with held events wakes the agent. A PR that closes with nothing
 
 In the settle arm, on Claude Code, the agent does not start the wait: jouet does. `jouet setup claude` installs a second `PostToolUse` entry that runs `jouet watch claude` in the background (Claude Code's `asyncRewake` hook option). For every session outside the arm it exits at once. In the arm, after a foreground `git push`, `gh pr create` or `stack submit` that exited 0, it:
 
-1. finds the PR of the branch checked out where the command ran, and does nothing more when there is none, or when a live watcher of the session already has that PR;
+1. finds the PR of the branch checked out where the command ran, and does nothing more when there is none, or when a live watcher of the session already has that PR. It leaves that watcher the commit now checked out, so a watcher that was about to end with a digest about an older commit waits once more instead;
 2. takes the lease and waits as `jouet wait pr --until needs-agent` does, for up to `24h`, counting comments as new from the push on;
 3. exits `2` with the digest on stderr when the PR needs the agent, or when it ends for any other reason (settled with nothing to do, closed, the time limit) with events held. Claude Code then starts one turn with the digest, whether the session was idle or working.
 
@@ -192,9 +192,9 @@ FAIL unit  step "cargo nextest"
   next: jouet watches this PR again after your next push
 ```
 
-A watcher that ends with nothing held and nothing for the agent says nothing. One that fails (no token, GitHub unreachable, a lease it cannot write) exits `0` and gives its lease back, so no event is held with nothing left to report it. When the session closes, Claude Code stops the watcher with SIGTERM: it removes its lease, or leaves it when events are held, for the next hook of the session to report.
+A watcher that ends with nothing held and nothing for the agent says nothing. One that fails (no token, GitHub unreachable, a lease it cannot write) exits `0` and gives its lease back, so no event is held with nothing left to report it. When the session closes, Claude Code stops the watcher with SIGTERM: it stops covering the PR at once, takes a second for a hook that was holding an event to finish, then removes its lease, or leaves it when events are held, for the next hook of the session to report.
 
-What it does not cover: a push to another directory's repository (`git -C dir push`), a push of a branch other than the one checked out, every PR but the current branch's after a `stack submit`, a push run with `run_in_background`, and a one-shot run (`claude -p PROMPT`), where Claude Code runs the hook in the foreground and the wait would hold the run. It needs Claude Code 2.1.318 or later, the oldest version it was tried with, and reads the Claude Code process's command line to tell a one-shot run, which it cannot do on Windows. Each of these leaves the push with no watcher, and Auto-fix events about the PR start turns as before.
+What it does not cover: a push to another directory's repository (`git -C dir push`), a push of a branch other than the one checked out, every PR but the current branch's after a `stack submit`, a push run with `run_in_background`, and a one-shot run (`claude -p PROMPT`), where Claude Code runs the hook in the foreground and the wait would hold the run. It needs Claude Code 2.1.318 or later, the oldest version it was tried with, and reads the Claude Code process's command line to tell a one-shot run, which it cannot do on Windows. On macOS that command line comes from `ps`, which does not keep the arguments apart, so every run with `-p` or `--print` counts as one-shot there, also one fed a stream (`--input-format stream-json`). Each of these leaves the push with no watcher, and Auto-fix events about the PR start turns as before.
 
 `jouet watch` is not a command to run by hand; it reads the hook's JSON on stdin, and is the one hook entry of jouet's that exits `2`.
 

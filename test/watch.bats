@@ -8,7 +8,7 @@ setup() {
 	load 'test_helper/common_setup'
 	_common_setup
 	export XDG_CONFIG_HOME="$BATS_TEST_TMPDIR/config"
-	unset JOUET_HOOKS JOUET_HOOKS_LEDGER CLAUDE_PID
+	unset JOUET_HOOKS JOUET_HOOKS_LEDGER JOUET_EXPERIMENT_SETTLE_SHARE CLAUDE_PID
 	export AI_AGENT=claude-code_2-1-318_harness
 	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
 }
