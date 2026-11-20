@@ -99,7 +99,18 @@ pub fn run_doc<W: Watch>(
     timing: &Timing,
     reporter: &mut Reporter,
 ) -> (Exit, Option<W::Doc>) {
-    match wait(w, remote, timing, reporter) {
+    let waited = wait(w, remote, timing, reporter);
+    report(w, waited, reporter)
+}
+
+/// Prints what a [`wait`] came to, the result document or the error, and
+/// returns the exit code with the document it printed, if any.
+pub fn report<W: Watch>(
+    w: &W,
+    waited: Result<W::Doc, Stop>,
+    reporter: &mut Reporter,
+) -> (Exit, Option<W::Doc>) {
+    match waited {
         Ok(doc) => {
             let text = w.text(&doc, reporter);
             reporter.finish_doc(&doc, &text);

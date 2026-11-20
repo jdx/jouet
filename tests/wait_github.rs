@@ -1752,6 +1752,68 @@ mod watch {
     }
 
     #[test]
+    fn a_wait_the_agent_started_waits_on_the_commit_a_later_push_left_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        checkout(dir);
+        let claude = Claude::interactive();
+        let mut world = World::default();
+        world
+            .checks
+            .insert(SHA_A, vec![check(101, "unit", "in_progress", None)]);
+        let fake = serve(world);
+        let wait = [
+            &["wait", "pr", "7", "--repo", "jdx/demo"][..],
+            &["--until", "needs-agent"],
+            &FAST,
+        ]
+        .concat();
+        let mut own = command(&fake, dir, &wait);
+        own.env("PATH", dir.join("bin"))
+            .env("HOME", dir.join("home"))
+            .env("XDG_CONFIG_HOME", dir.join("config"))
+            .env("JOUET_ENTIRE", "false")
+            .env("JOUET_SESSION_ID", "s1");
+        for var in ["JOUET_HOOKS", "JOUET_HOOKS_LEDGER"] {
+            own.env_remove(var);
+        }
+        let own = own.spawn().expect("jouet should start");
+        let pushed = lease(dir).with_extension("pushed");
+        // The push finds the agent's own wait watching the PR.
+        let out = run(&fake, dir, &claude, &payload(dir, "t1", "git push"), &FAST);
+        assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+        assert_eq!(results(dir, "watch"), ["watching"]);
+        assert!(pushed.exists());
+        // The wait comes to a digest about a commit that is not the one
+        // pushed (the checkout has none), so it reads what the push left
+        // and waits again instead of printing it.
+        let fail = |name: &'static str| {
+            fake.set(move |w| {
+                w.checks
+                    .insert(SHA_A, vec![check(101, name, "completed", Some("failure"))]);
+            });
+        };
+        fail("unit");
+        for _ in 0..1_000 {
+            if !pushed.exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!pushed.exists(), "the wait never read what the push left");
+        fail("lint");
+        let out = own.wait_with_output().unwrap();
+        let digest = stdout(&out);
+        assert_eq!(digest.matches("NEEDS_AGENT").count(), 1, "{digest}");
+        assert!(
+            digest.contains("FAIL lint") && !digest.contains("FAIL unit"),
+            "{digest}"
+        );
+        assert!(leases(dir).is_empty() && !pushed.exists());
+        assert_eq!(results(dir, "settle"), ["needs_agent"]);
+    }
+
+    #[test]
     fn a_watcher_at_its_time_limit_wakes_the_agent_only_with_what_it_held() {
         let dir = tempfile::tempdir().unwrap();
         let dir = dir.path();

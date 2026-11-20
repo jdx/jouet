@@ -36,6 +36,7 @@ use std::time::{Duration, Instant};
 /// Lines of each comment the digest shows.
 const BODY_LINES: usize = 20;
 
+#[derive(Clone)]
 pub struct Options {
     /// How long nothing may change before the PR counts as settled.
     pub quiet: Duration,

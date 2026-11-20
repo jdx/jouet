@@ -170,7 +170,7 @@ A PR that closes with held events wakes the agent. A PR that closes with nothing
 
 In the settle arm, on Claude Code, the agent does not start the wait: jouet does. `jouet setup claude` installs a second `PostToolUse` entry that runs `jouet watch claude` in the background (Claude Code's `asyncRewake` hook option). For every session outside the arm it exits at once. In the arm, after a foreground `git push`, `gh pr create` or `stack submit` that exited 0, it:
 
-1. finds the PR of the branch checked out where the command ran, and does nothing more when there is none, or when a live watcher of the session already has that PR. It leaves that watcher the commit now checked out, so a watcher that was about to end with a digest about an older commit waits once more instead;
+1. finds the PR of the branch checked out where the command ran, and does nothing more when there is none, or when a live watcher of the session already has that PR. It leaves that watcher, whether jouet or the agent started it, the commit now checked out, so a watcher that was about to end with a digest about an older commit waits once more instead;
 2. takes the lease and waits as `jouet wait pr --until needs-agent` does, for up to `24h`, counting comments as new from the push on;
 3. exits `2` with the digest on stderr when the PR needs the agent, or when it ends for any other reason (settled with nothing to do, closed, the time limit) with events held. Claude Code then starts one turn with the digest, whether the session was idle or working.
 

@@ -260,8 +260,10 @@ fn halt_stop(halt: Halt) -> Stop {
 
 /// `wait pr --until needs-agent` in an agent's session: the watcher holds a
 /// lease, so the hooks can hold the Auto-fix events about its PR for its
-/// digest, and records in the ledger what it did with them. Anything that
-/// keeps it from writing the lease leaves a plain wait.
+/// digest, and records in the ledger what it did with them. A push that
+/// finds it watching starts no watcher of its own, so a digest about a
+/// commit older than that push is not printed: the wait goes on. Anything
+/// that keeps it from writing the lease leaves a plain wait.
 fn settle_watch(
     reporter: impl Fn(String) -> Reporter,
     timing: &Timing,
@@ -302,13 +304,27 @@ fn settle_watch(
         options.lease.clone_from(&path);
         options.settled_interval = Some(SETTLED_INTERVAL);
     }
-    let beat = path.clone().map(|path| Heartbeat::start(path, lease));
-    let mut w = SettleWait::new(Target::Number(repo, number), options);
-    let mut reporter = reporter(w.label());
-    let (exit, doc) = remote::run_doc(&mut w, &mut remote, timing, &mut reporter);
-    if let Some(beat) = beat {
-        beat.stop();
-    }
+    let mut beat = path.clone().map(|path| Heartbeat::start(path, lease));
+    let (w, mut reporter, waited) = loop {
+        let round = Timing {
+            timeout: timing.timeout.saturating_sub(started.elapsed()),
+            interval: timing.interval,
+        };
+        let mut w = SettleWait::new(Target::Number(repo.clone(), number), options.clone());
+        let mut reporter = reporter(w.label());
+        let waited = remote::wait(&mut w, &mut remote, &round, &mut reporter);
+        let Some(path) = &path else {
+            break (w, reporter, waited);
+        };
+        // A push that came as this wait was ending found the PR watched,
+        // so jouet started no watcher for it: its commit is waited on here.
+        let head = waited.as_ref().ok().map(settle::Doc::head_sha);
+        let stop = || beat.take().into_iter().for_each(Heartbeat::stop);
+        if Lease::retire(path, head, stop) {
+            break (w, reporter, waited);
+        }
+    };
+    let (exit, doc) = remote::report(&w, waited, &mut reporter);
     let Some(path) = path else {
         return exit;
     };
