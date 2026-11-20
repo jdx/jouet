@@ -4,7 +4,9 @@ description: Using jouet's PR and CI commands with GitLab merge requests, Forgej
 
 # GitLab, Forgejo and Entire
 
-`jouet pr status`, `pr next`, `pr threads`, `wait ci`, `wait pr` and `wait run` work with GitLab merge requests, with Forgejo and Gitea pull requests, and with the trails of [repositories Entire hosts](#entire-hosted-repositories), as well as with GitHub. They print the same lines, the same JSON fields and the same exit codes on every forge. When a forge has no equivalent of something, the command exits 4 with the reason, before it sends anything.
+`jouet pr status`, `pr next`, `pr threads`, `wait ci`, `wait pr` and `wait run`, and the built-in [`joue sweep`](/routines#the-built-in-routines) routine, work with GitLab merge requests, with Forgejo and Gitea pull requests, and with the trails of [repositories Entire hosts](#entire-hosted-repositories), as well as with GitHub. They print the same lines, the same JSON fields and the same exit codes on every forge. When a forge has no equivalent of something, the command exits 4 with the reason, before it sends anything.
+
+In a routine of your own, `github.prs` and `github.threads` read any of these forges. `github.graphql`, `get`, `paginate`, `mutate` and `request` talk to GitHub only.
 
 Support for these forges is new and has only been tested against recorded responses. Report what breaks on your server as an [issue](https://github.com/jdx/jouet/issues).
 

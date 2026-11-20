@@ -6,7 +6,7 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum Capability {
-    /// GitHub queries and REST reads, `github.prs`, and waits on CI, runs
+    /// GitHub queries and REST reads, `github.prs`, `github.threads`, and waits on CI, runs
     /// and PRs.
     #[serde(rename = "github.read")]
     GithubRead,

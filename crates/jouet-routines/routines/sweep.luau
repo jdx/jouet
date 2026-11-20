@@ -8,21 +8,6 @@
 --- usage: arg "[pr]" help="The PR: a number, URL, OWNER/REPO#N or branch. Defaults to the current branch's PR"
 --- usage: flag "--repo <OWNER/NAME>" help="The repository for a bare number or branch. Defaults to the git remote"
 
-local QUERY = [[
-query($owner: String!, $name: String!, $number: Int!, $after: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100, after: $after) {
-        pageInfo { hasNextPage endCursor }
-        nodes {
-          isResolved isOutdated path line
-          comments(first: 1) { nodes { databaseId author { login } body } }
-        }
-      }
-    }
-  }
-}]]
-
 local function first_line(text: string?): string
 	local line = string.match(text or "", "^[^\n]*") or ""
 	if #line > 100 then
@@ -39,30 +24,26 @@ return {
 			local missing = found.not_found and found.not_found[1] or "this branch"
 			joue.fail(joue.exit.not_found, `no PR for {missing}`)
 		end
-		local owner, name = string.match(pr.repo, "^([^/]+)/(.+)$")
+		-- Read from whichever forge the PR is on, as `jouet pr threads` reads it.
+		local found_threads = github.threads(pr)
 		local items = joue.array({})
 		local lines = {}
-		local after = nil
-		repeat
-			local data = github.graphql(QUERY, { owner = owner, name = name, number = pr.number, after = after })
-			local threads = data.repository.pullRequest.reviewThreads
-			for _, thread in threads.nodes do
-				local comment = thread.comments.nodes[1]
-				if not thread.isResolved and comment then
-					local place = if thread.path then `{thread.path}:{thread.line or "?"}` else "conversation"
-					local item = joue.object({
-						id = comment.databaseId,
-						place = place,
-						author = comment.author and comment.author.login,
-						outdated = thread.isOutdated,
-						says = first_line(comment.body),
-					}, { "id", "place", "author", "outdated", "says" })
-					table.insert(items, item)
-					table.insert(lines, `{item.id}  {place}  {item.author or "?"}: {item.says}`)
-				end
+		for _, thread in found_threads.threads do
+			local comment = thread.comments[1]
+			if not thread.resolved and comment then
+				local place = if thread.path then `{thread.path}:{thread.line or "?"}` else "conversation"
+				local author = if thread.author ~= "" then thread.author else nil
+				local item = joue.object({
+					id = thread.id,
+					place = place,
+					author = author,
+					outdated = thread.outdated == true,
+					says = first_line(comment.body),
+				}, { "id", "place", "author", "outdated", "says" })
+				table.insert(items, item)
+				table.insert(lines, `{item.id}  {place}  {author or "?"}: {item.says}`)
 			end
-			after = if threads.pageInfo.hasNextPage then threads.pageInfo.endCursor else nil
-		until after == nil
+		end
 		local header = `{#items} unresolved thread{if #items == 1 then "" else "s"} on {pr.repo}#{pr.number}`
 		print(header)
 		for _, line in lines do
@@ -86,6 +67,23 @@ return {
 				threads = { { id = 2468, outdated = false }, { id = 2470, outdated = true } },
 			},
 			requests = { "POST /graphql", "reviewThreads" },
+		},
+		{
+			-- The fixture also has a GitHub mirror at the same path with a PR
+			-- of the same number; its thread must not be listed under the MR.
+			name = "a GitLab MR's discussions are read from GitLab, not a GitHub repository at the same path",
+			args = { "gitlab.com/group/sub/project!4266" },
+			fixture = "fixtures/sweep-gitlab.json",
+			output = {
+				"2 unresolved threads on group/sub/project#4266",
+				"1126  internal/oauth/flow.go:42  reviewer: Should this reject an empty client ID too?",
+				"1150  internal/oauth/client.go:?  maintainer: Rename this before it ships",
+			},
+			json = {
+				pr = "group/sub/project#4266",
+				threads = { { id = 1126, outdated = false }, { id = 1150, outdated = true } },
+			},
+			requests = { "GET /projects/group%2Fsub%2Fproject/merge_requests/4266/discussions" },
 		},
 	},
 }

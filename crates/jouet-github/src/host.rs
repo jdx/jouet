@@ -12,6 +12,7 @@ use crate::forge::{self, Forge};
 use crate::pr::status::{self, FetchResult, Lookup};
 use crate::pr::target::{Repo, Target};
 use crate::pr::threads::{self, PrThreads, Pushed, Thread};
+use crate::rest::Rest;
 use crate::{Client, forgejo, gitlab};
 use serde_json::json;
 use std::fmt::Write as _;
@@ -95,6 +96,26 @@ pub fn connect(repo: &Repo) -> Result<Box<dyn Host>, String> {
     }
 }
 
+/// [`connect`], unless `github` is a test's client whose fake server
+/// answers for the other forges too ([`Client::with_forges_at`]): then a
+/// GitLab or Forgejo host is reached there.
+pub fn connect_via(repo: &Repo, github: &Client) -> Result<Box<dyn Host>, String> {
+    if let (Some(url), Some(host)) = (github.forges_at(), &repo.host) {
+        match repo.forge() {
+            Some(Forge::GitLab) => {
+                let rest = Rest::new(Forge::GitLab, host).with_fake_api(url);
+                return Ok(Box::new(gitlab::GitLab::with_rest(rest)));
+            }
+            Some(Forge::Forgejo) => {
+                let rest = Rest::new(Forge::Forgejo, host).with_fake_api(url);
+                return Ok(Box::new(forgejo::Forgejo::with_rest(rest)));
+            }
+            _ => {}
+        }
+    }
+    connect(repo)
+}
+
 /// Runs `f` with the host `repo` is on: `github` for a GitHub repository,
 /// else a new client for its forge.
 pub fn with<T>(
@@ -105,7 +126,7 @@ pub fn with<T>(
     if repo.host.is_none() {
         return f(github);
     }
-    f(connect(repo)?.as_mut())
+    f(connect_via(repo, github)?.as_mut())
 }
 
 /// Fetches lookups that may be on several forges: GitHub's through
@@ -128,7 +149,7 @@ pub fn fetch(github: &mut Client, lookups: Vec<Lookup>) -> Result<FetchResult, S
     for (repo, group) in groups {
         let fetched = match repo {
             None => status::fetch(github, group)?,
-            Some(repo) => connect(&repo)?.fetch(group)?,
+            Some(repo) => connect_via(&repo, github)?.fetch(group)?,
         };
         result.prs.extend(fetched.prs);
         result.not_found.extend(fetched.not_found);

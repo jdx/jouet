@@ -78,7 +78,7 @@ A routine from a file also shows the path it comes from. The two names point at 
 |---|---|
 | `pr-next [PR...]` | The routine behind [`jouet pr next`](/commands/pr-next): the same arguments, output and exit codes. |
 | `land [PR]` | Runs `pr-next`. If CI is still running, waits for it and asks again. Once the PR is `ready_to_merge`, runs `jouet pr land`, which still refuses whatever it refuses by hand, honouring branch protection. `--method` picks squash (the default), merge or rebase. Without `--yes` the land is only previewed. |
-| `sweep [PR]` | Lists the unresolved review threads as one line each: ID (the first comment's, as `jouet pr threads` takes it), `path:line`, author, and the first line of the comment. It never posts. |
+| `sweep [PR]` | Lists the unresolved review threads as one line each: ID (the first comment's, as `jouet pr threads` takes it), `path:line`, author, and the first line of the comment. It never posts. It reads GitLab MRs, Forgejo and Gitea PRs and Entire trails too ([forges](/forges)). |
 | `ship-check [PR]` | Runs the project's tests, then checks the PR, and reports both. It fails when the tests fail or the PR needs attention. Without a PR for the branch, it reports the tests alone. |
 
 `pr next` became a routine because it costs nothing measurable: against a real PR the routine and the Rust version it replaced take the same time within noise, since nearly all of it is GitHub's. Commands where speed is the point, such as the hooks, `edit` and the wait engine, stay in Rust as primitives.
@@ -191,7 +191,8 @@ A fixture holds the answers. The triage example's, `fixtures/triage.json` beside
 | Primitive | What it does | Capability |
 |---|---|---|
 | `github.prs{prs, mine, search, repo, settle}` | The PRs `pr status` selects, with their state, checks, review, threads and [attention codes](/commands/pr-status#attention), in one batched query. `settle` is the seconds to wait for GitHub to work out an unknown mergeable state (20 unless told otherwise, as with `pr status --settle`) | `github.read` |
-| `github.graphql(query, vars)` | A GraphQL query; GitHub's `NOT_FOUND` paths are `nil` | `github.read` |
+| `github.threads(pr)` | A PR's review threads, resolved or not: `{ repo, number, threads }`, each thread as `pr threads --json` writes one, with every comment in full. `pr` is one of `github.prs`'s PRs, `OWNER/REPO#N` or a PR's URL. Like `github.prs`, it reads GitLab, Forgejo and Entire too ([forges](/forges)); exits 3 when there is no such PR | `github.read` |
+| `github.graphql(query, vars)` | A GraphQL query to GitHub; GitHub's `NOT_FOUND` paths are `nil`. It and the REST primitives below reach GitHub only, so read a GitLab or Forgejo PR's threads with `github.threads` | `github.read` |
 | `github.get(path, {etag})` | One REST read: `{ status, etag, next, body }`. With `etag`, an unchanged answer is a free `304` | `github.read` |
 | `github.paginate(path, {max_pages})` | A REST list, following `Link` headers and joining the pages (10 pages unless told otherwise) | `github.read` |
 | `github.repo()` | The repository the git remote names | `github.read` |
@@ -229,7 +230,7 @@ A routine reaches only what its header declares:
 
 | Capability | Reaches |
 |---|---|
-| `github.read` | GitHub queries and REST reads, `github.prs`, jouet's PR commands, and waits on CI, PRs and runs |
+| `github.read` | GitHub queries and REST reads, `github.prs`, `github.threads`, jouet's PR commands, and waits on CI, PRs and runs |
 | `github.write` | GitHub mutations and REST writes, and jouet's commands that post or merge |
 | `git.read` | The work tree's state, diffs, history and refs, and secret scans |
 | `fs.read` | Planning edits, waits on files and logs, the project's hk checks, the code graph and dependencies' docs |

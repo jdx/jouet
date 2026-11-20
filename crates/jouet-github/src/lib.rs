@@ -45,6 +45,9 @@ pub struct Client {
     tried: Vec<String>,
     token: Option<Token>,
     rejected: Vec<&'static str>,
+    /// A test's fake server, which answers for every GitLab and Forgejo
+    /// host as well as for GitHub.
+    forges_at: Option<String>,
 }
 
 struct Token {
@@ -162,6 +165,7 @@ impl Client {
             tried: Vec::new(),
             token: None,
             rejected: Vec::new(),
+            forges_at: None,
         }
     }
 
@@ -182,6 +186,18 @@ impl Client {
             value: token.to_string(),
         });
         self
+    }
+
+    /// The same client, with every GitLab and Forgejo host answered by the
+    /// server at `url`, sent no token. For a test's fake server, which
+    /// then stands in for every forge.
+    pub fn with_forges_at(mut self, url: &str) -> Self {
+        self.forges_at = Some(url.to_string());
+        self
+    }
+
+    pub(crate) fn forges_at(&self) -> Option<&str> {
+        self.forges_at.as_deref()
     }
 
     /// Runs a GraphQL query and returns its `data`. Paths GitHub reports as

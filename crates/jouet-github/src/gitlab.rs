@@ -28,6 +28,11 @@ impl GitLab {
         }
     }
 
+    /// A GitLab reached through `rest`, such as a test's fake server.
+    pub fn with_rest(rest: Rest) -> Self {
+        Self { rest }
+    }
+
     /// The REST client, for the CI reads `wait` makes.
     pub fn rest(&mut self) -> &mut Rest {
         &mut self.rest

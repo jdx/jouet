@@ -3,11 +3,23 @@
   {
    "method": "POST",
    "path": "/graphql",
-   "match": "\"number\":15",
+   "match": "\"n\":15",
    "body": {
     "data": {
+     "viewer": {
+      "login": "jdx"
+     },
      "repository": {
       "pullRequest": {
+       "id": "PR_15",
+       "number": 15,
+       "url": "https://github.com/jdx/jouet/pull/15",
+       "headRefName": "feat/sweep",
+       "headRefOid": "abc123",
+       "baseRefOid": "def456",
+       "headRepository": {
+        "nameWithOwner": "jdx/jouet"
+       },
        "reviewThreads": {
         "pageInfo": {
          "hasNextPage": false,
@@ -15,52 +27,91 @@
         },
         "nodes": [
          {
+          "id": "PRRT_0",
           "isResolved": false,
           "isOutdated": false,
           "path": "src/main.rs",
           "line": 12,
+          "startLine": null,
+          "originalLine": 12,
+          "originalStartLine": null,
+          "diffSide": "RIGHT",
+          "startDiffSide": null,
           "comments": {
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
-             "databaseId": 2468,
+             "fullDatabaseId": "2468",
+             "url": "https://github.com/jdx/jouet/pull/15#discussion_r2468",
+             "createdAt": "2026-10-30T18:00:00Z",
+             "body": "Handle the empty case here\nIt panics on an empty list.",
              "author": {
+              "__typename": "User",
               "login": "octocat"
-             },
-             "body": "Handle the empty case here\nIt panics on an empty list."
+             }
             }
            ]
           }
          },
          {
+          "id": "PRRT_1",
           "isResolved": true,
           "isOutdated": false,
           "path": "src/lib.rs",
           "line": 3,
+          "startLine": null,
+          "originalLine": 3,
+          "originalStartLine": null,
+          "diffSide": "RIGHT",
+          "startDiffSide": null,
           "comments": {
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
-             "databaseId": 2469,
+             "fullDatabaseId": "2469",
+             "url": "https://github.com/jdx/jouet/pull/15#discussion_r2469",
+             "createdAt": "2026-10-30T18:00:00Z",
+             "body": "Fixed",
              "author": {
+              "__typename": "User",
               "login": "octocat"
-             },
-             "body": "Fixed"
+             }
             }
            ]
           }
          },
          {
+          "id": "PRRT_2",
           "isResolved": false,
           "isOutdated": true,
           "path": null,
           "line": null,
+          "startLine": null,
+          "originalLine": null,
+          "originalStartLine": null,
+          "diffSide": null,
+          "startDiffSide": null,
           "comments": {
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+           },
            "nodes": [
             {
-             "databaseId": 2470,
+             "fullDatabaseId": "2470",
+             "url": "https://github.com/jdx/jouet/pull/15#discussion_r2470",
+             "createdAt": "2026-10-30T18:00:00Z",
+             "body": "Long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
              "author": {
+              "__typename": "User",
               "login": "hubot"
-             },
-             "body": "Long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+             }
             }
            ]
           }

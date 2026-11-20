@@ -65,6 +65,10 @@ const FIXTURES: &[(&str, &str)] = &[
         include_str!("../routines/fixtures/sweep.json"),
     ),
     (
+        "fixtures/sweep-gitlab.json",
+        include_str!("../routines/fixtures/sweep-gitlab.json"),
+    ),
+    (
         "fixtures/ship-check.json",
         include_str!("../routines/fixtures/ship-check.json"),
     ),
