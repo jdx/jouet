@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6](https://github.com/jdx/jouet/compare/v0.0.5...v0.0.6) - 2026-11-21
+
+### Added
+
+- *(wait)* start the PR watcher from a background hook after a push ([#622](https://github.com/jdx/jouet/pull/622))
+
+### Fixed
+
+- *(test)* say a run timed out, name the unfinished test, and exit 124 ([#625](https://github.com/jdx/jouet/pull/625))
+- *(routines)* read sweep's threads from the PR's own forge ([#624](https://github.com/jdx/jouet/pull/624))
+- *(hook)* stop blocking for files changed after a passing test run ([#621](https://github.com/jdx/jouet/pull/621))
+- *(hook)* raise a Codex stop's reason once per run ([#617](https://github.com/jdx/jouet/pull/617))
+
+### Other
+
+- run link-discussion on pull_request ([#620](https://github.com/jdx/jouet/pull/620))
+- remove the pull_request_target workflows ([#619](https://github.com/jdx/jouet/pull/619))
+
 ## [0.0.5](https://github.com/jdx/jouet/compare/v0.0.4...v0.0.5) - 2026-11-16
 
 ### Added
