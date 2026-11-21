@@ -17,6 +17,12 @@ fn counts(d: &Digest) -> [u64; 3] {
     [d.passed, d.failed, d.skipped]
 }
 
+/// [`super::digest_cut`] of a run where jouet is, whose commands are
+/// printed after `next: jouet test --cmd -- `.
+fn digest_cut(text: &str, budget: usize, formats: &[Format]) -> Digest {
+    super::digest_cut(text, budget, "next: jouet test --cmd -- ".len(), formats)
+}
+
 #[test]
 fn nextest_reports_when_fail_fast_left_tests_unrun() {
     let d = digest(&fixture("nextest"), true, DEFAULT_BUDGET);
@@ -1666,6 +1672,13 @@ fn a_test_is_unfinished_until_it_passes_fails_or_the_run_sums_up() {
         side_by_side,
     );
     assert_eq!(unfinished(&d), ["c"]);
+    // A `start` pattern without a group names no test, and leaves the line
+    // to one that does.
+    let d = cut(
+        "failed = ['^FAIL (\\S+)']\nstart = ['^RUN ', '^RUN (\\S+)$']\n",
+        "RUN a\nwaiting\n",
+    );
+    assert_eq!(unfinished(&d), ["a"]);
 
     // A test that failed has finished, and is still a failure.
     let d = cut(
@@ -1741,7 +1754,8 @@ fn unfinished_tests_and_the_end_of_the_output_keep_to_the_budget() {
     assert!(d.unfinished_omitted > 0);
 
     // The first is cut to the budget, and says how much it left out. Its
-    // command is whole, and its output is what gives way to it.
+    // command is whole, and its output is what gives way to it and to
+    // `UNFINISHED`, as it is printed.
     let long = format!("RUN a\n{}", "a line of output\n".repeat(50));
     let d = digest_cut(&long, 100, &[format()]);
     assert_eq!(unfinished(&d), ["a"]);
@@ -1751,9 +1765,16 @@ fn unfinished_tests_and_the_end_of_the_output_keep_to_the_budget() {
         [
             "a line of output",
             "a line of output",
-            "a line of output",
-            "... 14 lines skipped"
+            "... 15 lines skipped"
         ]
+    );
+    // Printed after more, as for a run in another directory than jouet's,
+    // the command takes that much more.
+    let next = "next: cd /repo/tests && jouet test --cmd -- ".len();
+    let d = super::digest_cut(&long, 100, next, &[format()]);
+    assert_eq!(
+        d.unfinished[0].lines,
+        ["a line of output", "... 16 lines skipped"]
     );
     // Under a budget smaller than its command, the first still has its name
     // and its command, without which there is nothing to do next.
@@ -1763,15 +1784,16 @@ fn unfinished_tests_and_the_end_of_the_output_keep_to_the_budget() {
     assert_eq!(d.unfinished[0].lines, ["... 17 lines skipped"]);
 
     // The end of the output keeps its last lines, the run having stopped at
-    // the last one, and says first how many lines came before them.
+    // the last one, and says first how many lines came before them, in a
+    // line that counts as they do: five lines fit in 100 bytes, and four
+    // with that one.
     let mut text = "a line of output\n".repeat(49);
     text.push_str("where it stopped\n");
     let d = digest_cut(&text, 100, &[]);
     assert_eq!(
         d.output_end,
         [
-            "... 45 lines skipped",
-            "a line of output",
+            "... 46 lines skipped",
             "a line of output",
             "a line of output",
             "a line of output",
@@ -1811,6 +1833,27 @@ fn a_format_that_cannot_tell_what_is_unfinished_does_not_load() {
             format!("{base}rerun = 'run-one \"{{name}}\"'"),
             "`rerun` has `{name}` inside quotes",
         ),
+        // More than one command: a shell would give jouet the first alone.
+        (
+            format!("{base}rerun = 'cd cases && ./runner {{name}}'"),
+            "`rerun` has `&` outside quotes; it is one command with its arguments",
+        ),
+        (
+            format!("{base}rerun = 'run-one {{name}} | tee log'"),
+            "`rerun` has `|` outside quotes",
+        ),
+        (
+            format!("{base}rerun = 'run-one {{name}}; true'"),
+            "`rerun` has `;` outside quotes",
+        ),
+        (
+            format!("{base}rerun = \"run-one {{name}}\\ntrue\""),
+            "`rerun` has `\\n` outside quotes",
+        ),
+        (
+            format!("{base}rerun = 'SLOW=1 run-one {{name}}'"),
+            "`rerun` starts by setting `SLOW`",
+        ),
         (
             format!("{base}[[examples]]\noutput = 'RUN a'\nunfinished = []"),
             "example 1 leaves [\"a\"] unfinished, not []",
@@ -1829,6 +1872,14 @@ fn a_format_that_cannot_tell_what_is_unfinished_does_not_load() {
         &format!("{base}rerun = \"run-one --tag='not slow' {{name}}\"\n"),
     )
     .unwrap();
+    // And so is what they hold, or what is escaped, and an option's value.
+    for rerun in [
+        "run-one --only='a|b' {name}",
+        r"run-one a\\;b {name}",
+        "run-one --jobs=1 {name}",
+    ] {
+        Format::parse("x", &format!("{base}rerun = \"{rerun}\"\n")).unwrap();
+    }
     // An example says what it leaves unfinished only when it lists it.
     Format::parse("x", &format!("{base}[[examples]]\noutput = 'RUN a'\n")).unwrap();
     Format::parse(

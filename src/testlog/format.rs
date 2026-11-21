@@ -99,10 +99,14 @@ pub(crate) struct Format {
     rerun: Option<String>,
 }
 
-/// The test a line names: its `name` group, else its first.
+/// The test a line names: its `name` group, else its first, by the first
+/// pattern that names one. A pattern that matches without naming a test, as
+/// a `start` pattern may, leaves the line to the next.
 fn named<'a>(patterns: &[Regex], line: &'a str) -> Option<&'a str> {
-    let c = patterns.iter().find_map(|p| p.captures(line))?;
-    c.name("name").or_else(|| c.get(1)).map(|m| m.as_str())
+    patterns.iter().find_map(|p| {
+        let c = p.captures(line)?;
+        c.name("name").or_else(|| c.get(1)).map(|m| m.as_str())
+    })
 }
 
 /// A pattern of `key` that has no group to name the test with.
@@ -126,15 +130,33 @@ fn any(patterns: &[Regex], line: &str) -> bool {
     patterns.iter().any(|p| p.is_match(line))
 }
 
-/// Whether a `{name}` of `rerun` stands inside quotes, as a shell reads
-/// the command: the name is quoted when it is filled in, and quotes of its
-/// own would end those around it.
-fn name_in_quotes(rerun: &str) -> bool {
+/// Why `rerun` is not one command after `jouet test --cmd --`, as a shell
+/// reads it, when it is not. A `{name}` inside quotes: the name is quoted
+/// when it is filled in, and quotes of its own would end those around it.
+/// What ends a command or sends its output elsewhere, outside quotes: the
+/// shell would give jouet the words before it, and run the rest itself. A
+/// variable set before the command: jouet runs the words it is given, and
+/// would take that for the command.
+fn misread(rerun: &str) -> Option<String> {
+    let first = rerun.split_whitespace().next().unwrap_or_default();
+    if let Some((variable, _)) = first.split_once('=')
+        && !variable.is_empty()
+        && !variable.starts_with(|c: char| c.is_ascii_digit())
+        && variable
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Some(format!(
+            "`rerun` starts by setting `{variable}`; it is one command with its arguments, as written after `jouet test --cmd --`, which runs its first word"
+        ));
+    }
     let mut quote = None;
     let mut escaped = false;
     for (i, c) in rerun.char_indices() {
         if quote.is_some() && rerun[i..].starts_with(NAME) {
-            return true;
+            return Some(format!(
+                "`rerun` has `{NAME}` inside quotes; jouet quotes the name itself, so write it outside them"
+            ));
         }
         if escaped {
             escaped = false;
@@ -145,10 +167,16 @@ fn name_in_quotes(rerun: &str) -> bool {
             (None | Some('"'), '\\') => escaped = true,
             (None, '\'' | '"') => quote = Some(c),
             (Some(open), _) if open == c => quote = None,
+            (None, ';' | '&' | '|' | '<' | '>' | '(' | ')' | '\n') => {
+                return Some(format!(
+                    "`rerun` has `{}` outside quotes; it is one command with its arguments, as written after `jouet test --cmd --`, and a shell would end the command there",
+                    c.escape_default()
+                ));
+            }
             _ => {}
         }
     }
-    false
+    None
 }
 
 impl Format {
@@ -169,10 +197,8 @@ impl Format {
                     "`rerun` needs `{NAME}`, where the test's name goes"
                 ));
             }
-            if name_in_quotes(rerun) {
-                return Err(format!(
-                    "`rerun` has `{NAME}` inside quotes; jouet quotes the name itself, so write it outside them"
-                ));
+            if let Some(why) = misread(rerun) {
+                return Err(why);
             }
             // Only a test a `start` line names can be left unfinished.
             if !start.iter().any(|p| p.captures_len() > 1) {

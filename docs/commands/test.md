@@ -316,7 +316,7 @@ That digest is for agents, and for plain display (pipes, redirects, CI). A perso
 
 ### A run that ends at a time limit
 
-A run that is ended at a time limit has not failed a test: it was cut short. `jouet test` says so on its first line, with how long the run had gone, rather than `failed` and a failure it could not recognise:
+A run that is ended at a time limit was cut short, which is not a test failing, though tests that finished before it may have failed. `jouet test` says so on its first line, with how long the run had gone, rather than `failed` and a failure it could not recognise:
 
 ```sh
 $ jouet test --cmd -- timeout 2 ./e2e test_sync
@@ -343,7 +343,7 @@ the output does not name the test that was running; its end:
 full log: ~/.local/state/jouet/logs/test-1795270736495-394889-0.log
 ```
 
-Unfinished tests and the end of the output keep to what the failures left of `--budget`. A test's `next:` command counts toward it and is printed whole or not at all, since part of a command is another command. The first unfinished test always has its name and its command, even under a budget smaller than the two, without which the answer names nothing to do next: its output is cut to what the command leaves, with a `... N lines skipped` line, and the unfinished tests after those that fit are named on a `... N more unfinished: ...` line. The end of the output keeps its last lines, and always the last one, where the run stopped, after a `... N lines skipped` line that says how many came before them.
+Unfinished tests and the end of the output keep to what the failures left of `--budget`. A test's `next:` command counts toward it and is printed whole or not at all, since part of a command is another command. The first unfinished test always has its name and its command, even under a budget smaller than the two, without which the answer names nothing to do next: its output is cut to what the command leaves, with a `... N lines skipped` line, and the unfinished tests after those that fit are named on a `... N more unfinished: ...` line. The end of the output keeps its last lines, and always the last one, where the run stopped, after a `... N lines skipped` line that says how many came before them and counts toward the budget as they do.
 
 A run is cut short in one of three ways:
 
@@ -427,13 +427,13 @@ FAIL cli/test_a
   ERROR: E2E assertion failed: [mise ls] expected 'x'
 ```
 
-With `summary`, a run that passed says how many tests it ran (`cmd: passed in 12.0s: 3 passed`) rather than only that it passed, so there is no need to read the log to see that the tests you meant to run did. Without it, a format counts only the tests it names as failed.
+With `summary`, a run that passed says how many tests it ran (`cmd: passed in 12.0s: 3 passed`) rather than only that it passed, so there is no need to read the log to see that the tests you meant to run did. Without it, a format counts the tests it names: those that failed and, with `passed`, those that passed.
 
-`passed` and `rerun` are for [a run that ends at a time limit](#a-run-that-ends-at-a-time-limit). A test is unfinished when a `start` line named it, with its `name` group, else its first, and it has neither passed nor failed, and no `summary` line followed. With `passed`, every such test is named, so a runner that runs several at once is read rightly, and the tests that passed are named and counted; a `passed` line is no part of another test's failure. Without it, a test is taken to end where the next starts, so only the last one started can be unfinished. `rerun` is the command for one unfinished test; it takes a `start` pattern with a group. jouet quotes the name for a shell where it needs it, so write `{name}` outside quotes: `rerun = "run-one '{name}'"` does not load. A runner that prints nothing when a test starts leaves nothing to name: the run then shows the end of its output.
+`passed` and `rerun` are for [a run that ends at a time limit](#a-run-that-ends-at-a-time-limit). A test is unfinished when a `start` line named it, with its `name` group, else its first, and it has neither passed nor failed, and no `summary` line followed. With `passed`, every such test is named, so a runner that runs several at once is read rightly, and the tests that passed are named and counted; a `passed` line is no part of another test's failure. Without it, a test is taken to end where the next starts, so only the last one started can be unfinished. `rerun` is the command for one unfinished test; it takes a `start` pattern with a group. It is printed after `jouet test --cmd --`, so it is one command with its arguments: `rerun = "cd cases && ./runner {name}"` does not load, nor does one with `;`, `|`, `<`, `>` or parentheses outside quotes, or one that starts by setting a variable (`SLOW=1 ./runner {name}`), since a shell would give jouet only part of it. jouet quotes the name for a shell where it needs it, so write `{name}` outside quotes: `rerun = "run-one '{name}'"` does not load. A runner that prints nothing when a test starts leaves nothing to name: the run then shows the end of its output.
 
 Each pattern key takes a list of regular expressions ([Rust's syntax](https://docs.rs/regex/latest/regex/#syntax)), matched against each line once colour and mise's `[task]` prefixes are taken off.
 
-A format's examples are checked when it loads. A format does not load when its examples do not name the failures they list, or the `unfinished` tests of an example that lists them, when a `failed` or `passed` pattern has no group, when `rerun` has no `{name}`, has it inside quotes, or no `start` pattern names a test for it, when a pattern does not compile, or when it has a key jouet does not know; `jouet test` says why on stderr and runs without it. `jouet test --dry-run` lists the formats that load (`failure formats: ...`), and `--json` reports them as `formats`. Failures named by a format count for [`--baseline`](#failures-that-were-there-before-baseline) like any other.
+A format's examples are checked when it loads. A format does not load when its examples do not name the failures they list, or the `unfinished` tests of an example that lists them, when a `failed` or `passed` pattern has no group, when `rerun` has no `{name}`, has it inside quotes, is more than one command, or no `start` pattern names a test for it, when a pattern does not compile, or when it has a key jouet does not know; `jouet test` says why on stderr and runs without it. `jouet test --dry-run` lists the formats that load (`failure formats: ...`), and `--json` reports them as `formats`. Failures named by a format count for [`--baseline`](#failures-that-were-there-before-baseline) like any other.
 
 ## Partial runs and the stop gate {#the-safety-model}
 

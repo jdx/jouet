@@ -412,8 +412,10 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             let output = String::from_utf8_lossy(&output);
             let format_changes = code == 0 && gofmt_changes(&job.argv, &job.dir, &output);
             suite.format_changes = format_changes;
+            // Where the command ran, when that is not where jouet did.
+            let elsewhere = (job.dir != cwd).then_some(job.dir.as_path());
             let mut digest = if cut {
-                testlog::digest_cut(&output, budget, &formats)
+                testlog::digest_cut(&output, budget, next(elsewhere).len(), &formats)
             } else {
                 testlog::digest_with(&output, code != 0 || format_changes, budget, &formats)
             };
@@ -501,8 +503,6 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 exit = suite_exit;
             }
             if !out.json {
-                // Where the command ran, when that is not where jouet did.
-                let elsewhere = (job.dir != cwd).then_some(job.dir.as_path());
                 emit(&outcome(
                     suite,
                     stream,
@@ -1502,14 +1502,16 @@ fn follow(
         };
         if !killed && at.elapsed() >= STOP_GRACE {
             killed = true;
-            let _ = child.kill();
+            // What it started first: the tree is looked at again while the
+            // command is there to say whose they are.
             tree.signal(true);
+            let _ = child.kill();
         } else if !passed_on && at.elapsed() >= STOP_PASSED_ON {
             passed_on = true;
+            tree.signal(false);
             if status.is_none() {
                 crate::stop::signal(child.id(), false);
             }
-            tree.signal(false);
         }
         // Not before what the child started has ended too, or been killed.
         if let Some(status) = status
@@ -2119,6 +2121,16 @@ fn more(s: &mut String, what: &str, names: &[String], omitted: u64) {
     s.push('\n');
 }
 
+/// What the command that runs an unfinished test alone is printed after:
+/// the command is the runner's, so it runs where the runner did, which is
+/// `elsewhere` when that is not where jouet is.
+fn next(elsewhere: Option<&Path>) -> String {
+    let cd = elsewhere.map_or_else(String::new, |dir| {
+        format!("cd {} && ", quote(&dir.display().to_string()))
+    });
+    format!("next: {cd}jouet test --cmd -- ")
+}
+
 /// How a run that was cut short ended, `how` being a time limit or a signal:
 /// that, after how long, and for an agent (`!streamed`) the tests that had
 /// passed and failed by then, then each test that had started and not
@@ -2147,15 +2159,12 @@ fn cut_outcome(suite: &SuiteReport, how: &str, streamed: bool, elsewhere: Option
         let _ = writeln!(s, "passed: {}", digest.passed_names.join(", "));
     }
     failures(&mut s, digest, false);
-    // The command is the runner's, so it runs where the runner did.
-    let cd = elsewhere.map_or_else(String::new, |dir| {
-        format!("cd {} && ", quote(&dir.display().to_string()))
-    });
+    let next = next(elsewhere);
     for test in &digest.unfinished {
         let _ = writeln!(s, "UNFINISHED {}", test.name);
         indented(&mut s, &test.lines);
         if let Some(rerun) = &test.rerun {
-            let _ = writeln!(s, "next: {cd}jouet test --cmd -- {rerun}");
+            let _ = writeln!(s, "{next}{rerun}");
         }
     }
     more(
@@ -2230,7 +2239,12 @@ mod tests {
             adapter: "task".into(),
             duration_ms: Some(2000),
             timed_out: true,
-            digest: Some(testlog::digest_cut("RUN slow\nwaiting\n", 0, &[format])),
+            digest: Some(testlog::digest_cut(
+                "RUN slow\nwaiting\n",
+                0,
+                next(None).len(),
+                &[format],
+            )),
             ..SuiteReport::default()
         };
         let how = "timed out (exit 124)";

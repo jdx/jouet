@@ -33,8 +33,9 @@ const MARKED: &str = "no failure recognised; lines marked as failures";
 /// Bytes past the budget that the names of failures not shown may take. A
 /// name left out sends an agent to the log, which costs a whole request.
 const NAMES_SLACK: usize = 1000;
-/// What the command that runs an unfinished test alone is printed after.
-const NEXT: &str = "next: jouet test --cmd -- ";
+/// The bytes `UNFINISHED name` takes over `FAIL name`, as [`fit`] counts a
+/// name.
+const UNFINISHED_OVER_FAIL: usize = "UNFINISHED".len() - "FAIL".len();
 
 /// Counts are summed over every summary line the output has, such as one
 /// per test binary for cargo; 0 when none says.
@@ -602,15 +603,17 @@ pub(crate) fn digest(text: &str, failed: bool, budget: usize) -> Digest {
 /// output is shown instead. `budget` caps the bytes of failure text, 0 for
 /// no cap.
 pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Format]) -> Digest {
-    digest_of(text, failed, false, budget, formats)
+    digest_of(text, failed, None, budget, formats)
 }
 
 /// [`digest_with`] for a run that was cut short, by a time limit or a
 /// signal: the failures it had by then, and the tests that had started and
 /// not finished, with the command that runs each alone, where a declared
 /// format tells; else the end of the output, which is where it stopped.
-pub(crate) fn digest_cut(text: &str, budget: usize, formats: &[Format]) -> Digest {
-    digest_of(text, true, true, budget, formats)
+/// `next` is the bytes each command is printed after, which count for the
+/// budget with it.
+pub(crate) fn digest_cut(text: &str, budget: usize, next: usize, formats: &[Format]) -> Digest {
+    digest_of(text, true, Some(next), budget, formats)
 }
 
 /// The bytes `failures` take as printed, as [`fit`] counts them.
@@ -621,7 +624,14 @@ fn cost(failures: &[Failure]) -> usize {
         .sum()
 }
 
-fn digest_of(text: &str, failed: bool, cut: bool, budget: usize, formats: &[Format]) -> Digest {
+/// `cut` is [`digest_cut`]'s `next`, for a run that was cut short.
+fn digest_of(
+    text: &str,
+    failed: bool,
+    cut: Option<usize>,
+    budget: usize,
+    formats: &[Format],
+) -> Digest {
     let lines = clean(text);
     let mut parsed = parse(&lines, formats);
     if failed {
@@ -632,14 +642,14 @@ fn digest_of(text: &str, failed: bool, cut: bool, budget: usize, formats: &[Form
     let mut warnings_all = parsed.warning_names.clone();
     warnings_all.sort();
     warnings_all.dedup();
-    let open = if cut {
+    let open = if cut.is_some() {
         std::mem::take(&mut parsed.unfinished)
     } else {
         Vec::new()
     };
     // Where a run that was cut short stopped, when no test is named for it.
     let mut stopped_at = Vec::new();
-    if cut {
+    if cut.is_some() {
         // Not a failure nobody recognised: the run stopped here.
         if open.is_empty() {
             let tail: Vec<String> = lines.iter().filter(|l| !l.is_empty()).cloned().collect();
@@ -688,12 +698,15 @@ fn digest_of(text: &str, failed: bool, cut: bool, budget: usize, formats: &[Form
             lines: u.lines,
         })
         .collect();
-    // Each with its command, which is printed whole or not at all: part of
-    // a command is another command.
+    // Each as it is printed: under `UNFINISHED`, and with its command, which
+    // is printed whole or not at all, since part of a command is another
+    // command.
+    let next = cut.unwrap_or(0);
     let (shown, more_unfinished, unfinished_omitted) = fit_with(open, left, |f| {
-        reruns[f.at]
-            .as_ref()
-            .map_or(0, |rerun| NEXT.len() + rerun.len() + 1)
+        UNFINISHED_OVER_FAIL
+            + reruns[f.at]
+                .as_ref()
+                .map_or(0, |rerun| next + rerun.len() + 1)
     });
     let unfinished = shown
         .into_iter()
@@ -1902,27 +1915,37 @@ fn fit_with(
 
 /// The end of the output of a run that was cut short, as shown within
 /// `budget` bytes, 0 for no cap: its last lines, since the run stopped at
-/// the last one, after a line that says how many before them were left out.
+/// the last one, after a line that says how many before them were left out,
+/// which counts for the budget too.
 fn fit_end(lines: Vec<String>, budget: usize) -> Vec<String> {
     let lines: Vec<String> = lines.into_iter().map(cap).collect();
     if budget == 0 {
         return lines;
     }
-    let mut room = budget;
-    let mut from = lines.len();
-    while from > 0 && lines[from - 1].len() + 3 <= room {
-        room -= lines[from - 1].len() + 3;
-        from -= 1;
-    }
-    // The last line is shown whatever it takes.
-    if from == lines.len() {
-        from = from.saturating_sub(1);
+    // As printed, each line indented by two.
+    let bytes = |line: &str| line.len() + 3;
+    let mut kept: usize = lines.iter().map(|l| bytes(l)).sum();
+    // A line that stands for lines left out before counts as those.
+    let mut skipped = 0;
+    let mut from = 0;
+    // The fewest lines left out that fit with the line that says so. The
+    // last line is shown whatever it takes.
+    while from + 1 < lines.len() {
+        let marker = if from == 0 {
+            0
+        } else {
+            bytes(&skipped_marker(skipped))
+        };
+        if kept + marker <= budget {
+            break;
+        }
+        kept -= bytes(&lines[from]);
+        skipped += stands_for(&lines[from]);
+        from += 1;
     }
     if from == 0 {
         return lines;
     }
-    // A line that stands for lines left out before counts as those.
-    let skipped = lines[..from].iter().map(|l| stands_for(l)).sum();
     let mut kept = vec![skipped_marker(skipped)];
     kept.extend(lines.into_iter().skip(from));
     kept

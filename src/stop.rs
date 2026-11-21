@@ -107,7 +107,10 @@ fn table() -> Vec<Proc> {
         .flatten()
         .filter_map(|entry| {
             let pid = entry.file_name().to_str()?.parse().ok()?;
-            let stat = std::fs::read_to_string(entry.path().join("stat")).ok()?;
+            // Not as UTF-8: the command's name is cut at 15 bytes, which
+            // may be inside a character, and the fields after it are ASCII.
+            let stat = std::fs::read(entry.path().join("stat")).ok()?;
+            let stat = String::from_utf8_lossy(&stat);
             // The command's name is in parentheses and may hold spaces or
             // parentheses itself: the fields after it start at the state.
             let (_, rest) = stat.rsplit_once(')')?;
@@ -276,6 +279,8 @@ mod tests {
             }),
             "the shell and its sleep are listed"
         );
+        let shell = child.id();
+        let sleep = tree.procs.iter().find(|p| p.pid != shell).cloned().unwrap();
         assert!(tree.running());
         signal(child.id(), true);
         child.wait().unwrap();
@@ -283,6 +288,13 @@ mod tests {
         assert!(tree.running(), "the sleep outlives the shell");
         assert!(!tree.has(child.id()));
         tree.signal(false);
-        assert!(until(|| !tree.running()), "SIGTERM ends the sleep");
+        // By the process table itself, not by what the tree makes of it.
+        let runs = || {
+            table()
+                .iter()
+                .any(|p| p.pid == sleep.pid && p.born == sleep.born)
+        };
+        assert!(until(|| !runs()), "SIGTERM ends the sleep");
+        assert!(!tree.running());
     }
 }

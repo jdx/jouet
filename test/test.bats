@@ -2302,9 +2302,10 @@ assert_ended() {
 	assert_line '  step 1'
 	assert_ended "$(cat below)"
 
-	# One of them that ignores the signal is killed after two seconds.
+	# One of them that ignores the signal is killed after two seconds. It
+	# says it has started only once it ignores the signal.
 	# shellcheck disable=SC2016
-	stop_jouet_test --cmd -- sh -c 'sh -c "trap \"\" TERM; while :; do sleep 1; done" & echo $! >below; touch started; wait'
+	stop_jouet_test --cmd -- sh -c 'sh -c "echo \$\$ >below; trap \"\" TERM; touch started; while :; do sleep 1; done" & wait'
 	assert_equal "$stopped" 143
 	run cat out
 	assert_line --regexp '^cmd: stopped by SIGTERM after ([2-9]|[0-9]{2,})\.[0-9]s$'
