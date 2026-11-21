@@ -2208,6 +2208,17 @@ TOML
 	assert_line 'FAIL no failure recognised; the end of the output'
 }
 
+# Kills a process and those below it, the process first, so that it starts
+# no more of them.
+kill_tree() {
+	local children child
+	children=$(ps -A -o pid=,ppid= | awk -v parent="$1" '$2 == parent { print $1 }')
+	kill -KILL "$1" 2>/dev/null || true
+	for child in $children; do
+		kill_tree "$child"
+	done
+}
+
 # Runs `jouet test "$@"` in the background, sends it SIGTERM once the command
 # it runs has made the file `started`, and leaves its exit status in
 # `$stopped`, its stdout in `out`.
@@ -2229,9 +2240,10 @@ stop_jouet_test() {
 		sleep 0.05
 	done
 	if kill -0 "$pid" 2>/dev/null; then
-		kill -KILL "$pid"
+		# With the command it left running, which may ignore SIGTERM.
+		kill_tree "$pid"
 		wait "$pid" || true
-		fail 'jouet test was still running 15 seconds after SIGTERM'
+		fail "jouet test was still running 15 seconds after SIGTERM; stdout: $(cat out); stderr: $(cat err)"
 	fi
 	stopped=0
 	wait "$pid" || stopped=$?

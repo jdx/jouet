@@ -1755,6 +1755,12 @@ fn unfinished_tests_and_the_end_of_the_output_keep_to_the_budget() {
             "... 14 lines skipped"
         ]
     );
+    // Under a budget smaller than its command, the first still has its name
+    // and its command, without which there is nothing to do next.
+    let d = digest_cut(&long, 5, &[format()]);
+    assert_eq!(unfinished(&d), ["a"]);
+    assert_eq!(d.unfinished[0].rerun.as_deref(), Some("run-one a"));
+    assert_eq!(d.unfinished[0].lines, ["... 17 lines skipped"]);
 
     // The end of the output keeps its last lines, the run having stopped at
     // the last one, and says first how many lines came before them.

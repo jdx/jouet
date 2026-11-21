@@ -1182,6 +1182,9 @@ fn execute(job: &Job, log: &Path, stream: bool, stop: Option<&Stop>) -> Result<R
     let waited = follow(&mut child, log, stream, stop);
     hold(false);
     let (status, told) = waited.map_err(|e| format!("running {}: {e}", job.argv[0]))?;
+    // One that came after `follow` last looked was still held. From here a
+    // SIGTERM ends jouet, so this look misses none.
+    let told = told || stop.is_some_and(Stop::told);
     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     Ok(Ran {
         code: code_of(status),

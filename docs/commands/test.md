@@ -330,7 +330,7 @@ next: jouet test --cmd -- ./e2e cli/test_sync_remote_slow
 full log: ~/.local/state/jouet/logs/test-1795270663748-391764-0.log
 ```
 
-After the first line come the tests that finished (the passes by name, for up to eight, and each failure as in any run), then each test that had started and not finished, with what it had printed and, on a `next:` line, the command that runs it alone. Run that one, rather than the whole set again with a longer limit. The command is the runner's, so it runs where the runner did: for a suite that ran in another directory than the one `jouet test` was run in, the line reads `next: cd DIR && jouet test --cmd -- ...`. A person at a terminal, who saw the output as it ran, gets the first line with the log's path, and none of this.
+After the first line come the tests that finished (the passes by name, for up to eight, and each failure as in any run), then each test that had started and not finished, with what it had printed and, where its format declares `rerun`, a `next:` line with the command that runs it alone. Run that one, rather than the whole set again with a longer limit. The command is the runner's, so it runs where the runner did: for a suite that ran in another directory than the one `jouet test` was run in, the line reads `next: cd DIR && jouet test --cmd -- ...`. A person at a terminal, who saw the output as it ran, gets the first line with the log's path, and none of this.
 
 Only a [format you declare](#your-own-runners-formats) says which test was running, and only for a runner that prints a line when a test starts: the format's `start` names the test, `passed` says when one finished, and `rerun` is the command for one test. The runners jouet knows itself do not name an unfinished test yet. Where the output cannot tell, the run still says that it timed out, and shows the end of the output, which is where it stopped:
 
@@ -343,7 +343,7 @@ the output does not name the test that was running; its end:
 full log: ~/.local/state/jouet/logs/test-1795270736495-394889-0.log
 ```
 
-Unfinished tests and the end of the output keep to what the failures left of `--budget`. A test's `next:` command counts toward it and is printed whole or not at all, since part of a command is another command: the first test's output is cut to what the command leaves, with a `... N lines skipped` line, and the unfinished tests after those that fit are named on a `... N more unfinished: ...` line. The end of the output keeps its last lines, and always the last one, where the run stopped, after a `... N lines skipped` line that says how many came before them.
+Unfinished tests and the end of the output keep to what the failures left of `--budget`. A test's `next:` command counts toward it and is printed whole or not at all, since part of a command is another command. The first unfinished test always has its name and its command, even under a budget smaller than the two, without which the answer names nothing to do next: its output is cut to what the command leaves, with a `... N lines skipped` line, and the unfinished tests after those that fit are named on a `... N more unfinished: ...` line. The end of the output keeps its last lines, and always the last one, where the run stopped, after a `... N lines skipped` line that says how many came before them.
 
 A run is cut short in one of three ways:
 
