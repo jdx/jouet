@@ -281,11 +281,13 @@ fn followed(dir: &Path) -> Option<PathBuf> {
 /// [`push_dir`]'s to check.
 fn stated_dir(command: &str, cwd: &Path) -> Option<PathBuf> {
     let script = shell::parse(command);
-    // The last push a script that worked has run: one after `||` ran only
-    // if something failed, so it is passed over.
-    let at = (0..script.commands.len())
-        .rev()
-        .find(|&i| is_push(&script.commands[i]) && !alternative(&script.commands, i))?;
+    // The last push is the one whose PR is new. One after `||` ran only if
+    // something failed, and a script that worked does not say whether it
+    // did, or an earlier push instead.
+    let at = script.commands.iter().rposition(is_push)?;
+    if alternative(&script.commands, at) {
+        return None;
+    }
     let (before, push) = (&script.commands[..at], &script.commands[at]);
     if !plain(command, &script.commands[..=at]) {
         return None;
@@ -680,9 +682,7 @@ mod tests {
                 "cd /src/other && gh -R jdx/other stack submit",
                 "/src/other",
             ),
-            // A push after `||` did not run if the one before it worked.
-            ("git push || git -C /src/other push", "/work/session"),
-            ("cd /src/a && git push || git -C /src/b push", "/src/a"),
+            // What follows `||` is not a push, so the push is the one that ran.
             ("git -C /src/a push || echo failed", "/src/a"),
             ("git fetch || true && git -C /src/other push", "/src/other"),
             (
@@ -765,6 +765,10 @@ mod tests {
             "HOME=/srv/alt git -C ~/repo push",
             // The only push runs when something before it failed.
             "git fetch || git -C /src/other push",
+            // Either push may be the one that worked.
+            "git push || git -C /src/other push",
+            "cd /src/a && git push || git -C /src/b push",
+            "git -C /src/a push && echo ok || git -C /src/b push",
             "git fetch || cat log | git -C /src/other push",
             "cd /src/other && gh api pr create",
             "env -C /src/other git push",
