@@ -61,9 +61,12 @@ use usage_rs::Args;
 /// A run that was cut short says so in place of a failure: `timed out` when
 /// the command exited 124, as `timeout` does at its limit, and `stopped by
 /// SIGTERM` when a signal ended the command or jouet itself, which then ends
-/// the command and prints this before it ends. It names the tests that had
-/// started and not finished where a declared format tells, with the command
-/// that runs each alone, and else shows the end of the output.
+/// the command, with the processes it started, and prints this before it
+/// ends. For an agent it names the tests that had started and not finished
+/// where a declared format tells, each with the command that runs it alone
+/// when the format declares one (`rerun`), and else shows the end of the
+/// output. A person at a terminal, who saw the output go by, gets the first
+/// line and the log's path.
 ///
 /// Exits 1 when tests fail, 2 for a usage error (the runner's too), 4 when
 /// no runner is found or installed, 124 when the command timed out.

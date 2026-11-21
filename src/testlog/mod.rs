@@ -33,6 +33,8 @@ const MARKED: &str = "no failure recognised; lines marked as failures";
 /// Bytes past the budget that the names of failures not shown may take. A
 /// name left out sends an agent to the log, which costs a whole request.
 const NAMES_SLACK: usize = 1000;
+/// What the command that runs an unfinished test alone is printed after.
+const NEXT: &str = "next: jouet test --cmd -- ";
 
 /// Counts are summed over every summary line the output has, such as one
 /// per test binary for cargo; 0 when none says.
@@ -686,7 +688,13 @@ fn digest_of(text: &str, failed: bool, cut: bool, budget: usize, formats: &[Form
             lines: u.lines,
         })
         .collect();
-    let (shown, more_unfinished, unfinished_omitted) = fit(open, left);
+    // Each with its command, which is printed whole or not at all: part of
+    // a command is another command.
+    let (shown, more_unfinished, unfinished_omitted) = fit_with(open, left, |f| {
+        reruns[f.at]
+            .as_ref()
+            .map_or(0, |rerun| NEXT.len() + rerun.len() + 1)
+    });
     let unfinished = shown
         .into_iter()
         .zip(reruns)
@@ -696,22 +704,7 @@ fn digest_of(text: &str, failed: bool, cut: bool, budget: usize, formats: &[Form
             rerun,
         })
         .collect();
-    let output_end = fit(
-        if stopped_at.is_empty() {
-            Vec::new()
-        } else {
-            vec![Found {
-                at: 0,
-                name: String::new(),
-                lines: stopped_at,
-            }]
-        },
-        left,
-    )
-    .0
-    .into_iter()
-    .flat_map(|f| f.lines)
-    .collect();
+    let output_end = fit_end(stopped_at, left);
     let no_tests = parsed.passed + parsed.failed == 0 && no_tests(&lines);
     Digest {
         passed: parsed.passed,
@@ -1849,14 +1842,25 @@ fn skipped_marker(n: usize) -> String {
 /// shown, cut to the budget if it must be. Once one does not fit, the rest
 /// are names only, so the order holds.
 fn fit(found: Vec<Found>, budget: usize) -> (Vec<Failure>, Vec<String>, u64) {
+    fit_with(found, budget, |_| 0)
+}
+
+/// [`fit`], each failure taking `extra` bytes more than its name and lines:
+/// what is printed with it. The first is cut to the budget less that.
+fn fit_with(
+    found: Vec<Found>,
+    budget: usize,
+    extra: impl Fn(&Found) -> usize,
+) -> (Vec<Failure>, Vec<String>, u64) {
     let mut shown: Vec<Failure> = Vec::new();
     let mut more = Vec::new();
     let mut omitted = 0;
     let mut used = 0;
     for f in found {
+        let extra = extra(&f);
         let lines = shape(&f.name, f.lines);
         // As printed: `FAIL name`, then each line indented by two.
-        let cost = f.name.len() + 6 + lines.iter().map(|l| l.len() + 3).sum::<usize>();
+        let cost = f.name.len() + 6 + extra + lines.iter().map(|l| l.len() + 3).sum::<usize>();
         if more.is_empty() && omitted == 0 && (budget == 0 || used + cost <= budget) {
             used += cost;
             shown.push(Failure {
@@ -1864,7 +1868,7 @@ fn fit(found: Vec<Found>, budget: usize) -> (Vec<Failure>, Vec<String>, u64) {
                 lines,
             });
         } else if shown.is_empty() {
-            let mut room = budget.saturating_sub(f.name.len() + 6);
+            let mut room = budget.saturating_sub(f.name.len() + 6 + extra);
             let kept: Vec<String> = lines
                 .iter()
                 .take_while(|l| {
@@ -1894,6 +1898,46 @@ fn fit(found: Vec<Found>, budget: usize) -> (Vec<Failure>, Vec<String>, u64) {
         }
     }
     (shown, more, omitted)
+}
+
+/// The end of the output of a run that was cut short, as shown within
+/// `budget` bytes, 0 for no cap: its last lines, since the run stopped at
+/// the last one, after a line that says how many before them were left out.
+fn fit_end(lines: Vec<String>, budget: usize) -> Vec<String> {
+    let lines: Vec<String> = lines.into_iter().map(cap).collect();
+    if budget == 0 {
+        return lines;
+    }
+    let mut room = budget;
+    let mut from = lines.len();
+    while from > 0 && lines[from - 1].len() + 3 <= room {
+        room -= lines[from - 1].len() + 3;
+        from -= 1;
+    }
+    // The last line is shown whatever it takes.
+    if from == lines.len() {
+        from = from.saturating_sub(1);
+    }
+    if from == 0 {
+        return lines;
+    }
+    // A line that stands for lines left out before counts as those.
+    let skipped = lines[..from].iter().map(|l| stands_for(l)).sum();
+    let mut kept = vec![skipped_marker(skipped)];
+    kept.extend(lines.into_iter().skip(from));
+    kept
+}
+
+/// How many lines of output a shown line stands for: what a marker of
+/// skipped lines says, and one for any other.
+fn stands_for(line: &str) -> usize {
+    line.strip_prefix("... ")
+        .and_then(|rest| {
+            rest.strip_suffix(" lines skipped")
+                .or_else(|| rest.strip_suffix(" line skipped"))
+        })
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(1)
 }
 
 #[cfg(test)]

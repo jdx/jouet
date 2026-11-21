@@ -1674,6 +1674,15 @@ fn a_test_is_unfinished_until_it_passes_fails_or_the_run_sums_up() {
     );
     assert_eq!(names(&d), ["b"]);
     assert_eq!(unfinished(&d), ["a"]);
+    // A pass line of another test is not the end of what a failure printed
+    // before it, nor one of its lines.
+    let d = cut(
+        "failed = ['^FAIL (\\S+)']\nstart = ['^RUN (\\S+)']\npassed = ['^PASS (\\S+)']\n",
+        "RUN a\nRUN b\nassertion for b\nPASS a\nFAIL b\n",
+    );
+    assert_eq!(names(&d), ["b"]);
+    assert_eq!(d.failures[0].lines, ["assertion for b"]);
+    assert!(d.unfinished.is_empty());
     let d = cut(
         "failed = ['^FAIL (\\S+)']\nstart = ['^RUN (\\S+)']\n",
         "RUN a\nFAIL a\nboom\n",
@@ -1720,33 +1729,52 @@ fn unfinished_tests_and_the_end_of_the_output_keep_to_the_budget() {
         text.push_str(&format!("RUN test_{i}\ntest_{i}: {}\n", "x".repeat(60)));
     }
     let d = digest_cut(&text, 200, &[format()]);
-    assert_eq!(unfinished(&d), ["test_0", "test_1"]);
-    assert_eq!(d.unfinished[1].rerun.as_deref(), Some("run-one test_1"));
-    assert_eq!(d.more_unfinished[0], "test_2");
+    // The command printed with each counts too: two tests' output fits in
+    // 200 bytes, and one test with its command.
+    assert_eq!(unfinished(&d), ["test_0"]);
+    assert_eq!(d.unfinished[0].rerun.as_deref(), Some("run-one test_0"));
+    assert_eq!(d.more_unfinished[0], "test_1");
     assert_eq!(
         d.unfinished.len() + d.more_unfinished.len() + d.unfinished_omitted as usize,
         300
     );
     assert!(d.unfinished_omitted > 0);
 
-    // The first is cut to the budget, and says how much it left out.
+    // The first is cut to the budget, and says how much it left out. Its
+    // command is whole, and its output is what gives way to it.
     let long = format!("RUN a\n{}", "a line of output\n".repeat(50));
     let d = digest_cut(&long, 100, &[format()]);
     assert_eq!(unfinished(&d), ["a"]);
-    let last = d.unfinished[0].lines.last().unwrap();
-    assert!(
-        last.starts_with("... ") && last.ends_with(" lines skipped"),
-        "{last}"
+    assert_eq!(d.unfinished[0].rerun.as_deref(), Some("run-one a"));
+    assert_eq!(
+        d.unfinished[0].lines,
+        [
+            "a line of output",
+            "a line of output",
+            "a line of output",
+            "... 14 lines skipped"
+        ]
     );
 
-    // So is the end of the output.
-    let d = digest_cut(&"a line of output\n".repeat(50), 100, &[]);
-    let last = d.output_end.last().unwrap();
-    assert!(
-        last.starts_with("... ") && last.ends_with(" lines skipped"),
-        "{last}"
+    // The end of the output keeps its last lines, the run having stopped at
+    // the last one, and says first how many lines came before them.
+    let mut text = "a line of output\n".repeat(49);
+    text.push_str("where it stopped\n");
+    let d = digest_cut(&text, 100, &[]);
+    assert_eq!(
+        d.output_end,
+        [
+            "... 45 lines skipped",
+            "a line of output",
+            "a line of output",
+            "a line of output",
+            "a line of output",
+            "where it stopped"
+        ]
     );
-    assert!(d.output_end.len() < 8, "{:?}", d.output_end);
+    // The last line is shown whatever the budget.
+    let d = digest_cut(&text, 5, &[]);
+    assert_eq!(d.output_end, ["... 49 lines skipped", "where it stopped"]);
 }
 
 #[test]
@@ -1770,6 +1798,14 @@ fn a_format_that_cannot_tell_what_is_unfinished_does_not_load() {
             "`rerun` needs a `start` pattern with a group that names the test",
         ),
         (
+            format!("{base}rerun = \"run-one '{{name}}'\""),
+            "`rerun` has `{name}` inside quotes",
+        ),
+        (
+            format!("{base}rerun = 'run-one \"{{name}}\"'"),
+            "`rerun` has `{name}` inside quotes",
+        ),
+        (
             format!("{base}[[examples]]\noutput = 'RUN a'\nunfinished = []"),
             "example 1 leaves [\"a\"] unfinished, not []",
         ),
@@ -1781,6 +1817,12 @@ fn a_format_that_cannot_tell_what_is_unfinished_does_not_load() {
         let err = Format::parse("x", &text).unwrap_err();
         assert!(err.contains(why), "{text}: {err}");
     }
+    // Quotes elsewhere in the command are the format's own.
+    Format::parse(
+        "x",
+        &format!("{base}rerun = \"run-one --tag='not slow' {{name}}\"\n"),
+    )
+    .unwrap();
     // An example says what it leaves unfinished only when it lists it.
     Format::parse("x", &format!("{base}[[examples]]\noutput = 'RUN a'\n")).unwrap();
     Format::parse(

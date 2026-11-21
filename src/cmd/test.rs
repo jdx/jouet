@@ -6,6 +6,7 @@
 use super::Output;
 use crate::affected::{self, Decision, Plan, Suite};
 use crate::cli::TestArgs;
+use crate::stop::{Stop, Tree};
 use crate::testlog::{self, Digest};
 use jouet_output::display::Mode;
 use jouet_output::exit::Exit;
@@ -16,8 +17,6 @@ use std::fs::File;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 mod baseline;
@@ -48,7 +47,7 @@ struct Report {
     ok: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Default, Serialize)]
 struct SuiteReport {
     adapter: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -376,8 +375,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 if let Some(key) = &key
                     && after.is_some()
                     && after == tree
-                    && ran.code != TIMED_OUT
-                    && stopped_by(ran.code).is_none()
+                    && !cut_short(ran.code)
                 {
                     let kept = reuse::Kept {
                         at: 0,
@@ -503,7 +501,15 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 exit = suite_exit;
             }
             if !out.json {
-                emit(&outcome(suite, stream, empty_test, contradictory));
+                // Where the command ran, when that is not where jouet did.
+                let elsewhere = (job.dir != cwd).then_some(job.dir.as_path());
+                emit(&outcome(
+                    suite,
+                    stream,
+                    empty_test,
+                    contradictory,
+                    elsewhere,
+                ));
             }
             if told {
                 stopped = true;
@@ -515,14 +521,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // is run, compared or recorded, since whoever sent the signal is not
     // waiting. jouet then ends as the signal would have ended it.
     if stopped {
-        if runs {
-            super::hook::mark_own_run(&cwd, &own_command(), false);
-        }
-        report.ok = false;
-        if out.json {
-            out.result(&report, String::new);
-        }
-        die();
+        end_stopped(out, &mut report, runs, &cwd);
     }
     // Every failed suite blames the machine: said here, where the agent
     // reads it, and not run again at the merge base, which fails the same
@@ -631,7 +630,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                     mode
                 };
                 slow = mode == baseline::Mode::Kept;
-                baseline::compare(&root, base, &formats, &failed, mode)
+                baseline::compare(&root, base, &formats, &failed, mode, &stop)
             }
         };
         match found {
@@ -649,7 +648,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                     emit(&found.text());
                 }
                 if found.none_new() {
-                    exit = Exit::Ok;
+                    // Only the suites that failed were compared: one that
+                    // was cut short still has no answer.
+                    exit = cut_exit(&report.suites);
                 }
                 report.baseline = Some(found);
             }
@@ -664,6 +665,11 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 }
             }
         }
+    }
+    // Told to stop while a command ran at the merge base: it was stopped
+    // and the checkout removed, and the run ends as above.
+    if stop.told() {
+        end_stopped(out, &mut report, runs, &cwd);
     }
     report.ok = exit == Exit::Ok;
     if args.affected
@@ -1065,39 +1071,10 @@ fn stopped_by(code: i32) -> Option<&'static str> {
         .map(|(_, name)| *name)
 }
 
-/// SIGTERM while a command runs, which is what `timeout` and a harness send
-/// jouet at a time limit: in place of ending jouet at once it sets a flag, so
-/// the command can be stopped and what it had said by then reported. Outside
-/// a run, and once the flag is read, SIGTERM ends jouet as it always did.
-struct Stop {
-    told: Arc<AtomicBool>,
-    /// Whether SIGTERM ends jouet.
-    ends: Arc<AtomicBool>,
-}
-
-impl Stop {
-    fn new() -> Self {
-        let told = Arc::new(AtomicBool::new(false));
-        let ends = Arc::new(AtomicBool::new(true));
-        // The first ends jouet when `ends` is set; else the second sets `told`.
-        #[cfg(unix)]
-        {
-            let term = signal_hook::consts::SIGTERM;
-            let _ = signal_hook::flag::register_conditional_default(term, Arc::clone(&ends));
-            let _ = signal_hook::flag::register(term, Arc::clone(&told));
-        }
-        Self { told, ends }
-    }
-
-    /// Whether jouet was told to stop. From then on SIGTERM ends it, so a
-    /// second one is not held up by the report.
-    fn told(&self) -> bool {
-        let told = self.told.load(Ordering::Relaxed);
-        if told {
-            self.ends.store(true, Ordering::Relaxed);
-        }
-        told
-    }
+/// Whether a run that ended with `code` was cut short, by a time limit or
+/// a signal, and so has no whole answer.
+fn cut_short(code: i32) -> bool {
+    code == TIMED_OUT || stopped_by(code).is_some()
 }
 
 /// Ends jouet the way the SIGTERM it was sent would have.
@@ -1109,21 +1086,31 @@ fn die() -> ! {
     std::process::exit(i32::from(Exit::Failed.code()))
 }
 
-/// Passes the SIGTERM jouet was sent on to the command it runs.
-#[cfg(unix)]
-fn pass_on(child: &Child) {
-    if let Ok(pid) = libc::pid_t::try_from(child.id()) {
-        // SAFETY: kill(2) with a child's pid and a constant signal has no
-        // memory effects.
-        unsafe {
-            libc::kill(pid, libc::SIGTERM);
-        }
+/// Ends a run jouet was told to stop, once what it had to say is out: the
+/// report for `--json`, and the mark for the stop gate cleared.
+fn end_stopped(out: &Output, report: &mut Report, runs: bool, cwd: &Path) -> ! {
+    if runs {
+        super::hook::mark_own_run(cwd, &own_command(), false);
     }
+    report.ok = false;
+    if out.json {
+        out.result(report, String::new);
+    }
+    die()
 }
 
-/// Nothing sends jouet a SIGTERM to pass on.
-#[cfg(not(unix))]
-fn pass_on(_child: &Child) {}
+/// What the suites that were cut short leave of the exit code once a
+/// comparison at the merge base has cleared the failures: `failed` for one
+/// a signal stopped, `timeout` for one that ran into a time limit.
+fn cut_exit(suites: &[SuiteReport]) -> Exit {
+    if suites.iter().any(|suite| suite.stopped_by.is_some()) {
+        Exit::Failed
+    } else if suites.iter().any(|suite| suite.timed_out) {
+        Exit::Timeout
+    } else {
+        Exit::Ok
+    }
+}
 
 /// How a job's run ended.
 struct Ran {
@@ -1169,7 +1156,7 @@ fn execute(job: &Job, log: &Path, stream: bool, stop: Option<&Stop>) -> Result<R
     // From before the command starts, so no SIGTERM ends jouet with it running.
     let hold = |held: bool| {
         if let Some(stop) = stop {
-            stop.ends.store(!held, Ordering::Relaxed);
+            stop.hold(held);
         }
     };
     hold(true);
@@ -1457,8 +1444,9 @@ fn task_running(dir: &Path, program: &str) -> Option<String> {
 
 /// Waits for the child to exit, copying what it writes to its log onto
 /// stdout when `stream`. Once `stop` says jouet was told to stop, the child
-/// is too, and killed if it has not ended [`STOP_GRACE`] later; the flag
-/// returned says that happened.
+/// and the processes it started are too, and killed if they have not ended
+/// [`STOP_GRACE`] later; the flag returned says jouet was told, which a
+/// child that ended at that moment does not undo.
 fn follow(
     child: &mut Child,
     log: &Path,
@@ -1473,10 +1461,14 @@ fn follow(
     let mut buf = [0u8; 8192];
     // Short at first, so a command that ends at once is not kept waiting.
     let mut pause = Duration::from_millis(1);
-    let mut told: Option<Instant> = None;
+    let mut status = None;
+    // Since when jouet has been told to stop, and what it then had to stop.
+    let mut told: Option<(Instant, Tree)> = None;
     let (mut passed_on, mut killed) = (false, false);
     loop {
-        let status = child.try_wait()?;
+        if status.is_none() {
+            status = child.try_wait()?;
+        }
         if let Some((reader, stdout)) = &mut copy {
             loop {
                 let n = reader.read(&mut buf)?;
@@ -1487,20 +1479,40 @@ fn follow(
             }
             stdout.flush()?;
         }
-        if let Some(status) = status {
-            return Ok((status, told.is_some()));
-        }
         if told.is_none() && stop.is_some_and(Stop::told) {
-            told = Some(Instant::now());
+            // A child that has been reaped has no process of its own left
+            // to look below.
+            let tree = if status.is_none() {
+                Tree::of(child.id())
+            } else {
+                Tree::none()
+            };
+            told = Some((Instant::now(), tree));
         }
-        if let Some(at) = told {
-            if !killed && at.elapsed() >= STOP_GRACE {
-                killed = true;
-                let _ = child.kill();
-            } else if !passed_on && at.elapsed() >= STOP_PASSED_ON {
-                passed_on = true;
-                pass_on(child);
+        let Some((at, tree)) = &mut told else {
+            if let Some(status) = status {
+                return Ok((status, false));
             }
+            std::thread::sleep(pause);
+            pause = (pause * 2).min(Duration::from_millis(50));
+            continue;
+        };
+        if !killed && at.elapsed() >= STOP_GRACE {
+            killed = true;
+            let _ = child.kill();
+            tree.signal(true);
+        } else if !passed_on && at.elapsed() >= STOP_PASSED_ON {
+            passed_on = true;
+            if status.is_none() {
+                crate::stop::signal(child.id(), false);
+            }
+            tree.signal(false);
+        }
+        // Not before what the child started has ended too, or been killed.
+        if let Some(status) = status
+            && (killed || !tree.running())
+        {
+            return Ok((status, true));
         }
         std::thread::sleep(pause);
         pause = (pause * 2).min(Duration::from_millis(50));
@@ -1930,15 +1942,22 @@ fn text(report: &Report) -> String {
 
 /// How a suite's run ended: a line with its counts and its log, and for an
 /// agent (`!streamed`) the failures it found, cut to the budget.
-fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory: bool) -> String {
+fn outcome(
+    suite: &SuiteReport,
+    streamed: bool,
+    empty_test: bool,
+    contradictory: bool,
+    elsewhere: Option<&Path>,
+) -> String {
     let secs = suite.duration_ms.unwrap_or(0) as f64 / 1000.0;
     // Cut short, whatever the command made of it: a command told to stop
     // may still exit 0.
     if let Some(signal) = suite.stopped_by {
-        return cut_outcome(suite, &format!("stopped by {signal}"), streamed);
+        return cut_outcome(suite, &format!("stopped by {signal}"), streamed, elsewhere);
     }
     if suite.timed_out {
-        return cut_outcome(suite, &format!("timed out (exit {TIMED_OUT})"), streamed);
+        let how = format!("timed out (exit {TIMED_OUT})");
+        return cut_outcome(suite, &how, streamed, elsewhere);
     }
     let incomplete = suite.digest.as_ref().is_some_and(|d| d.nextest_incomplete);
     let mut s = match suite.exit_code {
@@ -2100,9 +2119,10 @@ fn more(s: &mut String, what: &str, names: &[String], omitted: u64) {
 /// How a run that was cut short ended, `how` being a time limit or a signal:
 /// that, after how long, and for an agent (`!streamed`) the tests that had
 /// passed and failed by then, then each test that had started and not
-/// finished with the command that runs it alone, or else the end of the
-/// output, which is where it stopped.
-fn cut_outcome(suite: &SuiteReport, how: &str, streamed: bool) -> String {
+/// finished with the command that runs it alone, from `elsewhere` when the
+/// run was not where jouet is, or else the end of the output, which is
+/// where it stopped.
+fn cut_outcome(suite: &SuiteReport, how: &str, streamed: bool, elsewhere: Option<&Path>) -> String {
     let secs = suite.duration_ms.unwrap_or(0) as f64 / 1000.0;
     let mut s = format!("{}: {how} after {secs:.1}s", suite.adapter);
     let log = suite.log.as_deref().unwrap_or("");
@@ -2124,11 +2144,15 @@ fn cut_outcome(suite: &SuiteReport, how: &str, streamed: bool) -> String {
         let _ = writeln!(s, "passed: {}", digest.passed_names.join(", "));
     }
     failures(&mut s, digest, false);
+    // The command is the runner's, so it runs where the runner did.
+    let cd = elsewhere.map_or_else(String::new, |dir| {
+        format!("cd {} && ", quote(&dir.display().to_string()))
+    });
     for test in &digest.unfinished {
         let _ = writeln!(s, "UNFINISHED {}", test.name);
         indented(&mut s, &test.lines);
         if let Some(rerun) = &test.rerun {
-            let _ = writeln!(s, "next: jouet test --cmd -- {rerun}");
+            let _ = writeln!(s, "next: {cd}jouet test --cmd -- {rerun}");
         }
     }
     more(
@@ -2168,6 +2192,83 @@ fn counts(digest: &Digest) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_suite_that_was_cut_short_keeps_its_exit_when_the_rest_also_fail_at_the_base() {
+        let suite = |timed_out, stopped_by| SuiteReport {
+            timed_out,
+            stopped_by,
+            ..SuiteReport::default()
+        };
+        // Every failure also fails at the merge base, and nothing was cut.
+        assert_eq!(
+            cut_exit(&[suite(false, None), suite(false, None)]),
+            Exit::Ok
+        );
+        assert_eq!(
+            cut_exit(&[suite(false, None), suite(true, None)]),
+            Exit::Timeout
+        );
+        // As without a comparison: a stopped suite fails the run.
+        assert_eq!(
+            cut_exit(&[suite(true, None), suite(false, Some("SIGTERM"))]),
+            Exit::Failed
+        );
+    }
+
+    #[test]
+    fn the_command_for_an_unfinished_test_runs_where_the_suite_did() {
+        let format = testlog::Format::parse(
+            "x",
+            "failed = ['^FAIL (\\S+)']\nstart = ['^RUN (\\S+)']\nrerun = 'run-one {name}'\n",
+        )
+        .unwrap();
+        let suite = SuiteReport {
+            adapter: "task".into(),
+            duration_ms: Some(2000),
+            timed_out: true,
+            digest: Some(testlog::digest_cut("RUN slow\nwaiting\n", 0, &[format])),
+            ..SuiteReport::default()
+        };
+        let how = "timed out (exit 124)";
+        let here = cut_outcome(&suite, how, false, None);
+        assert!(
+            here.contains("\nnext: jouet test --cmd -- run-one slow\n"),
+            "{here}"
+        );
+        // In another directory than jouet's own, the command says to go there.
+        let there = cut_outcome(&suite, how, false, Some(Path::new("/repo/its tests")));
+        assert!(
+            there.contains("\nnext: cd '/repo/its tests' && jouet test --cmd -- run-one slow\n"),
+            "{there}"
+        );
+        // A person who watched the run gets the headline alone.
+        let streamed = cut_outcome(&suite, how, true, None);
+        assert!(
+            streamed.starts_with("task: timed out (exit 124) after 2.0s")
+                && !streamed.contains("next: "),
+            "{streamed}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stop_seen_only_once_the_command_has_ended_still_counts() {
+        let run = || {
+            let mut child = Command::new("true").stdin(Stdio::null()).spawn().unwrap();
+            // Ended and reaped before the run looks at it, as when SIGTERM
+            // arrives between the command's exit and the next look.
+            child.wait().unwrap();
+            child
+        };
+        let log = Path::new("not-read-without-streaming");
+        let (status, told) = follow(&mut run(), log, false, Some(&Stop::told_already())).unwrap();
+        assert!(status.success() && told);
+        let (status, told) = follow(&mut run(), log, false, Some(&Stop::new())).unwrap();
+        assert!(status.success() && !told);
+        let (status, told) = follow(&mut run(), log, false, None).unwrap();
+        assert!(status.success() && !told);
+    }
 
     #[test]
     fn change_context_preserves_nested_scope_and_names_touched_files() {

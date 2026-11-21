@@ -24,7 +24,8 @@
 //! # with a group. Without it, only the last test started can be unfinished.
 //! passed = ['^PASS: (?<name>\S+)']
 //! # The command that runs one test alone, `{name}` being the test: the next
-//! # command a run that was cut short gives for an unfinished test.
+//! # command a run that was cut short gives for an unfinished test. jouet
+//! # quotes the name for the shell, so `{name}` stands outside any quotes.
 //! rerun = "mise run test:e2e {name}"
 //!
 //! [[examples]]
@@ -125,6 +126,31 @@ fn any(patterns: &[Regex], line: &str) -> bool {
     patterns.iter().any(|p| p.is_match(line))
 }
 
+/// Whether a `{name}` of `rerun` stands inside quotes, as a shell reads
+/// the command: the name is quoted when it is filled in, and quotes of its
+/// own would end those around it.
+fn name_in_quotes(rerun: &str) -> bool {
+    let mut quote = None;
+    let mut escaped = false;
+    for (i, c) in rerun.char_indices() {
+        if quote.is_some() && rerun[i..].starts_with(NAME) {
+            return true;
+        }
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match (quote, c) {
+            // Nothing escapes inside single quotes.
+            (None | Some('"'), '\\') => escaped = true,
+            (None, '\'' | '"') => quote = Some(c),
+            (Some(open), _) if open == c => quote = None,
+            _ => {}
+        }
+    }
+    false
+}
+
 impl Format {
     /// The format `text` declares, named `name`, once its examples pass.
     pub(crate) fn parse(name: &str, text: &str) -> Result<Self, String> {
@@ -141,6 +167,11 @@ impl Format {
             if !rerun.contains(NAME) {
                 return Err(format!(
                     "`rerun` needs `{NAME}`, where the test's name goes"
+                ));
+            }
+            if name_in_quotes(rerun) {
+                return Err(format!(
+                    "`rerun` has `{NAME}` inside quotes; jouet quotes the name itself, so write it outside them"
                 ));
             }
             // Only a test a `start` line names can be left unfinished.
@@ -234,7 +265,6 @@ impl Format {
                     uncounted_passes += 1;
                 }
                 open.retain(|(_, n)| *n != name);
-                start = i + 1;
                 continue;
             }
             let Some(name) = named(&self.failed, line) else {
@@ -257,7 +287,8 @@ impl Format {
                 .unwrap_or(if self.start.is_empty() { body.len() } else { 0 });
             let mut block: Vec<String> = body[from..]
                 .iter()
-                .filter(|l| !any(&self.drop, l))
+                // A test run beside this one may have passed meanwhile.
+                .filter(|l| !any(&self.drop, l) && !any(&self.passed, l))
                 .cloned()
                 .collect();
             // A runner that says it all on the failed line (`FAIL a: expected

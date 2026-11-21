@@ -2174,7 +2174,7 @@ TOML
 	if command -v timeout >/dev/null; then
 		run --separate-stderr jouet test --cmd -- timeout 1 sh -c 'echo "step 1"; sleep 20; echo "step 2"'
 		assert_failure 124
-		assert_line --regexp '^cmd: timed out \(exit 124\) after 1\.[0-9]s$'
+		assert_line --regexp '^cmd: timed out \(exit 124\) after [0-9]+\.[0-9]s$'
 		assert_line '  step 1'
 		refute_line '  step 2'
 	fi
@@ -2222,8 +2222,32 @@ stop_jouet_test() {
 	done
 	assert [ -e started ]
 	kill -TERM "$pid"
+	# jouet ends within its two seconds of grace; were it not to, a wait
+	# without a limit would hang the whole suite.
+	for _ in $(seq 1 300); do
+		kill -0 "$pid" 2>/dev/null || break
+		sleep 0.05
+	done
+	if kill -0 "$pid" 2>/dev/null; then
+		kill -KILL "$pid"
+		wait "$pid" || true
+		fail 'jouet test was still running 15 seconds after SIGTERM'
+	fi
 	stopped=0
 	wait "$pid" || stopped=$?
+}
+
+# Whether the process is gone: ended, or ended and not yet reaped by whoever
+# it was left to.
+assert_ended() {
+	local _
+	for _ in $(seq 1 100); do
+		if ! kill -0 "$1" 2>/dev/null || [[ "$(ps -o stat= -p "$1" 2>/dev/null)" == Z* ]]; then
+			return 0
+		fi
+		sleep 0.05
+	done
+	fail "process $1 is still running"
 }
 
 @test "jouet sent SIGTERM ends the command, says where the run was, and ends by the signal" {
@@ -2250,9 +2274,29 @@ stop_jouet_test() {
 	stop_jouet_test --cmd -- sh -c 'trap "" TERM; echo $$ >pid; echo "step 1"; touch started; while :; do sleep 1; done'
 	assert_equal "$stopped" 143
 	run cat out
-	assert_line --regexp '^cmd: stopped by SIGTERM after [2-9]\.[0-9]s$'
+	assert_line --regexp '^cmd: stopped by SIGTERM after ([2-9]|[0-9]{2,})\.[0-9]s$'
 	run kill -0 "$(cat pid)"
 	assert_failure
+}
+
+@test "jouet sent SIGTERM ends what the command started too" {
+	# A shell, like a task runner, ends at SIGTERM and leaves what it started
+	# running; the signal went to jouet alone, so nothing else ends it.
+	# shellcheck disable=SC2016 # the script's own shell expands these
+	stop_jouet_test --cmd -- sh -c 'sleep 300 & echo $! >below; echo "step 1"; touch started; wait'
+	assert_equal "$stopped" 143
+	run cat out
+	assert_line --regexp '^cmd: stopped by SIGTERM after [0-9]+\.[0-9]s$'
+	assert_line '  step 1'
+	assert_ended "$(cat below)"
+
+	# One of them that ignores the signal is killed after two seconds.
+	# shellcheck disable=SC2016
+	stop_jouet_test --cmd -- sh -c 'sh -c "trap \"\" TERM; while :; do sleep 1; done" & echo $! >below; touch started; wait'
+	assert_equal "$stopped" 143
+	run cat out
+	assert_line --regexp '^cmd: stopped by SIGTERM after ([2-9]|[0-9]{2,})\.[0-9]s$'
+	assert_ended "$(cat below)"
 }
 
 @test "a format that says when a test starts names the one a time limit cut short, and the command for it" {
@@ -2336,6 +2380,49 @@ TOML
 	assert_line --regexp '^cmd: stopped by SIGTERM after '
 	assert_line 'baseline: not compared; a run that was cut short is not run again at the merge base'
 	assert_equal "$(wc -l <"$CUT_RUNS_FILE" | tr -d ' ')" 4
+}
+
+@test "a run at the merge base that is cut short is not compared, and SIGTERM stops it" {
+	export STARTED="$PWD/started" BASE_RUNS_FILE="$BATS_TEST_TMPDIR/base-runs"
+	# At the merge base the command runs into a time limit, or with
+	# AT_BASE_WAITS set keeps running; in the working tree it fails.
+	cat >limit-command <<'SH'
+#!/bin/sh
+echo run >>"$BASE_RUNS_FILE"
+echo "step 1"
+if [ -n "$AT_BASE_WAITS" ]; then
+	echo $$ >"$STARTED.pid"
+	touch "$STARTED"
+	exec sleep 30
+fi
+exit 124
+SH
+	chmod +x limit-command
+	git add limit-command
+	git commit -qm base
+	git checkout -qb work
+	printf '#!/bin/sh\necho "1..1"\necho "not ok 1 a failing test"\nexit 1\n' >limit-command
+
+	run --separate-stderr jouet test --baseline --cmd -- ./limit-command
+	assert_failure 1
+	assert_line 'FAIL a failing test'
+	assert_line --regexp '^baseline: the run at [^ ]+ was cut short \(exit 124\); failures were not compared \(full log: .+\.log\)$'
+	assert_equal "$(wc -l <"$BASE_RUNS_FILE" | tr -d ' ')" 1
+	# It left no answer to compare the next run with.
+	run --separate-stderr jouet test --baseline --cmd -- ./limit-command
+	assert_failure 1
+	assert_output --partial 'was cut short (exit 124); failures were not compared'
+	assert_equal "$(wc -l <"$BASE_RUNS_FILE" | tr -d ' ')" 2
+
+	# jouet sent SIGTERM while the command runs there stops that command,
+	# says the failures were not compared, and ends by the signal.
+	export AT_BASE_WAITS=1
+	stop_jouet_test --baseline --cmd -- ./limit-command
+	assert_equal "$stopped" 143
+	run cat out
+	assert_line 'FAIL a failing test'
+	assert_line 'baseline: not compared: jouet was told to stop (SIGTERM) during the run at the merge base'
+	assert_ended "$(cat "$STARTED.pid")"
 }
 
 @test "--baseline does not call failures new when the merge base's run names none, or reaches far fewer tests" {

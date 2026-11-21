@@ -251,6 +251,11 @@ impl DiscoverySignals {
                 // SAFETY: the handler only accesses atomics and invokes the signal-safe default handler.
                 unsafe {
                     signal_hook::low_level::register(signal, move || {
+                        // A SIGTERM a test run holds is the run's to act
+                        // on: it stops its command and reports first.
+                        if signal == libc::SIGTERM && crate::stop::held() {
+                            return;
+                        }
                         DISCOVERY_SIGNAL.store(signal, SeqCst);
                         if !DISCOVERY_ACTIVE.load(SeqCst) {
                             let _ = signal_hook::low_level::emulate_default_handler(signal);
