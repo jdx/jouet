@@ -1585,6 +1585,18 @@ mod watch {
         panic!("the session has no {count} watchers: {:?}", leases(dir));
     }
 
+    /// Waits for the ledger's `count`th entry of `event`: a watcher has its
+    /// lease before it records that it started.
+    fn await_recorded(dir: &Path, event: &str, count: usize) {
+        for _ in 0..500 {
+            if recorded(dir, event).len() >= count {
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        panic!("the ledger has no {count} entries of {event}");
+    }
+
     /// The work tree the ledger says each entry of `event` was for.
     fn work_trees(dir: &Path, event: &str) -> Vec<String> {
         std::fs::read_to_string(dir.join("state/jouet/ledger/ledger.jsonl"))
@@ -1794,11 +1806,13 @@ mod watch {
         let push = |id: &str, command: &str| payload(dir, id, command);
         let first = start(&fake, dir, &claude, &push("t1", "git push"), &FAST);
         lease(dir);
+        await_recorded(dir, "watch", 1);
         // A push the session makes from its own directory into the other
         // checkout: the PR there has no watcher, so it gets one.
         let elsewhere = "cd ~/src/other && git add tasks.md && git commit -q -m \"docs(tasks): say what lint runs\" && git push 2>&1 | tail -2 && jouet pr threads reply PRRT_1 --body done";
         let second = start(&fake, dir, &claude, &push("t2", elsewhere), &FAST);
         let by_pr = leases_by_pr(dir, 2);
+        await_recorded(dir, "watch", 2);
         assert_eq!(
             by_pr.keys().collect::<Vec<_>>(),
             ["jdx/demo#7", "jdx/other#9"]

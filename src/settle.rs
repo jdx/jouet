@@ -174,9 +174,9 @@ fn git_options(argv: &[String]) -> (Vec<(&str, Option<&str>)>, &[String]) {
 
 /// Whether a parsed command is itself a push or the opening of a PR: it
 /// runs git with `push` after git's own options (`git -C dir push`), or
-/// another program with one of the other pairs as its first words (`gh pr
-/// create`). A command that only has the words among its arguments (`echo
-/// git push done`) is not one.
+/// another program with one of the other pairs as its subcommand (`gh pr
+/// create`, `gh --repo o/r pr create`). A command that only has the words
+/// among its arguments (`echo git push done`) is not one.
 fn is_push(command: &shell::Command) -> bool {
     let argv = command.argv();
     match command.program() {
@@ -187,8 +187,37 @@ fn is_push(command: &shell::Command) -> bool {
         Some("echo" | "printf") | None => false,
         Some(_) => PUSH_WORDS
             .iter()
-            .any(|pair| pair[0] != "git" && argv.get(1..3).is_some_and(|words| words == pair)),
+            .any(|pair| pair[0] != "git" && subcommand(argv, pair)),
     }
+}
+
+/// Whether `pair` is the subcommand `argv` runs: its first words after the
+/// program and the program's own options, each of which may take the word
+/// after it as its value.
+fn subcommand(argv: &[String], pair: &[&str; 2]) -> bool {
+    let mut rest = argv.get(1..).unwrap_or_default();
+    let mut value = false;
+    loop {
+        if rest.get(..2).is_some_and(|words| words == pair) {
+            return true;
+        }
+        match rest.first() {
+            Some(word) if word.starts_with('-') => value = true,
+            Some(_) if value => value = false,
+            _ => return false,
+        }
+        rest = &rest[1..];
+    }
+}
+
+/// Whether the command at `at` runs only when one before it in its list
+/// failed (`a || b`), so a script that worked may not have run it.
+fn alternative(commands: &[shell::Command], at: usize) -> bool {
+    commands[..at]
+        .iter()
+        .rev()
+        .take_while(|c| matches!(c.op, Some(Op::And | Op::Or | Op::Pipe)))
+        .any(|c| c.op == Some(Op::Or))
 }
 
 /// Whether a shell command pushes a branch or opens a PR.
@@ -250,15 +279,24 @@ fn followed(dir: &Path) -> Option<PathBuf> {
 /// [`push_dir`]'s to check.
 fn stated_dir(command: &str, cwd: &Path) -> Option<PathBuf> {
     let script = shell::parse(command);
-    let at = script.commands.iter().rposition(is_push)?;
+    // The last push a script that worked has run: one after `||` ran only
+    // if something failed, so it is passed over.
+    let at = (0..script.commands.len())
+        .rev()
+        .find(|&i| is_push(&script.commands[i]) && !alternative(&script.commands, i))?;
     let (before, push) = (&script.commands[..at], &script.commands[at]);
     if !plain(command, &script.commands[..=at]) {
         return None;
     }
     let mut dir = cwd.to_path_buf();
     // `GIT_DIR=dir git push`, `env GIT_DIR=dir git push` and `export
-    // GIT_DIR=dir` before it name the repository another way.
-    let elsewhere = |a: &String| a.starts_with("GIT_DIR=") || a.starts_with("GIT_WORK_TREE=");
+    // GIT_DIR=dir` before it name the repository another way, and `export
+    // HOME=dir` changes what `~` and `$HOME` stand for.
+    let elsewhere = |a: &String| {
+        ["GIT_DIR=", "GIT_WORK_TREE=", "HOME="]
+            .iter()
+            .any(|name| a.starts_with(name))
+    };
     for (i, step) in before.iter().enumerate() {
         if step.words.iter().any(elsewhere) {
             return None;
@@ -631,6 +669,19 @@ mod tests {
                 "/src/other",
             ),
             ("cd /src/a && git push; cd /src/b; echo pr create", "/src/a"),
+            // The program's own options stand before its subcommand.
+            (
+                "cd /src/other && gh --repo jdx/other pr create --fill",
+                "/src/other",
+            ),
+            (
+                "cd /src/other && gh -R jdx/other stack submit",
+                "/src/other",
+            ),
+            // A push after `||` did not run if the one before it worked.
+            ("git push || git -C /src/other push", "/work/session"),
+            ("cd /src/a && git push || git -C /src/b push", "/src/a"),
+            ("git -C /src/a push || echo failed", "/src/a"),
             (
                 "cd /src/a && git push -u origin x && gh pr create --fill",
                 "/src/a",
@@ -705,6 +756,13 @@ mod tests {
             "GIT_DIR=/src/other/.git git push",
             "env GIT_DIR=/src/a/.git git -C /src/other push",
             "export GIT_DIR=/src/a/.git; cd /src/other && git push",
+            // `$HOME` is not the hook's once the command sets it.
+            "export HOME=/srv/alt; cd \"$HOME/repo\" && git push",
+            "HOME=/srv/alt; cd $HOME/repo && git push",
+            "HOME=/srv/alt git -C ~/repo push",
+            // The only push runs when something before it failed.
+            "git fetch || git -C /src/other push",
+            "cd /src/other && gh api pr create",
             "env -C /src/other git push",
             // No command of its own is the push.
             "cd /src/other && sh -c 'git push'",
