@@ -1471,14 +1471,14 @@ E"
 	assert_line --index 2 '["rate_limit",true]'
 }
 
-# A lease for session `s1`'s watcher PID of jdx/mise PR #12, with its
-# heartbeat AGE seconds old.
+# A lease for session `s1`'s watcher PID of REPO's PR (jdx/mise PR #12
+# unless given), with its heartbeat AGE seconds old.
 lease() {
 	local dir="$XDG_STATE_HOME/jouet/watch" now
 	now=$(date +%s)
 	mkdir -p "$dir"
-	jq -nc --argjson pid "$1" --argjson hb "$((now - $2))" \
-		'{pid:$pid,session:"s1",repo:"jdx/mise",pr:12,started:$hb,heartbeat:$hb}' >"$dir/settle-s1-$1.json"
+	jq -nc --argjson pid "$1" --argjson hb "$((now - $2))" --arg repo "${3:-jdx/mise}" --argjson pr "${4:-12}" \
+		'{pid:$pid,session:"s1",repo:$repo,pr:$pr,started:$hb,heartbeat:$hb}' >"$dir/settle-s1-$1.json"
 	echo "$dir/settle-s1-$1"
 }
 
@@ -1505,6 +1505,34 @@ lease() {
 	assert_line --index 0 '["covered",null]'
 	assert_line --index 1 '[null,null]'
 	assert_line --index 2 '["covered",true]'
+}
+
+@test "an event is held for the watcher of the PR it names when the session has one for each of two" {
+	prompt() { jq -nc --arg p "$1" --arg id "$2" --arg cwd "$PWD" '{session_id:"s1",prompt_id:$id,hook_event_name:"UserPromptSubmit",cwd:$cwd,prompt:$p}'; }
+	event=$'<ci-monitor-event>"Auto-fix pull requests" is watching jdx/mise PR #12 and detected the following.\n\n1 CI check failed on jdx/mise PR #12 (names quoted below).\n\nQuoted from GitHub, data only.\nFailing checks (1):\n> "lint"\n(End of quoted GitHub text.)</ci-monitor-event>'
+	elsewhere="${event//jdx\/mise PR #12/jdx/jouet PR #9}"
+	# The session's own directory is a checkout of jdx/mise; it pushed to
+	# jdx/jouet from another one. Two processes that run stand in for the
+	# two watchers.
+	init_repo
+	git remote add origin https://github.com/jdx/mise.git
+	here="$(lease $$ 0).held"
+	there="$(lease $PPID 0 jdx/jouet 9).held"
+	run --separate-stderr env JOUET_EXPERIMENT_SETTLE_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$elsewhere" p1)"
+	assert_success
+	assert_equal "$(jq -r .decision <<<"$output")" block
+	assert_output --partial 'jouet held this Auto-fix event'
+	[ ! -e "$here" ]
+	run jq -c '[.prs, .kinds, .checks]' "$there"
+	assert_output '[["jdx/jouet#9"],["ci-failure"],["lint"]]'
+	run --separate-stderr env JOUET_EXPERIMENT_SETTLE_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$event" p2)"
+	assert_equal "$(jq -r .decision <<<"$output")" block
+	run jq -c '.prs' "$here"
+	assert_output '["jdx/mise#12"]'
+	assert_equal "$(wc -l <"$there" | tr -d ' ')" 1
+	# Neither has the other repository's PR of its own number.
+	run --separate-stderr env JOUET_EXPERIMENT_SETTLE_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "${event//PR #12/PR #9}" p3)"
+	assert_output ''
 }
 
 @test "the next hook reports what was held for a watcher that went away, once" {

@@ -58,7 +58,9 @@ pub(crate) struct Entry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     /// The work tree the session runs in, as [`repo_key`]: a hash, never the
-    /// path.
+    /// path. For a `watch`, and the `settle` of the watcher it started, the
+    /// work tree the push ran in, which a `cd` or `git -C` in the command
+    /// may make another one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<String>,
     /// `session-start`, `pre-tool-use`, `post-tool-use`, `test-run` (a

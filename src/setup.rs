@@ -327,13 +327,13 @@ impl Harness {
             self.name()
         );
         let timeout = crate::cmd::wait::LEASE_TIMEOUT.as_secs() + WATCH_MARGIN;
-        let handlers: Vec<Value> = crate::settle::PUSH_WORDS
+        let handlers: Vec<Value> = crate::settle::push_patterns()
             .iter()
-            .map(|[program, verb]| {
+            .map(|pattern| {
                 json!({
                     "type": "command",
                     "command": command,
-                    "if": format!("Bash(*{program} {verb}*)"),
+                    "if": format!("Bash(*{pattern}*)"),
                     "timeout": timeout,
                     "asyncRewake": true,
                     "rewakeMessage": "jouet watched the PR you pushed to and reports:",
@@ -1023,6 +1023,15 @@ mod tests {
             "asyncRewake": true,
             "rewakeMessage": "jouet watched the PR you pushed to and reports:",
             "rewakeSummary": "jouet: the PR needs a look"
+          },
+          {
+            "type": "command",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch claude'",
+            "if": "Bash(*git -C * push*)",
+            "timeout": 86700,
+            "asyncRewake": true,
+            "rewakeMessage": "jouet watched the PR you pushed to and reports:",
+            "rewakeSummary": "jouet: the PR needs a look"
           }
         ]
       }
@@ -1304,6 +1313,15 @@ mod tests {
             "type": "command",
             "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch claude'",
             "if": "Bash(*stack submit*)",
+            "timeout": 86700,
+            "asyncRewake": true,
+            "rewakeMessage": "jouet watched the PR you pushed to and reports:",
+            "rewakeSummary": "jouet: the PR needs a look"
+          },
+          {
+            "type": "command",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch claude'",
+            "if": "Bash(*git -C * push*)",
             "timeout": 86700,
             "asyncRewake": true,
             "rewakeMessage": "jouet watched the PR you pushed to and reports:",

@@ -7,6 +7,11 @@
 //! watched needs the agent, with the digest `jouet wait pr --until
 //! needs-agent` prints, the Auto-fix events jouet held for it included.
 //!
+//! The PR is the one of the checkout the push ran in, which the command
+//! says when it is not the session's directory (`cd ../other && git push`,
+//! `git -C ../other push`; see `crate::settle::push_dir`). A session that
+//! pushes to several PRs has a watcher for each.
+//!
 //! Everything else exits 0 at once and prints nothing: a call that is not a
 //! push that worked, a session outside the settle arm (`crate::experiment`),
 //! a PR a live watcher of the session already has, a branch with no PR, a
@@ -23,6 +28,7 @@ use jouet_output::time::parse_duration;
 use jouet_rules::Call;
 use serde_json::Value;
 use std::io::Read;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 /// The oldest Claude Code an `asyncRewake` hook was seen woken by. An older
@@ -73,12 +79,25 @@ fn watch(args: &WatchArgs) -> Option<String> {
     if !super::hook::first_run(Harness::Claude, "watch", &payload) {
         return None;
     }
-    // The PR is the one of the branch checked out where the agent pushed.
-    if let Some(cwd) = call.cwd.as_deref().filter(|cwd| !cwd.is_empty())
-        && std::env::set_current_dir(cwd).is_err()
-    {
-        record(&settings, session, "error");
-        return None;
+    // The PR is the one of the branch checked out where the agent pushed:
+    // the directory the command's own `cd`s and `git -C` lead to from the
+    // call's, which is the session's. The lease, the commit left for a
+    // watcher that has the PR, and the ledger's `repo` all follow it.
+    let cwd = call
+        .cwd
+        .as_deref()
+        .filter(|cwd| !cwd.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok());
+    if let Some(cwd) = cwd {
+        let moved = call
+            .command
+            .as_deref()
+            .and_then(|command| crate::settle::push_dir(command, &cwd));
+        if std::env::set_current_dir(moved.unwrap_or(cwd)).is_err() {
+            record(&settings, session, "error");
+            return None;
+        }
     }
     if !backgrounded() {
         record(&settings, session, "foreground");

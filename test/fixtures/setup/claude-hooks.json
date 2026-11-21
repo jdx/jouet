@@ -95,6 +95,15 @@
             "asyncRewake": true,
             "rewakeMessage": "jouet watched the PR you pushed to and reports:",
             "rewakeSummary": "jouet: the PR needs a look"
+          },
+          {
+            "type": "command",
+            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch claude'",
+            "if": "Bash(*git -C * push*)",
+            "timeout": 86700,
+            "asyncRewake": true,
+            "rewakeMessage": "jouet watched the PR you pushed to and reports:",
+            "rewakeSummary": "jouet: the PR needs a look"
           }
         ]
       }
