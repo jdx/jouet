@@ -35,6 +35,7 @@ mod setup;
 mod share;
 mod sources;
 mod spec;
+mod stop;
 mod testlog;
 mod verify;
 mod wind;

@@ -2,7 +2,7 @@
 //! failure that was there before the change, from the environment or an
 //! earlier commit, does not count against it.
 
-use super::{Job, execute, log_path};
+use super::{Job, Ran, Stop, cut_short, execute, log_path};
 use crate::testlog::{self, Format};
 use crate::{affected, known};
 use jouet_output::exit::Exit;
@@ -588,6 +588,15 @@ impl From<String> for NotCompared {
     }
 }
 
+/// jouet was sent SIGTERM while a command ran at the merge base, and
+/// stopped it.
+fn told_to_stop() -> NotCompared {
+    NotCompared::from(
+        "not compared: jouet was told to stop (SIGTERM) during the run at the merge base"
+            .to_string(),
+    )
+}
+
 /// A command as [`known`] keeps it: its words and directory, with paths
 /// into the checkout written from its root, so every worktree of the
 /// repository shares it.
@@ -693,6 +702,7 @@ fn targeted(
     checkout: &mut Checkout<'_>,
     formats: &[Format],
     log: PathBuf,
+    stop: &Stop,
 ) -> Result<Option<BTreeSet<String>>, NotCompared> {
     let Some(go) = &now.go else {
         return Ok(None);
@@ -737,10 +747,14 @@ fn targeted(
         dir: tree.join(dir),
         exit: Box::new(|_| Exit::Ok),
     };
-    let Ok((code, _)) = execute(&at_base, &log, false) else {
+    let Ok(Ran { code, told, .. }) = execute(&at_base, &log, false, Some(stop)) else {
         return Ok(None);
     };
-    if code == 0 {
+    if told {
+        return Err(told_to_stop());
+    }
+    // A run that was cut short says nothing of what fails there.
+    if code == 0 || cut_short(code) {
         return Ok(None);
     }
     let output = std::fs::read(&log).unwrap_or_default();
@@ -952,6 +966,7 @@ pub(super) fn compare(
     formats: &[Format],
     failed: &[(&Job, Option<Evidence>, u64, u64)],
     mode: Mode,
+    stop: &Stop,
 ) -> Result<Option<Baseline>, NotCompared> {
     let setup = affected::project_config::baseline_setup(root).map_err(|e| {
         let hint = e.hint.map_or(String::new(), |hint| format!(" {hint}"));
@@ -998,6 +1013,7 @@ pub(super) fn compare(
                 &mut checkout,
                 formats,
                 log_path(failed.len() * 2 + 2 + i),
+                stop,
             )?
         {
             pre_existing.extend(found);
@@ -1017,8 +1033,11 @@ pub(super) fn compare(
                         exit: Box::new(|_| Exit::Ok),
                     };
                     let log = log_path(failed.len() * 2 + 1);
-                    let (code, _) = execute(&prepare, &log, false)
+                    let Ran { code, told, .. } = execute(&prepare, &log, false, Some(stop))
                         .map_err(|e| format!("baseline setup: {e}"))?;
+                    if told {
+                        return Err(told_to_stop());
+                    }
                     if code != 0 {
                         return Err(NotCompared::from(format!(
                             "baseline setup failed (exit {code}); failures were not compared (full log: {})",
@@ -1036,7 +1055,7 @@ pub(super) fn compare(
                 };
                 // After this run's own logs, so pruning never takes one of them.
                 let log = log_path(failed.len() + i + 1);
-                let (code, _) = execute(&at_base, &log, false).map_err(|error| {
+                let Ran { code, told, .. } = execute(&at_base, &log, false, Some(stop)).map_err(|error| {
                     let program = Path::new(&at_base.argv[0]);
                     let program = if program.is_absolute() {
                         program.to_path_buf()
@@ -1056,6 +1075,18 @@ pub(super) fn compare(
                 let output = std::fs::read(&log).unwrap_or_default();
                 run_log = Some(log.clone());
                 let output = String::from_utf8_lossy(&output);
+                if told {
+                    return Err(told_to_stop());
+                }
+                // Cut short there, it has no whole answer to compare with,
+                // and none to keep for the next comparison.
+                if cut_short(code) {
+                    return Err(NotCompared::from(format!(
+                        "the run at {} was cut short (exit {code}); failures were not compared (full log: {})",
+                        base.name,
+                        log.display()
+                    )));
+                }
                 if code == 0
                     && testlog::digest_with(&output, false, 0, formats).failed > 0
                     && super::super::hook::checks(&at_base.dir, &super::command_line(&at_base.argv))

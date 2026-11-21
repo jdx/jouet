@@ -1,0 +1,15 @@
+[build] $ cargo build --all-features
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.43s
+[test:e2e] $ ~/src/app/xtasks/test/e2e test_sync
+>>> E2E cli/test_sync
+PASS: cli/test_sync (25s, 157 assertions)
+>>> E2E cli/test_sync_cache
+PASS: cli/test_sync_cache (11s, 35 assertions)
+>>> E2E cli/test_sync_remote_slow
+DEBUG: $ app sync --remote
+SUCCESS: [app sync --remote] output is equal to 'synced'
+DEBUG: $ app sync status --wait
+Terminated
+[test:e2e] ERROR ~/src/app/xtasks/test/e2e exited with non-zero status: killed by SIGTERM
+Finished in 579.65s
+[test:e2e] ERROR task failed

@@ -76,7 +76,9 @@ pub(super) fn key(
         hash.update((bytes.len() as u64).to_le_bytes());
         hash.update(bytes);
     };
-    part(b"jouet test result v3");
+    // v4: a run that was cut short is no longer kept, and one kept before
+    // that is not answered from.
+    part(b"jouet test result v4");
     part(state.as_bytes());
     part(job.dir.as_os_str().as_encoded_bytes());
     part(&(job.argv.len() as u64).to_le_bytes());

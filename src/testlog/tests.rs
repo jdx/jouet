@@ -17,6 +17,12 @@ fn counts(d: &Digest) -> [u64; 3] {
     [d.passed, d.failed, d.skipped]
 }
 
+/// [`super::digest_cut`] of a run where jouet is, whose commands are
+/// printed after `next: jouet test --cmd -- `.
+fn digest_cut(text: &str, budget: usize, formats: &[Format]) -> Digest {
+    super::digest_cut(text, budget, "next: jouet test --cmd -- ".len(), formats)
+}
+
 #[test]
 fn nextest_reports_when_fail_fast_left_tests_unrun() {
     let d = digest(&fixture("nextest"), true, DEFAULT_BUDGET);
@@ -1573,4 +1579,312 @@ fn a_few_warnings_are_named_with_their_place_once_each() {
         "{:?}",
         d.warning_names
     );
+}
+
+/// [`E2E_FORMAT`] with what a run that was cut short needs: the line that
+/// says a test passed, and the command that runs one test.
+fn cut_format() -> Format {
+    Format::parse(
+        "e2e",
+        &format!(
+            "passed = ['^PASS: (?<name>\\S+) \\(']\nrerun = \"app run test:e2e {{name}}\"\n{E2E_FORMAT}"
+        ),
+    )
+    .unwrap()
+}
+
+fn unfinished(d: &Digest) -> Vec<&str> {
+    d.unfinished.iter().map(|u| u.name.as_str()).collect()
+}
+
+#[test]
+fn a_cut_run_names_the_test_that_had_started_and_the_command_for_it() {
+    let d = digest_cut(&fixture("e2e-cut-started"), DEFAULT_BUDGET, &[cut_format()]);
+    // Not a failure nobody recognised: nothing failed.
+    assert_eq!(names(&d), [""; 0]);
+    assert_eq!(counts(&d), [2, 0, 0]);
+    assert_eq!(d.passed_names, ["cli/test_sync", "cli/test_sync_cache"]);
+    assert_eq!(unfinished(&d), ["cli/test_sync_remote_slow"]);
+    let test = &d.unfinished[0];
+    assert_eq!(
+        test.rerun.as_deref(),
+        Some("app run test:e2e cli/test_sync_remote_slow")
+    );
+    // What it had printed by then, to the end of the output.
+    assert_eq!(test.lines[0], "DEBUG: $ app sync --remote");
+    assert_eq!(test.lines[2], "DEBUG: $ app sync status --wait");
+    assert_eq!(test.lines.last().unwrap(), "[test:e2e] ERROR task failed");
+    assert!(d.output_end.is_empty(), "{:?}", d.output_end);
+
+    // The same output of a run that failed some other way is read as before.
+    let d = digest_with(
+        &fixture("e2e-cut-started"),
+        true,
+        DEFAULT_BUDGET,
+        &[cut_format()],
+    );
+    assert_eq!(names(&d), ["no failure recognised; the end of the output"]);
+    assert!(d.unfinished.is_empty() && d.output_end.is_empty());
+}
+
+#[test]
+fn a_cut_run_that_names_no_running_test_shows_where_it_stopped() {
+    // The runner prints nothing when a test starts, so the tests that
+    // passed are all the output can name.
+    let d = digest_cut(&fixture("e2e-cut"), DEFAULT_BUDGET, &[cut_format()]);
+    assert_eq!(names(&d), [""; 0]);
+    assert_eq!(d.passed_names, ["cli/test_sync", "cli/test_sync_cache"]);
+    assert!(d.unfinished.is_empty());
+    assert_eq!(d.output_end.last().unwrap(), "[test:e2e] ERROR task failed");
+    assert!(
+        d.output_end.contains(&"Terminated".to_string()),
+        "{:?}",
+        d.output_end
+    );
+
+    // Without a format at all, the end of the output is all there is.
+    let d = digest_cut(&fixture("e2e-cut"), DEFAULT_BUDGET, &[]);
+    assert_eq!(names(&d), [""; 0]);
+    assert!(d.passed_names.is_empty());
+    assert_eq!(d.output_end.last().unwrap(), "[test:e2e] ERROR task failed");
+}
+
+#[test]
+fn a_test_is_unfinished_until_it_passes_fails_or_the_run_sums_up() {
+    let cut = |decl: &str, text: &str| {
+        let format = Format::parse("e2e", decl).unwrap();
+        digest_cut(text, DEFAULT_BUDGET, &[format])
+    };
+    let side_by_side = "RUN a\nRUN b\nb: waiting\nPASS a\nRUN c\nc: waiting\n";
+    // A runner that says when a test passes may run several at once.
+    let d = cut(
+        "failed = ['^FAIL (\\S+)']\nstart = ['^RUN (\\S+)']\npassed = ['^PASS (\\S+)']\n",
+        side_by_side,
+    );
+    assert_eq!(unfinished(&d), ["b", "c"]);
+    assert_eq!(d.unfinished[0].lines, ["b: waiting"]);
+    assert_eq!(d.unfinished[1].lines, ["c: waiting"]);
+    assert_eq!(d.unfinished[0].rerun, None);
+    assert_eq!(d.passed_names, ["a"]);
+    // One that does not runs them one at a time, as far as its output tells.
+    let d = cut(
+        "failed = ['^FAIL (\\S+)']\nstart = ['^RUN (\\S+)']\n",
+        side_by_side,
+    );
+    assert_eq!(unfinished(&d), ["c"]);
+    // A `start` pattern without a group names no test, and leaves the line
+    // to one that does.
+    let d = cut(
+        "failed = ['^FAIL (\\S+)']\nstart = ['^RUN ', '^RUN (\\S+)$']\n",
+        "RUN a\nwaiting\n",
+    );
+    assert_eq!(unfinished(&d), ["a"]);
+
+    // A test that failed has finished, and is still a failure.
+    let d = cut(
+        "failed = ['^FAIL (\\S+)']\nstart = ['^RUN (\\S+)']\npassed = ['^PASS (\\S+)']\n",
+        "RUN a\nRUN b\nFAIL b\nboom\n",
+    );
+    assert_eq!(names(&d), ["b"]);
+    assert_eq!(unfinished(&d), ["a"]);
+    // A pass line of another test is not the end of what a failure printed
+    // before it, nor one of its lines.
+    let d = cut(
+        "failed = ['^FAIL (\\S+)']\nstart = ['^RUN (\\S+)']\npassed = ['^PASS (\\S+)']\n",
+        "RUN a\nRUN b\nassertion for b\nPASS a\nFAIL b\n",
+    );
+    assert_eq!(names(&d), ["b"]);
+    assert_eq!(d.failures[0].lines, ["assertion for b"]);
+    assert!(d.unfinished.is_empty());
+    let d = cut(
+        "failed = ['^FAIL (\\S+)']\nstart = ['^RUN (\\S+)']\n",
+        "RUN a\nFAIL a\nboom\n",
+    );
+    assert_eq!(names(&d), ["a"]);
+    assert!(d.unfinished.is_empty());
+    // With nothing running, where the run stopped is the end of the output.
+    assert_eq!(d.output_end, ["RUN a", "FAIL a", "boom"]);
+
+    // A run that summed up left no test running.
+    let d = cut(
+        "failed = ['^FAIL (\\S+)']\nstart = ['^RUN (\\S+)']\nsummary = ['^ran \\d+ tests \\((.+)\\)']\n",
+        "RUN a\nran 1 tests (1 passed)\nTerminated\n",
+    );
+    assert!(d.unfinished.is_empty());
+    assert_eq!(counts(&d), [1, 0, 0]);
+}
+
+#[test]
+fn the_command_for_an_unfinished_test_quotes_its_name() {
+    let format = Format::parse(
+        "x",
+        "failed = ['^FAIL (.+)$']\nstart = ['^RUN (?<name>.+)$']\nrerun = 'run-one --only {name}'\n",
+    )
+    .unwrap();
+    let d = digest_cut("RUN it's slow; $HOME\n", DEFAULT_BUDGET, &[format]);
+    assert_eq!(
+        d.unfinished[0].rerun.as_deref(),
+        Some(r"run-one --only 'it'\''s slow; $HOME'")
+    );
+}
+
+#[test]
+fn unfinished_tests_and_the_end_of_the_output_keep_to_the_budget() {
+    let format = || {
+        Format::parse(
+            "x",
+            "failed = ['^FAIL (\\S+)']\nstart = ['^RUN (\\S+)']\npassed = ['^PASS (\\S+)']\nrerun = 'run-one {name}'\n",
+        )
+        .unwrap()
+    };
+    let mut text = String::new();
+    for i in 0..300 {
+        text.push_str(&format!("RUN test_{i}\ntest_{i}: {}\n", "x".repeat(60)));
+    }
+    let d = digest_cut(&text, 200, &[format()]);
+    // The command printed with each counts too: two tests' output fits in
+    // 200 bytes, and one test with its command.
+    assert_eq!(unfinished(&d), ["test_0"]);
+    assert_eq!(d.unfinished[0].rerun.as_deref(), Some("run-one test_0"));
+    assert_eq!(d.more_unfinished[0], "test_1");
+    assert_eq!(
+        d.unfinished.len() + d.more_unfinished.len() + d.unfinished_omitted as usize,
+        300
+    );
+    assert!(d.unfinished_omitted > 0);
+
+    // The first is cut to the budget, and says how much it left out. Its
+    // command is whole, and its output is what gives way to it and to
+    // `UNFINISHED`, as it is printed.
+    let long = format!("RUN a\n{}", "a line of output\n".repeat(50));
+    let d = digest_cut(&long, 100, &[format()]);
+    assert_eq!(unfinished(&d), ["a"]);
+    assert_eq!(d.unfinished[0].rerun.as_deref(), Some("run-one a"));
+    assert_eq!(
+        d.unfinished[0].lines,
+        [
+            "a line of output",
+            "a line of output",
+            "... 15 lines skipped"
+        ]
+    );
+    // Printed after more, as for a run in another directory than jouet's,
+    // the command takes that much more.
+    let next = "next: cd /repo/tests && jouet test --cmd -- ".len();
+    let d = super::digest_cut(&long, 100, next, &[format()]);
+    assert_eq!(
+        d.unfinished[0].lines,
+        ["a line of output", "... 16 lines skipped"]
+    );
+    // Under a budget smaller than its command, the first still has its name
+    // and its command, without which there is nothing to do next.
+    let d = digest_cut(&long, 5, &[format()]);
+    assert_eq!(unfinished(&d), ["a"]);
+    assert_eq!(d.unfinished[0].rerun.as_deref(), Some("run-one a"));
+    assert_eq!(d.unfinished[0].lines, ["... 17 lines skipped"]);
+
+    // The end of the output keeps its last lines, the run having stopped at
+    // the last one, and says first how many lines came before them, in a
+    // line that counts as they do: five lines fit in 100 bytes, and four
+    // with that one.
+    let mut text = "a line of output\n".repeat(49);
+    text.push_str("where it stopped\n");
+    let d = digest_cut(&text, 100, &[]);
+    assert_eq!(
+        d.output_end,
+        [
+            "... 46 lines skipped",
+            "a line of output",
+            "a line of output",
+            "a line of output",
+            "where it stopped"
+        ]
+    );
+    // The last line is shown whatever the budget.
+    let d = digest_cut(&text, 5, &[]);
+    assert_eq!(d.output_end, ["... 49 lines skipped", "where it stopped"]);
+}
+
+#[test]
+fn a_format_that_cannot_tell_what_is_unfinished_does_not_load() {
+    let base = "failed = ['^FAIL (\\S+)']\nstart = ['^RUN (\\S+)']\n";
+    for (text, why) in [
+        (
+            "failed = ['^FAIL (\\S+)']\npassed = ['^ok ']".to_string(),
+            "`passed` pattern `^ok ` needs a group that names the test",
+        ),
+        (
+            format!("{base}rerun = 'run-one'"),
+            "`rerun` needs `{name}`, where the test's name goes",
+        ),
+        (
+            "failed = ['^FAIL (\\S+)']\nstart = ['^RUN ']\nrerun = 'run-one {name}'".to_string(),
+            "`rerun` needs a `start` pattern with a group that names the test",
+        ),
+        (
+            "failed = ['^FAIL (\\S+)']\nrerun = 'run-one {name}'".to_string(),
+            "`rerun` needs a `start` pattern with a group that names the test",
+        ),
+        (
+            format!("{base}rerun = \"run-one '{{name}}'\""),
+            "`rerun` has `{name}` inside quotes",
+        ),
+        (
+            format!("{base}rerun = 'run-one \"{{name}}\"'"),
+            "`rerun` has `{name}` inside quotes",
+        ),
+        // More than one command: a shell would give jouet the first alone.
+        (
+            format!("{base}rerun = 'cd cases && ./runner {{name}}'"),
+            "`rerun` has `&` outside quotes; it is one command with its arguments",
+        ),
+        (
+            format!("{base}rerun = 'run-one {{name}} | tee log'"),
+            "`rerun` has `|` outside quotes",
+        ),
+        (
+            format!("{base}rerun = 'run-one {{name}}; true'"),
+            "`rerun` has `;` outside quotes",
+        ),
+        (
+            format!("{base}rerun = \"run-one {{name}}\\ntrue\""),
+            "`rerun` has `\\n` outside quotes",
+        ),
+        (
+            format!("{base}rerun = 'SLOW=1 run-one {{name}}'"),
+            "`rerun` starts by setting `SLOW`",
+        ),
+        (
+            format!("{base}[[examples]]\noutput = 'RUN a'\nunfinished = []"),
+            "example 1 leaves [\"a\"] unfinished, not []",
+        ),
+        (
+            format!("{base}[[examples]]\noutput = 'RUN a'\nunfinished = ['b']"),
+            "example 1 leaves [\"a\"] unfinished, not [\"b\"]",
+        ),
+    ] {
+        let err = Format::parse("x", &text).unwrap_err();
+        assert!(err.contains(why), "{text}: {err}");
+    }
+    // Quotes elsewhere in the command are the format's own.
+    Format::parse(
+        "x",
+        &format!("{base}rerun = \"run-one --tag='not slow' {{name}}\"\n"),
+    )
+    .unwrap();
+    // And so is what they hold, or what is escaped, and an option's value.
+    for rerun in [
+        "run-one --only='a|b' {name}",
+        r"run-one a\\;b {name}",
+        "run-one --jobs=1 {name}",
+    ] {
+        Format::parse("x", &format!("{base}rerun = \"{rerun}\"\n")).unwrap();
+    }
+    // An example says what it leaves unfinished only when it lists it.
+    Format::parse("x", &format!("{base}[[examples]]\noutput = 'RUN a'\n")).unwrap();
+    Format::parse(
+        "x",
+        &format!("{base}[[examples]]\noutput = 'RUN a'\nunfinished = ['a']\n"),
+    )
+    .unwrap();
 }

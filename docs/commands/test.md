@@ -203,7 +203,7 @@ reused: `mise run check` ran on these same files 3m ago (115s, exit 1); --fresh 
 
 The output, the log, the [baseline](#failures-that-were-there-before-baseline) comparison and what the stop gate records are those of the earlier run, and `--json` marks the suite `"reused": true`.
 
-A run is answered this way only when every one of these is the same: the contents of the working tree (tracked and untracked files, less those git ignores), HEAD, the command, the directory it runs in, and the environment. The environment includes shell variables such as `PWD` and `OLDPWD`, because a command can depend on them; non-UTF-8 values are supported. A run is kept for this only when it left the working tree as it found it. It is kept for `[test] reuse_s` seconds (`JOUET_TEST_REUSE_S`, 0 by default).
+A run is answered this way only when every one of these is the same: the contents of the working tree (tracked and untracked files, less those git ignores), HEAD, the command, the directory it runs in, and the environment. The environment includes shell variables such as `PWD` and `OLDPWD`, because a command can depend on them; non-UTF-8 values are supported. A run is kept for this only when it left the working tree as it found it, and was not [cut short](#a-run-that-ends-at-a-time-limit). It is kept for `[test] reuse_s` seconds (`JOUET_TEST_REUSE_S`, 0 by default).
 
 Ignored files are not part of the key. A reused result can therefore be stale after an ignored input changes, and a reused command does not recreate deleted ignored outputs. Commands can also depend on network or service state or be flaky. Opt in only when those limits are acceptable; `--fresh` runs the command and keeps its result for the next run.
 
@@ -314,6 +314,49 @@ full log: ~/.local/state/jouet/logs/test-1793449700778-936641-0.log
 
 That digest is for agents, and for plain display (pipes, redirects, CI). A person at a terminal sees the output as it runs, then the line with the counts and the log's path. `--json` puts the counts and failures in the document (see [JSON](#json)).
 
+### A run that ends at a time limit
+
+A run that is ended at a time limit was cut short, which is not a test failing, though tests that finished before it may have failed. `jouet test` says so on its first line, with how long the run had gone, rather than `failed` and a failure it could not recognise:
+
+```sh
+$ jouet test --cmd -- timeout 2 ./e2e test_sync
+cmd: timed out (exit 124) after 2.0s: 2 passed
+passed: cli/test_sync, cli/test_sync_cache
+UNFINISHED cli/test_sync_remote_slow
+  DEBUG: $ app sync --remote
+  SUCCESS: [app sync --remote] output is equal to 'synced'
+  DEBUG: $ app sync status --wait
+next: jouet test --cmd -- ./e2e cli/test_sync_remote_slow
+full log: ~/.local/state/jouet/logs/test-1795270663748-391764-0.log
+```
+
+After the first line come the tests that finished (the passes by name, for up to eight, and each failure as in any run), then each test that had started and not finished, with what it had printed and, where its format declares `rerun`, a `next:` line with the command that runs it alone. Run that one, rather than the whole set again with a longer limit. The command is the runner's, so it runs where the runner did: for a suite that ran in another directory than the one `jouet test` was run in, the line reads `next: cd DIR && jouet test --cmd -- ...`. A person at a terminal, who saw the output as it ran, gets the first line with the log's path, and none of this.
+
+Only a [format you declare](#your-own-runners-formats) says which test was running, and only for a runner that prints a line when a test starts: the format's `start` names the test, `passed` says when one finished, and `rerun` is the command for one test. The runners jouet knows itself do not name an unfinished test yet. Where the output cannot tell, the run still says that it timed out, and shows the end of the output, which is where it stopped:
+
+```text
+cmd: timed out (exit 124) after 2.0s: 2 passed
+passed: cli/test_sync, cli/test_sync_cache
+the output does not name the test that was running; its end:
+  PASS: cli/test_sync (25s, 157 assertions)
+  PASS: cli/test_sync_cache (11s, 35 assertions)
+full log: ~/.local/state/jouet/logs/test-1795270736495-394889-0.log
+```
+
+Unfinished tests and the end of the output keep to what the failures left of `--budget`. A test's `next:` command counts toward it and is printed whole or not at all, since part of a command is another command. The first unfinished test always has its name and, where its format declares `rerun`, its command, even under a budget smaller than the two, without which the answer names nothing to do next: its output is cut to what the command leaves, with a `... N lines skipped` line, and the unfinished tests after those that fit are named on a `... N more unfinished: ...` line. The end of the output keeps its last lines, and always the last one, where the run stopped, after a `... N lines skipped` line that says how many came before them and counts toward the budget as they do.
+
+A run is cut short in one of three ways:
+
+| How it ended | First line | `jouet test` exits |
+|---|---|---|
+| The command exited `124`, as `timeout` does when it ends its command at the limit | `timed out (exit 124) after 580.0s` | `124` |
+| SIGHUP, SIGINT, SIGKILL or SIGTERM ended the command, or the command exited `128` plus one of their numbers, as a shell does for what it ran | `stopped by SIGTERM after 580.0s` | `1` |
+| jouet itself was sent SIGTERM, as a harness may do to a call at its limit | `stopped by SIGTERM after 580.0s` | by the signal, as it would have without the answer (a shell sees `143`) |
+
+Sent SIGTERM, jouet passes it on after 100 ms, in case the sender did not signal them too, to the command and to the processes below it (what it started, and what those started), and kills those still running two seconds later: a shell or a task runner that ends at SIGTERM would else leave its own running. A process whose parent had already exited when the signal came is not found, since nothing says whose it was. jouet then prints the answer above (with `--json`, the document), runs no further suite and no comparison, and ends by the signal. A SIGTERM that comes just as the command ends still counts: the suite is `stopped by SIGTERM`, whatever the command's exit code. One that comes while a command runs at the merge base for `--baseline` stops that command the same way, and nothing is compared. A second SIGTERM ends jouet at once. SIGINT is not held: Ctrl-C ends jouet as before, and nothing can be printed after SIGKILL.
+
+A run that was cut short is not kept for reuse (`[test] reuse_s`), and is not run again at the merge base, where it would be cut short too; `--baseline` says `baseline: not compared; a run that was cut short is not run again at the merge base`. A failing run whose command is cut short at the merge base is not compared either, and not kept as a comparison: `baseline: the run at main was cut short (exit 124); failures were not compared (full log: ...)`. Where several suites ran, a comparison that finds every failure at the merge base too does not clear one that was cut short: the run still exits `124`, or `1` for a suite a signal stopped. A command that another signal ends, or that exits with any other code, is a failed run as before.
+
 ### Recognised output
 
 Failures are recognised by their lines, whatever command printed them, in the output of:
@@ -358,6 +401,10 @@ drop = ['^\S+: \d+s$']
 # The runner's own count of the tests it ran: its first group, else the whole
 # line, is read for `3 passed`, `1 failed` and `2 skipped`.
 summary = ['^E2E: ran \d+ tests \((.+)\)']
+# A line that says a test passed, named as `failed` names one.
+passed = ['^PASS: (?<name>\S+) \(']
+# The command that runs one test alone; `{name}` is the test.
+rerun = "mise run test:e2e {name}"
 
 [[examples]]
 output = """
@@ -365,8 +412,11 @@ output = """
 ERROR: E2E assertion failed: [mise ls] expected 'x'
 cli/test_a: 1s
 ERROR: E2E test cli/test_a failed: exited with status code 1
+>>> E2E cli/test_b
 """
 failures = ["cli/test_a"]
+# The tests the output leaves started and not finished.
+unfinished = ["cli/test_b"]
 ```
 
 With it, the failed test is named, with its assertion:
@@ -377,11 +427,13 @@ FAIL cli/test_a
   ERROR: E2E assertion failed: [mise ls] expected 'x'
 ```
 
-With `summary`, a run that passed says how many tests it ran (`cmd: passed in 12.0s: 3 passed`) rather than only that it passed, so there is no need to read the log to see that the tests you meant to run did. Without it, a format counts only the tests it names as failed.
+With `summary`, a run that passed says how many tests it ran (`cmd: passed in 12.0s: 3 passed`) rather than only that it passed, so there is no need to read the log to see that the tests you meant to run did. Without it, a format counts the tests it names: those that failed and, with `passed`, those that passed.
+
+`passed` and `rerun` are for [a run that ends at a time limit](#a-run-that-ends-at-a-time-limit). A test is unfinished when a `start` line named it, with its `name` group, else its first, and it has neither passed nor failed, and no `summary` line followed. With `passed`, every such test is named, so a runner that runs several at once is read rightly, and the tests that passed are named and counted; a `passed` line is no part of another test's failure. Without it, a test is taken to end where the next starts, so only the last one started can be unfinished. `rerun` is the command for one unfinished test; it takes a `start` pattern with a group. It is printed after `jouet test --cmd --`, so it is one command with its arguments: `rerun = "cd cases && ./runner {name}"` does not load, nor does one with `;`, `|`, `<`, `>` or parentheses outside quotes, or one that starts by setting a variable (`SLOW=1 ./runner {name}`), since a shell would give jouet only part of it. jouet quotes the name for a shell where it needs it, so write `{name}` outside quotes: `rerun = "run-one '{name}'"` does not load. A runner that prints nothing when a test starts leaves nothing to name: the run then shows the end of its output.
 
 Each pattern key takes a list of regular expressions ([Rust's syntax](https://docs.rs/regex/latest/regex/#syntax)), matched against each line once colour and mise's `[task]` prefixes are taken off.
 
-A format's examples are checked when it loads. A format does not load when its examples do not name the failures they list, when a pattern does not compile, or when it has a key jouet does not know; `jouet test` says why on stderr and runs without it. `jouet test --dry-run` lists the formats that load (`failure formats: ...`), and `--json` reports them as `formats`. Failures named by a format count for [`--baseline`](#failures-that-were-there-before-baseline) like any other.
+A format's examples are checked when it loads. A format does not load when its examples do not name the failures they list, or the `unfinished` tests of an example that lists them, when a `failed` or `passed` pattern has no group, when `rerun` has no `{name}`, has it inside quotes, is more than one command, or no `start` pattern names a test for it, when a pattern does not compile, or when it has a key jouet does not know; `jouet test` says why on stderr and runs without it. `jouet test --dry-run` lists the formats that load (`failure formats: ...`), and `--json` reports them as `formats`. Failures named by a format count for [`--baseline`](#failures-that-were-there-before-baseline) like any other.
 
 ## Partial runs and the stop gate {#the-safety-model}
 
@@ -416,8 +468,11 @@ run = "jouet test --affected"
 | `1` | the tests failed (the runner exited non-zero), the `--cmd` command exited non-zero, or the runner could not list the tests a change affects |
 | `2` | a usage error: `--adapter` without `--affected`, `--since` without `--affected` or `--baseline`, `--cmd` without a command or with `--affected`, `--budget` after `--` without a number, an unknown adapter, an unknown ref or one with no merge base, `--baseline` where the merge base is `HEAD` with nothing changed, or pytest's or unittest's own usage error |
 | `4` | a recognised `--cmd` test ran no tests, no adapter or test task was found, the runner or the `--cmd` program is not installed, not in a git repository, or `.jouet/test.toml` is untrusted or has changed since it was trusted |
+| `124` | the command timed out: it exited `124`, as `timeout` does when it ends its command at the limit (see [a run that ends at a time limit](#a-run-that-ends-at-a-time-limit)) |
 
-With several adapters, every suite runs, and the exit is `1` if any failed.
+A command that a signal ended exits `1`. Sent SIGTERM itself, jouet prints what the run had said and ends by the signal, so it has no exit code of its own; a shell reports `143`.
+
+With several adapters, every suite runs, and the exit is `1` if any failed; otherwise it is that of the first suite that did not pass, `124` for one that timed out.
 
 ## JSON
 
@@ -467,6 +522,7 @@ With several adapters, every suite runs, and the exit is `1` if any failed.
 
 - **Per suite:** `decision` is `affected`, `full` or `nothing`, with a `reason` for the last two. Each of `files` has an `effect` of `source`, `ignored` or `full`, with a `reason` for the last two. `via` is the chain of imports from a changed file to the test; it is absent when the runner picked a test through something jouet's own scan does not follow (a path alias, a package), and a `note` says how many. `env` lists variables jouet set for the command, such as `COVERAGE_CORE`. With `--cmd`, the one suite's `adapter` is `cmd`; for the repository's test task, it is `task`.
 - **After a run**, each suite has its `log` and what jouet read in it: `passed`, `failed` and `skipped`, summed over every summary line the runner printed, and `warnings` (rustc's); `failures`, each with its `name` and `lines`, as many as fit `--budget`; `more_failures`, the names of those after; and `failures_omitted`, how many did not fit even by name.
+- **After a run that was cut short**, the suite has `timed_out: true` (the command exited `124`) or `stopped_by`, the signal's name, such as `SIGTERM`; `exit_code` is then `128` plus the number of the signal that ended the command, `143` for SIGTERM. Its `failures` are only those the output names. `unfinished` lists the tests that had started and not finished, each with its `name`, its `lines` and, when its format declares one, the `rerun` command, with `more_unfinished` and `unfinished_omitted` for those that did not fit the budget. When the output names none, `output_end` holds its last lines.
 - **For the whole run:** `dry_run` is `true` for a dry run, `formats` names the failure formats that loaded, and `baseline` holds a comparison with the merge base: its `base`, and the failures that are `pre_existing`, `new`, or `unknown` (not reached there).
 
 A count of `0` is left out, as are empty lists.
