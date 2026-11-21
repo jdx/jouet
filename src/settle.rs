@@ -210,14 +210,16 @@ fn subcommand(argv: &[String], pair: &[&str; 2]) -> bool {
     }
 }
 
-/// Whether the command at `at` runs only when one before it in its list
-/// failed (`a || b`), so a script that worked may not have run it.
+/// Whether the command at `at`, or the pipeline it is in, runs only when
+/// what is before it in its list failed (`a || b`), so a script that worked
+/// may not have run it. The shell groups a list from the left, so the push
+/// of `a || b && git push` is not one: it runs when either worked.
 fn alternative(commands: &[shell::Command], at: usize) -> bool {
     commands[..at]
         .iter()
         .rev()
-        .take_while(|c| matches!(c.op, Some(Op::And | Op::Or | Op::Pipe)))
-        .any(|c| c.op == Some(Op::Or))
+        .find(|c| c.op != Some(Op::Pipe))
+        .is_some_and(|c| c.op == Some(Op::Or))
 }
 
 /// Whether a shell command pushes a branch or opens a PR.
@@ -682,6 +684,7 @@ mod tests {
             ("git push || git -C /src/other push", "/work/session"),
             ("cd /src/a && git push || git -C /src/b push", "/src/a"),
             ("git -C /src/a push || echo failed", "/src/a"),
+            ("git fetch || true && git -C /src/other push", "/src/other"),
             (
                 "cd /src/a && git push -u origin x && gh pr create --fill",
                 "/src/a",
@@ -762,6 +765,7 @@ mod tests {
             "HOME=/srv/alt git -C ~/repo push",
             // The only push runs when something before it failed.
             "git fetch || git -C /src/other push",
+            "git fetch || cat log | git -C /src/other push",
             "cd /src/other && gh api pr create",
             "env -C /src/other git push",
             // No command of its own is the push.
