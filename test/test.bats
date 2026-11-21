@@ -2208,14 +2208,34 @@ TOML
 	assert_line 'FAIL no failure recognised; the end of the output'
 }
 
-# Kills a process and those below it, the process first, so that it starts
-# no more of them.
-kill_tree() {
-	local children child
-	children=$(ps -A -o pid=,ppid= | awk -v parent="$1" '$2 == parent { print $1 }')
-	kill -KILL "$1" 2>/dev/null || true
-	for child in $children; do
-		kill_tree "$child"
+# The processes below $1 in the process table on stdin (`ps -A -o
+# pid=,ppid=,lstart=`), each as its id and when it started.
+below() {
+	awk -v root="$1" '
+		{ pid[NR] = $1; parent[NR] = $2; $1 = $2 = ""; sub(/^ +/, ""); born[NR] = $0 }
+		END {
+			found[root] = 1
+			do {
+				added = 0
+				for (i = 1; i <= NR; i++) {
+					if ((parent[i] in found) && !(pid[i] in found)) {
+						found[pid[i]] = 1
+						added = 1
+						print pid[i], born[i]
+					}
+				}
+			} while (added)
+		}'
+}
+
+# Kills the processes listed on stdin as `below` lists them: each that is
+# still the process listed, not another given its id since.
+kill_listed() {
+	local pid born
+	while read -r pid born; do
+		if [[ "$(ps -o lstart= -p "$pid" 2>/dev/null | awk '{ $1 = $1; print }')" == "$born" ]]; then
+			kill -KILL "$pid" 2>/dev/null || true
+		fi
 	done
 }
 
@@ -2232,6 +2252,8 @@ stop_jouet_test() {
 		sleep 0.05
 	done
 	assert [ -e started ]
+	# What it had started by now, for the cleanup below.
+	ps -A -o pid=,ppid=,lstart= | below "$pid" >tree
 	kill -TERM "$pid"
 	# jouet ends within its two seconds of grace; were it not to, a wait
 	# without a limit would hang the whole suite.
@@ -2240,8 +2262,12 @@ stop_jouet_test() {
 		sleep 0.05
 	done
 	if kill -0 "$pid" 2>/dev/null; then
-		# With the command it left running, which may ignore SIGTERM.
-		kill_tree "$pid"
+		# With what it left running, which may ignore SIGTERM: what is below
+		# it now, and what was before the signal, since a process whose
+		# parent has ended since is no longer found from jouet.
+		ps -A -o pid=,ppid=,lstart= | below "$pid" >>tree
+		kill -KILL "$pid" 2>/dev/null || true
+		kill_listed <tree
 		wait "$pid" || true
 		fail "jouet test was still running 15 seconds after SIGTERM; stdout: $(cat out); stderr: $(cat err)"
 	fi

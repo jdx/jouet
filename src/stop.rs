@@ -8,7 +8,7 @@
 //! shell or a task runner that ends at SIGTERM leaves its own running.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 /// Whether a run holds SIGTERM, for the handlers other code installs.
 static HELD: AtomicBool = AtomicBool::new(false);
@@ -20,51 +20,72 @@ pub(crate) fn held() -> bool {
     HELD.load(Ordering::SeqCst)
 }
 
+/// In a [`Stop`]'s state: a run holds SIGTERM.
+const HOLDS: u8 = 1;
+/// In a [`Stop`]'s state: a SIGTERM came.
+const TOLD: u8 = 2;
+
 /// SIGTERM while a command runs. Outside a run, and from the first one a run
 /// held, SIGTERM ends jouet as it always did, so a second one is never held
 /// up by the report.
 pub(crate) struct Stop {
-    told: Arc<AtomicBool>,
-    /// Whether SIGTERM ends jouet.
-    ends: Arc<AtomicBool>,
+    /// [`HOLDS`] and [`TOLD`], in one value: a SIGTERM and a run that lets
+    /// go of it each change it in one step, so whichever is second sees the
+    /// first, on whatever thread the signal is handled.
+    state: Arc<AtomicU8>,
+}
+
+/// What a SIGTERM does to `state`: whether it is recorded for the run that
+/// holds it, being the first, in place of ending jouet.
+#[cfg(unix)]
+fn recorded(state: &AtomicU8) -> bool {
+    state.fetch_or(TOLD, Ordering::SeqCst) == HOLDS
 }
 
 impl Stop {
     pub(crate) fn new() -> Self {
-        let told = Arc::new(AtomicBool::new(false));
-        let ends = Arc::new(AtomicBool::new(true));
-        // In this order at each SIGTERM: it ends jouet when no run holds it,
-        // or when one was held before; else it is recorded. The second is
-        // armed by the third inside the handler, so no SIGTERM that follows
-        // waits for the flag to be read.
+        let state = Arc::new(AtomicU8::new(0));
+        // At each SIGTERM: it ends jouet when no run holds it, or when one
+        // was held before; else it is recorded, which is what makes the next
+        // one end jouet, so none that follows waits for the state to be read.
         #[cfg(unix)]
         {
             let term = signal_hook::consts::SIGTERM;
-            let _ = signal_hook::flag::register_conditional_default(term, Arc::clone(&ends));
-            let _ = signal_hook::flag::register_conditional_default(term, Arc::clone(&told));
-            let _ = signal_hook::flag::register(term, Arc::clone(&told));
+            let state = Arc::clone(&state);
+            // SAFETY: the handler changes one atomic and calls the
+            // signal-safe default handler.
+            let _ = unsafe {
+                signal_hook::low_level::register(term, move || {
+                    if !recorded(&state) {
+                        let _ = signal_hook::low_level::emulate_default_handler(term);
+                    }
+                })
+            };
         }
-        Self { told, ends }
+        Self { state }
     }
 
     /// One that was told to stop already.
     #[cfg(all(test, unix))]
     pub(crate) fn told_already() -> Self {
         Self {
-            told: Arc::new(AtomicBool::new(true)),
-            ends: Arc::new(AtomicBool::new(true)),
+            state: Arc::new(AtomicU8::new(TOLD)),
         }
     }
 
     /// Holds SIGTERM while a command runs, and lets go of it after.
     pub(crate) fn hold(&self, held: bool) {
-        self.ends.store(!held, Ordering::SeqCst);
+        if held {
+            self.state.fetch_or(HOLDS, Ordering::SeqCst);
+        } else {
+            self.state.fetch_and(!HOLDS, Ordering::SeqCst);
+        }
         HELD.store(held, Ordering::SeqCst);
     }
 
     /// Whether jouet was told to stop.
     pub(crate) fn told(&self) -> bool {
-        self.told.load(Ordering::SeqCst)
+        self.state.load(Ordering::SeqCst) & TOLD != 0
     }
 }
 
@@ -260,6 +281,32 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         false
+    }
+
+    #[test]
+    fn a_sigterm_is_recorded_once_for_the_run_that_holds_it() {
+        let stop = Stop {
+            state: Arc::new(AtomicU8::new(0)),
+        };
+        // The first one a run holds is the run's, and the next ends jouet.
+        stop.hold(true);
+        assert!(!stop.told());
+        assert!(recorded(&stop.state));
+        assert!(stop.told());
+        assert!(!recorded(&stop.state));
+        // The run that lets go of it still sees it.
+        stop.hold(false);
+        assert!(stop.told());
+
+        // One that comes once the run has let go ends jouet: the run did
+        // not see it, and will not look again.
+        let stop = Stop {
+            state: Arc::new(AtomicU8::new(0)),
+        };
+        stop.hold(true);
+        stop.hold(false);
+        assert!(!stop.told());
+        assert!(!recorded(&stop.state));
     }
 
     #[test]

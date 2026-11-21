@@ -343,7 +343,7 @@ the output does not name the test that was running; its end:
 full log: ~/.local/state/jouet/logs/test-1795270736495-394889-0.log
 ```
 
-Unfinished tests and the end of the output keep to what the failures left of `--budget`. A test's `next:` command counts toward it and is printed whole or not at all, since part of a command is another command. The first unfinished test always has its name and its command, even under a budget smaller than the two, without which the answer names nothing to do next: its output is cut to what the command leaves, with a `... N lines skipped` line, and the unfinished tests after those that fit are named on a `... N more unfinished: ...` line. The end of the output keeps its last lines, and always the last one, where the run stopped, after a `... N lines skipped` line that says how many came before them and counts toward the budget as they do.
+Unfinished tests and the end of the output keep to what the failures left of `--budget`. A test's `next:` command counts toward it and is printed whole or not at all, since part of a command is another command. The first unfinished test always has its name and, where its format declares `rerun`, its command, even under a budget smaller than the two, without which the answer names nothing to do next: its output is cut to what the command leaves, with a `... N lines skipped` line, and the unfinished tests after those that fit are named on a `... N more unfinished: ...` line. The end of the output keeps its last lines, and always the last one, where the run stopped, after a `... N lines skipped` line that says how many came before them and counts toward the budget as they do.
 
 A run is cut short in one of three ways:
 
