@@ -1561,6 +1561,21 @@ mod watch {
             .collect()
     }
 
+    /// What the watchers' logs under `dir` say, one string per log kept.
+    fn logs(dir: &Path) -> Vec<String> {
+        std::fs::read_dir(dir.join("logs"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("watch-"))
+            })
+            .map(|p| std::fs::read_to_string(p).unwrap())
+            .collect()
+    }
+
     const FAST: [&str; 4] = ["--interval", "100ms", "--quiet-for", "2s"];
 
     #[test]
@@ -1875,5 +1890,89 @@ mod watch {
         assert_eq!((stdout(&out), stderr(&out)), (String::new(), String::new()));
         assert!(leases(dir).is_empty());
         assert_eq!(results(dir, "watch"), ["error"]);
+        // The ledger has the error's class, the log what it was.
+        assert_eq!(recorded(dir, "watch")[0]["error"], "remote");
+        let logs = logs(dir);
+        assert_eq!(logs.len(), 1, "{logs:?}");
+        assert!(
+            logs[0].contains("jouet watch: started no watcher (remote): "),
+            "{logs:?}"
+        );
+        assert!(logs[0].contains("rate limit"), "{logs:?}");
+    }
+
+    #[test]
+    fn a_watcher_that_fails_says_why_in_the_wake_the_ledger_and_its_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        checkout(dir);
+        let claude = Claude::interactive();
+        let mut world = World::default();
+        world
+            .checks
+            .insert(SHA_A, vec![check(101, "unit", "in_progress", None)]);
+        let fake = serve(world);
+        let limit = ["--interval", "100ms", "--timeout", "30s"];
+        let child = start(&fake, dir, &claude, &payload(dir, "t1", "git push"), &limit);
+        let lease_path = lease(dir);
+        hold(&lease_path);
+        // GitHub stops answering for longer than the watcher has.
+        fake.set(|w| w.rate_limit_for = Some(3600));
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+        // The wake is the note alone: what the wait printed is in the log.
+        let wake = stderr(&out);
+        assert!(
+            wake.starts_with("jouet: the `jouet wait pr` watcher for jdx/demo#7 stopped before its digest, with 1 Auto-fix event"),
+            "{wake}"
+        );
+        let why = wake
+            .trim_end()
+            .rsplit_once(". It stopped on an error: ")
+            .map(|(_, why)| why.to_string())
+            .unwrap_or_else(|| panic!("no reason in: {wake}"));
+        assert!(why.contains("rate limit"), "{wake}");
+        assert_eq!(wake.trim_end().lines().count(), 1, "{wake}");
+        assert!(leases(dir).is_empty() && !lease_path.with_extension("held").exists());
+
+        let settles = recorded(dir, "settle");
+        assert_eq!(results(dir, "settle"), ["error"]);
+        assert_eq!(
+            (
+                &settles[0]["error"],
+                &settles[0]["held"],
+                &settles[0]["woke"]
+            ),
+            (&json!("remote"), &json!(1), &json!(true))
+        );
+        let logs = logs(dir);
+        assert_eq!(logs.len(), 1, "{logs:?}");
+        assert!(
+            logs[0].contains("jouet watch: watching jdx/demo#7\n"),
+            "{logs:?}"
+        );
+        assert!(
+            logs[0].contains(&format!("jouet watch: stopped on an error (remote): {why}")),
+            "{logs:?}"
+        );
+    }
+
+    #[test]
+    fn a_watcher_that_ends_without_an_error_leaves_no_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        checkout(dir);
+        let claude = Claude::interactive();
+        let mut world = World::default();
+        world
+            .checks
+            .insert(SHA_A, vec![check(101, "unit", "in_progress", None)]);
+        let fake = serve(world);
+        let limit = ["--interval", "100ms", "--timeout", "1s"];
+        let out = run(&fake, dir, &claude, &payload(dir, "t1", "git push"), &limit);
+        assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+        assert_eq!(results(dir, "settle"), ["timeout"]);
+        assert_eq!(recorded(dir, "settle")[0].get("error"), None);
+        assert_eq!(logs(dir), Vec::<String>::new());
     }
 }

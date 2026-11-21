@@ -160,6 +160,12 @@ pub(crate) struct Settle {
     /// For a `settle`: it woke the agent with its digest.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub woke: bool,
+    /// For a `settle` or a `watch` whose result is `error`: the class of
+    /// what went wrong, the name of the exit code it stands for (`remote`,
+    /// `precondition`, `failed`). Never the message, which may name the
+    /// repository; the watcher's log has that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 impl Entry {

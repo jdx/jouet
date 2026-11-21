@@ -81,15 +81,16 @@ fn lost_in(dir: &Path, session: &str, now: i64) -> Vec<Lost> {
             Lost {
                 pid: l.pid,
                 held: held.len(),
-                note: lost_note(&l, &held),
+                note: lost_note(&l, &held, None),
             }
         })
         .collect()
 }
 
 /// What to tell the agent about the events held for a watcher that ended
-/// without its digest; nothing when none were.
-pub(crate) fn lost_note(lease: &Lease, held: &[Held]) -> Option<String> {
+/// without its digest; nothing when none were. `why` is the error that
+/// stopped it, when the watcher itself is the one saying so.
+pub(crate) fn lost_note(lease: &Lease, held: &[Held], why: Option<&str>) -> Option<String> {
     let first = held.iter().map(|h| h.at).min()?;
     // The watcher's own --since, so a restart sees the comments it did:
     // they were posted before their events were held.
@@ -123,6 +124,9 @@ pub(crate) fn lost_note(lease: &Lease, held: &[Held]) -> Option<String> {
         lease.repo,
         jouet_output::time::format_utc(since)
     );
+    if let Some(why) = why {
+        let _ = write!(note, ". It stopped on an error: {why}");
+    }
     Some(note)
 }
 
@@ -233,6 +237,8 @@ mod tests {
             "{note}"
         );
         assert!(note.contains("ci-failure (trusted / test)"), "{note}");
+        // Only the watcher itself knows what stopped it.
+        assert!(!note.contains("stopped on an error"), "{note}");
         assert!(
             note.contains(&format!(
                 "jouet wait pr 12 --repo jdx/jouet --until needs-agent --since {}",

@@ -30,6 +30,9 @@ pub struct LedgerSettle {
     pub watcher: Option<u32>,
     /// Whether the watcher's end gave the agent a digest to act on.
     pub woke: bool,
+    /// For an `error`: its class (`remote`, `precondition`, `failed`);
+    /// absent from entries jouet wrote before it was recorded.
+    pub error: Option<String>,
 }
 
 /// A hold with no settle after it for this long is orphaned: a watcher
@@ -56,8 +59,18 @@ pub struct SettleArm {
     pub covered: u64,
     /// Of those, the ones jouet held.
     pub held: u64,
+    /// Covered events that came with other notes of the app's in the same
+    /// prompt, so jouet let the prompt through instead of holding it.
+    pub passed_with_notes: u64,
+    /// Of those, the ones whose only note was the status line of the
+    /// sessions linked to this one.
+    pub passed_with_status_only: u64,
     /// Watchers that ended, by result.
     pub settles: BTreeMap<String, u64>,
+    /// The errors that stopped a watcher or kept one from starting, by
+    /// class: `remote` (GitHub could not be read), `precondition` (no token,
+    /// no state directory) or `failed` (the lease could not be written).
+    pub errors: BTreeMap<String, u64>,
     /// Held events a watcher's digest showed or said were over.
     pub accounted: u64,
     /// Held events a digest left out.
@@ -82,7 +95,10 @@ struct Session {
     woke: u64,
     covered: u64,
     held: u64,
+    with_notes: u64,
+    status_only: u64,
     settles: BTreeMap<String, u64>,
+    errors: BTreeMap<String, u64>,
     accounted: u64,
     silent: u64,
     lost: u64,
@@ -135,6 +151,8 @@ pub fn settle_arms(
             let s = sessions.entry(session).or_default();
             s.watched = true;
             s.covered += 1;
+            s.with_notes += u64::from(!prompt.notes.is_empty());
+            s.status_only += u64::from(prompt.notes == [STATUS]);
             if prompt.dropped {
                 s.held += 1;
                 s.pending.push((e.ts, prompt.watcher));
@@ -145,10 +163,16 @@ pub fn settle_arms(
             let s = sessions.entry(session).or_default();
             s.watched = true;
             *s.watchers.entry(watch.result.clone()).or_default() += 1;
+            if let Some(class) = &watch.error {
+                *s.errors.entry(class.clone()).or_default() += 1;
+            }
         } else if let Some(settle) = e.settle.as_ref() {
             let s = sessions.entry(session).or_default();
             s.watched = true;
             s.woke += u64::from(settle.woke);
+            if let Some(class) = &settle.error {
+                *s.errors.entry(class.clone()).or_default() += 1;
+            }
             if settle.result == "lease-lost" {
                 s.lost += 1;
                 s.lost_held += settle.held;
@@ -197,8 +221,13 @@ pub fn settle_arms(
                 out.wakes += s.woke;
                 out.covered += s.covered;
                 out.held += s.held;
+                out.passed_with_notes += s.with_notes;
+                out.passed_with_status_only += s.status_only;
                 for (result, n) in &s.settles {
                     *out.settles.entry(result.clone()).or_default() += n;
+                }
+                for (class, n) in &s.errors {
+                    *out.errors.entry(class.clone()).or_default() += n;
                 }
                 out.accounted += s.accounted;
                 out.silent_drops += s.silent;
@@ -223,6 +252,8 @@ pub fn settle_arms(
 
 const SETTLE: &str = "settle";
 const COVERED: &str = "covered";
+/// The note that is only the status of the sessions linked to this one.
+const STATUS: &str = "linked-sessions";
 
 #[cfg(test)]
 mod tests {
@@ -251,6 +282,13 @@ mod tests {
         }
     }
 
+    fn with_notes(mut e: LedgerEntry, notes: &[&str]) -> LedgerEntry {
+        if let Some(p) = e.prompt.as_mut() {
+            p.notes = notes.iter().map(ToString::to_string).collect();
+        }
+        e
+    }
+
     fn settle(session: &str, ts: u64, result: &str, held: u64, accounted: u64) -> LedgerEntry {
         LedgerEntry {
             harness: "jouet".into(),
@@ -261,6 +299,7 @@ mod tests {
                 wake_after_first_held_s: (held > 0).then_some(ts - 100),
                 watcher: None,
                 woke: result == "needs_agent",
+                error: (result == "error").then(|| "remote".into()),
             }),
             ..entry(
                 session,
@@ -298,6 +337,22 @@ mod tests {
             covered("n1", 600, true),
             settle("n1", 700, "parked", 0, 0),
             covered("n1", 800, true),
+            // Three more that came with other notes and so passed; one of
+            // them with the linked sessions' status alone.
+            with_notes(covered("n1", 810, false), &["fork-report", STATUS]),
+            with_notes(covered("n1", 820, false), &[STATUS]),
+            with_notes(covered("n1", 830, false), &["other"]),
+            // A watcher GitHub stopped answering, with nothing held, and a
+            // push that got none for want of a token.
+            settle("n1", 840, "error", 0, 0),
+            LedgerEntry {
+                settle: Some(LedgerSettle {
+                    result: "error".into(),
+                    error: Some("precondition".into()),
+                    ..LedgerSettle::default()
+                }),
+                ..entry("n1", 850, "watch")
+            },
             // c1: covered, never held.
             covered("c1", 100, false),
             settle("c1", 300, "closed", 0, 0),
@@ -328,14 +383,22 @@ mod tests {
                 sessions: 1,
                 pushes: 3,
                 watchers: BTreeMap::from([
+                    ("error".into(), 1),
                     ("no-pr".into(), 1),
                     ("started".into(), 1),
                     ("watching".into(), 1),
                 ]),
                 wakes: 1,
-                covered: 5,
+                covered: 8,
                 held: 5,
-                settles: BTreeMap::from([("needs_agent".into(), 1), ("parked".into(), 1)]),
+                passed_with_notes: 3,
+                passed_with_status_only: 1,
+                settles: BTreeMap::from([
+                    ("error".into(), 1),
+                    ("needs_agent".into(), 1),
+                    ("parked".into(), 1),
+                ]),
+                errors: BTreeMap::from([("precondition".into(), 1), ("remote".into(), 1)]),
                 accounted: 1,
                 silent_drops: 1,
                 lease_lost: 1,

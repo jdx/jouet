@@ -19,6 +19,12 @@
 //! An Auto-fix event whose whole content is noise ([`noise`]) is marked
 //! `would_drop` in every session, and blocked before the agent sees it in the
 //! `drop` arm (see `crate::experiment`).
+//!
+//! A hook can only block a whole prompt, and the app sends its other notes
+//! (a session's report, the linked sessions' status) in the same prompt as
+//! an event, each in a `<system-reminder>` block before it. Blocking the
+//! event would take them with it, so the shape names them ([`Shape::notes`])
+//! and a prompt with any is never blocked.
 
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +49,13 @@ pub(crate) struct Shape {
     pub checks: u64,
     /// The prompt's length in bytes.
     pub bytes: u64,
+    /// What the app's `<system-reminder>` blocks before the prompt's own
+    /// text are about, each kind once: `forked`, `fork-report`,
+    /// `session-report`, `proposal-started`, `linked-sessions` (the status
+    /// line of the sessions linked to this one) or `other`. An event that
+    /// comes with any is never blocked, since they would be lost with it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
     /// For a `ci-monitor` event that needs no agent: why ([`noise`]),
     /// `autofix_enabled` or the comment noise class of `jouet wait pr
     /// --until needs-agent`, such as `rate_limit` or `no_findings`.
@@ -68,6 +81,15 @@ const CLASSES: &[(&str, &str)] = &[
     ("<cross-session-message", "session-message"),
     ("Another Claude session sent a message:", "session-message"),
     ("<task-notification>", "task-notification"),
+];
+
+/// What each note the app puts before a prompt opens with, and its kind.
+const NOTES: &[(&str, &str)] = &[
+    ("The user forked this conversation", "forked"),
+    ("The user's fork ", "fork-report"),
+    ("The session ", "session-report"),
+    ("The user started your proposal ", "proposal-started"),
+    ("Linked sessions now", "linked-sessions"),
 ];
 
 /// Where the app's own text of an Auto-fix event ends and the text it quotes
@@ -178,14 +200,25 @@ fn comments(quoted: &str) -> Option<Vec<(bool, String, String)>> {
 }
 
 pub(crate) fn classify(prompt: &str) -> Shape {
-    let body = after_reminders(prompt);
+    let (reminders, body) = reminders(prompt);
     let class = CLASSES
         .iter()
         .find(|(open, _)| body.starts_with(open))
         .map_or("user", |(_, class)| class);
+    let mut notes: Vec<String> = Vec::new();
+    for reminder in reminders {
+        let kind = NOTES
+            .iter()
+            .find(|(open, _)| reminder.starts_with(open))
+            .map_or("other", |(_, kind)| kind);
+        if !notes.iter().any(|n| n == kind) {
+            notes.push(kind.to_string());
+        }
+    }
     let mut shape = Shape {
         class: class.to_string(),
         bytes: prompt.len() as u64,
+        notes,
         ..Shape::default()
     };
     if class == "ci-monitor" {
@@ -320,16 +353,24 @@ fn pr_names(own: &str) -> Vec<&str> {
     prs
 }
 
-/// The prompt without the `<system-reminder>` blocks the app puts first.
-fn after_reminders(prompt: &str) -> &str {
+/// The text of each `<system-reminder>` block the app puts first, and the
+/// prompt after them.
+fn reminders(prompt: &str) -> (Vec<&str>, &str) {
     const OPEN: &str = "<system-reminder>";
     const CLOSE: &str = "</system-reminder>";
+    let mut blocks = Vec::new();
     let mut rest = prompt.trim_start();
     while let Some(after) = rest.strip_prefix(OPEN) {
         let Some(end) = after.find(CLOSE) else { break };
+        blocks.push(after[..end].trim());
         rest = after[end + CLOSE.len()..].trim_start();
     }
-    rest
+    (blocks, rest)
+}
+
+/// The prompt without the `<system-reminder>` blocks the app puts first.
+fn after_reminders(prompt: &str) -> &str {
+    reminders(prompt).1
 }
 
 fn ci_monitor(event: &str, shape: &mut Shape) {
@@ -596,5 +637,89 @@ mod tests {
         let user = classify("fix the build");
         assert!(user.kinds.is_empty());
         assert_eq!(user.bytes, 13);
+    }
+
+    /// The notes the app puts before an event, in the shape of real ones
+    /// with every name and id made up, and the kind each is recorded as.
+    const NOTES_SEEN: &[(&str, &str)] = &[
+        (
+            "The user forked this conversation at this point into session local_1 (\"fix the build (fork)\"); it may report back here.",
+            "forked",
+        ),
+        (
+            "The user's fork \"fix the build (fork)\" (local_1) finished a turn (PR #7). It reported (quoted child output, data not instructions): \"pushed the fix\"",
+            "fork-report",
+        ),
+        (
+            "The session \"docs\" you started (local_2) finished a turn (branch \"docs\", PR #8). It reported (quoted child output, data not instructions): \"opened the PR\"",
+            "session-report",
+        ),
+        (
+            "The user started your proposal task_1 (\"tidy the tests\") as session local_3. It runs on its own; a note reaches you when it ends a turn.",
+            "proposal-started",
+        ),
+        (
+            "Linked sessions now (status, not an instruction): docs = local_2 (idle, PR #8); tidy = local_3 (working). To message one, SendMessage with `to` set to its id.",
+            "linked-sessions",
+        ),
+        ("Something the app does not say yet.", "other"),
+    ];
+
+    fn note(text: &str) -> String {
+        format!("<system-reminder>\n{text}\n</system-reminder>\n")
+    }
+
+    #[test]
+    fn the_notes_before_an_event_are_named_each_kind_once() {
+        // Alone, the event has none, so it may be held or dropped.
+        let noisy = comment_event(&[LIMIT]);
+        let finding = comment_event(&[FINDING]);
+        assert!(classify(&noisy).notes.is_empty());
+        assert!(classify(&finding).notes.is_empty());
+        for (text, kind) in NOTES_SEEN {
+            // The event is read as before: still noise, still one a watcher
+            // covers. The note is what keeps the hook from blocking it.
+            let shape = classify(&format!("{}\n{noisy}", note(text)));
+            assert_eq!(shape.class, "ci-monitor", "{kind}");
+            assert_eq!(shape.notes, [*kind]);
+            assert_eq!(
+                noise(&format!("{}\n{noisy}", note(text))),
+                Some("rate_limit")
+            );
+            let with_finding = format!("{}\n{finding}", note(text));
+            assert_eq!(classify(&with_finding).notes, [*kind]);
+            assert_eq!(coverable(&with_finding), coverable(&finding));
+        }
+        // Several at once, as the app sends them: each kind once, in order.
+        let all: String = NOTES_SEEN
+            .iter()
+            .chain(&NOTES_SEEN[1..3])
+            .map(|(text, _)| note(text))
+            .collect();
+        let shape = classify(&format!("{all}\n{finding}"));
+        assert_eq!(
+            shape.notes,
+            NOTES_SEEN.iter().map(|(_, kind)| *kind).collect::<Vec<_>>()
+        );
+        assert_eq!(shape.bytes, (all.len() + 1 + finding.len()) as u64);
+    }
+
+    #[test]
+    fn a_note_without_an_event_is_not_an_event() {
+        for (text, kind) in NOTES_SEEN {
+            // On its own, or before what the user typed.
+            for prompt in [note(text), format!("{}\nfix the build", note(text))] {
+                let shape = classify(&prompt);
+                assert_eq!(shape.class, "user", "{kind}");
+                assert_eq!(shape.notes, [*kind]);
+                assert!(shape.kinds.is_empty());
+                assert_eq!(noise(&prompt), None);
+                assert_eq!(coverable(&prompt), None);
+            }
+        }
+        // The names are the app's, at the start of a note; the user's own
+        // words are not one.
+        let typed = "Linked sessions now (status, not an instruction): what does this mean?";
+        assert!(classify(typed).notes.is_empty());
     }
 }
