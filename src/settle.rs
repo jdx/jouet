@@ -18,7 +18,7 @@ use crate::prompt::{Coverable, Shape};
 use jouet_rules::shell::{self, Op};
 use jouet_wait::lease::{self, Held, Lease};
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Why a covered event did not start a turn.
 pub(crate) const HOLD_REASON: &str = "jouet held this Auto-fix event for the PR watcher running in this session (the one jouet started after a push, or a `jouet wait pr --until needs-agent`), which reports it in its digest when the PR settles; set `[experiment] settle_share = 0` in jouet's config to stop.";
@@ -172,19 +172,23 @@ fn git_options(argv: &[String]) -> (Vec<(&str, Option<&str>)>, &[String]) {
     (options, rest)
 }
 
-/// Whether a parsed command pushes a branch or opens a PR: its words hold
-/// one of the pairs, or it is git with `push` after its own options (`git
-/// -C dir push`).
+/// Whether a parsed command is itself a push or the opening of a PR: it
+/// runs git with `push` after git's own options (`git -C dir push`), or
+/// another program with one of the other pairs as its first words (`gh pr
+/// create`). A command that only has the words among its arguments (`echo
+/// git push done`) is not one.
 fn is_push(command: &shell::Command) -> bool {
     let argv = command.argv();
-    PUSH_WORDS
-        .iter()
-        .any(|pair| argv.windows(2).any(|w| w == pair))
-        || (command.program() == Some("git")
-            && git_options(argv)
-                .1
-                .first()
-                .is_some_and(|verb| verb == "push"))
+    match command.program() {
+        Some("git") => git_options(argv)
+            .1
+            .first()
+            .is_some_and(|verb| verb == "push"),
+        Some("echo" | "printf") | None => false,
+        Some(_) => PUSH_WORDS
+            .iter()
+            .any(|pair| pair[0] != "git" && argv.get(1..3).is_some_and(|words| words == pair)),
+    }
 }
 
 /// Whether a shell command pushes a branch or opens a PR.
@@ -212,11 +216,33 @@ pub(crate) fn pushes(command: &str) -> bool {
 /// the agent's, so a directory is taken only when it is there and inside a
 /// git work tree.
 pub(crate) fn push_dir(command: &str, cwd: &Path) -> Option<PathBuf> {
-    // As the file system has it, so a `..` or a link in it is followed
-    // before its work tree is looked for.
-    let dir = stated_dir(command, cwd)?.canonicalize().ok()?;
+    let dir = followed(&stated_dir(command, cwd)?)?;
     let moved = cwd.canonicalize().map_or(true, |cwd| cwd != dir);
     (moved && dir.is_dir() && jouet_output::paths::work_tree(&dir).is_some()).then_some(dir)
+}
+
+/// `dir` as the file system has it, with its links and each `..` followed,
+/// when the two readings of a `..` agree. The shell's `cd` drops the name
+/// before it, while git's `-C` and the file system take the parent of what
+/// that name links to. None when they differ (`cd link && cd ..`), since
+/// the text does not say which shell option is set, and for a path that is
+/// not there.
+fn followed(dir: &Path) -> Option<PathBuf> {
+    let mut at = PathBuf::new();
+    for part in dir.components() {
+        match part {
+            Component::ParentDir => {
+                let named = at.parent()?.canonicalize().ok()?;
+                if at.canonicalize().ok()?.parent() != Some(&named) {
+                    return None;
+                }
+                at.pop();
+            }
+            Component::CurDir => {}
+            part => at.push(part),
+        }
+    }
+    at.canonicalize().ok()
 }
 
 /// Where the text of `command` says its last push ran, started in `cwd`;
@@ -230,7 +256,13 @@ fn stated_dir(command: &str, cwd: &Path) -> Option<PathBuf> {
         return None;
     }
     let mut dir = cwd.to_path_buf();
+    // `GIT_DIR=dir git push`, `env GIT_DIR=dir git push` and `export
+    // GIT_DIR=dir` before it name the repository another way.
+    let elsewhere = |a: &String| a.starts_with("GIT_DIR=") || a.starts_with("GIT_WORK_TREE=");
     for (i, step) in before.iter().enumerate() {
+        if step.words.iter().any(elsewhere) {
+            return None;
+        }
         match step.program() {
             Some("cd") => {
                 let runs = match i.checked_sub(1).and_then(|p| before[p].op) {
@@ -256,13 +288,12 @@ fn stated_dir(command: &str, cwd: &Path) -> Option<PathBuf> {
             _ => {}
         }
     }
-    // `env -C dir git push` and `GIT_DIR=dir git push` name it another way.
+    // So does `env -C dir git push`.
     let wrappers = &push.words[..push.words.len() - push.argv().len()];
-    let elsewhere = |a: &String| a.starts_with("GIT_DIR=") || a.starts_with("GIT_WORK_TREE=");
     if wrappers
         .iter()
         .any(|w| w == "-C" || w.starts_with("--chdir"))
-        || push.env.iter().any(elsewhere)
+        || wrappers.iter().chain(&push.env).any(elsewhere)
     {
         return None;
     }
@@ -594,6 +625,12 @@ mod tests {
                 "/src/other",
             ),
             ("cd /src/a && git push; cd /src/b && git push", "/src/b"),
+            // Words a later command only prints are not the push.
+            (
+                "git -C /src/other push && echo git push complete",
+                "/src/other",
+            ),
+            ("cd /src/a && git push; cd /src/b; echo pr create", "/src/a"),
             (
                 "cd /src/a && git push -u origin x && gh pr create --fill",
                 "/src/a",
@@ -666,11 +703,15 @@ mod tests {
             "git --git-dir=/src/other/.git push",
             "git --work-tree /src/other push",
             "GIT_DIR=/src/other/.git git push",
+            "env GIT_DIR=/src/a/.git git -C /src/other push",
+            "export GIT_DIR=/src/a/.git; cd /src/other && git push",
             "env -C /src/other git push",
             // No command of its own is the push.
             "cd /src/other && sh -c 'git push'",
             "cd /src/other && echo \"$(git push)\"",
             "cd /src/other && git commit -m 'then git push'",
+            "cd /src/other && echo git push",
+            "cd /src/other && echo pr create",
         ] {
             assert_eq!(stated(command), None, "{command}");
         }
@@ -712,6 +753,40 @@ mod tests {
             "cd ../other/file && git push",
             "cd ../plain && git push",
             "cd \"$DIR\" && git push",
+        ] {
+            assert_eq!(push_dir(command, &session), None, "{command}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_parent_directory_reached_through_a_link_is_not_guessed() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let session = root.join("session");
+        let other = root.join("repos/other");
+        for dir in [session.join(".git"), other.join(".git"), other.join("sub")] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        // `repos` is a work tree too, so a wrong `..` would find a PR there.
+        std::fs::create_dir_all(root.join("repos/.git")).unwrap();
+        std::os::unix::fs::symlink(&other, session.join("link")).unwrap();
+        // A link is followed, and a `..` that stays under it.
+        for (command, dir) in [
+            ("cd link && git push", other.clone()),
+            ("cd link/sub && git push", other.join("sub")),
+            ("cd link/sub && cd .. && git push", other.clone()),
+            ("git -C link/sub/.. push", other.clone()),
+        ] {
+            assert_eq!(push_dir(command, &session), Some(dir), "{command}");
+        }
+        // `cd ..` after it is the session's directory to the shell and
+        // `repos` to the file system.
+        for command in [
+            "cd link && cd .. && git push",
+            "cd link/.. && git push",
+            "git -C link/.. push",
+            "cd link && git -C .. push",
         ] {
             assert_eq!(push_dir(command, &session), None, "{command}");
         }
