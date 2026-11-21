@@ -2,7 +2,7 @@
 //! failure that was there before the change, from the environment or an
 //! earlier commit, does not count against it.
 
-use super::{Job, execute, log_path};
+use super::{Job, Ran, execute, log_path};
 use crate::testlog::{self, Format};
 use crate::{affected, known};
 use jouet_output::exit::Exit;
@@ -737,7 +737,7 @@ fn targeted(
         dir: tree.join(dir),
         exit: Box::new(|_| Exit::Ok),
     };
-    let Ok((code, _)) = execute(&at_base, &log, false) else {
+    let Ok(Ran { code, .. }) = execute(&at_base, &log, false, None) else {
         return Ok(None);
     };
     if code == 0 {
@@ -1017,7 +1017,7 @@ pub(super) fn compare(
                         exit: Box::new(|_| Exit::Ok),
                     };
                     let log = log_path(failed.len() * 2 + 1);
-                    let (code, _) = execute(&prepare, &log, false)
+                    let Ran { code, .. } = execute(&prepare, &log, false, None)
                         .map_err(|e| format!("baseline setup: {e}"))?;
                     if code != 0 {
                         return Err(NotCompared::from(format!(
@@ -1036,7 +1036,7 @@ pub(super) fn compare(
                 };
                 // After this run's own logs, so pruning never takes one of them.
                 let log = log_path(failed.len() + i + 1);
-                let (code, _) = execute(&at_base, &log, false).map_err(|error| {
+                let Ran { code, .. } = execute(&at_base, &log, false, None).map_err(|error| {
                     let program = Path::new(&at_base.argv[0]);
                     let program = if program.is_absolute() {
                         program.to_path_buf()

@@ -16,6 +16,8 @@ use std::fs::File;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 mod baseline;
@@ -83,6 +85,12 @@ struct SuiteReport {
     /// Answered from an earlier run of the command on the same files.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     reused: bool,
+    /// The command ran into a time limit: it exited 124, as `timeout` does.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    timed_out: bool,
+    /// The signal that stopped the command, or jouet while it ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stopped_by: Option<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -316,6 +324,8 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     // them from what that run said.
     let reuse_s = crate::settings::Settings::load().test.reuse_s;
     let mut tree = (runs && reuse_s > 0).then(|| reuse::state(&root)).flatten();
+    let stop = Stop::new();
+    let mut stopped = false;
     if !args.dry_run {
         for (i, (suite, job)) in report.suites.iter_mut().zip(&jobs).enumerate() {
             let Some(job) = job else { continue };
@@ -334,7 +344,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 .then(|| sequences.then(|| crate::cost::sequences::begin(&job.dir, i)))
                 .flatten()
                 .flatten();
-            let (code, ms) = if let Some(kept) = &kept {
+            let (code, ms, told) = if let Some(kept) = &kept {
                 if !out.json {
                     emit(&format!(
                         "reused: `{}` ran on these same files {} ago ({}s, exit {}); --fresh runs it again\n",
@@ -345,9 +355,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                     ));
                 }
                 suite.reused = true;
-                (kept.code, kept.ms)
+                (kept.code, kept.ms, false)
             } else {
-                let ran = match execute(job, &log, stream) {
+                let ran = match execute(job, &log, stream, Some(&stop)) {
                     Ok(ran) => ran,
                     Err(e) => {
                         if let Some(ticket) = ticket {
@@ -357,26 +367,40 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                     }
                 };
                 // Kept only when the run left the files as it found them: a
-                // formatter or a generator is never answered from it.
-                let after = tree.as_ref().and_then(|_| reuse::state(&root));
+                // formatter or a generator is never answered from it. Nor
+                // is a run that was cut short, which has no answer to keep.
+                let after = tree
+                    .as_ref()
+                    .filter(|_| !ran.told)
+                    .and_then(|_| reuse::state(&root));
                 if let Some(key) = &key
                     && after.is_some()
                     && after == tree
+                    && ran.code != TIMED_OUT
+                    && stopped_by(ran.code).is_none()
                 {
-                    let (code, ms) = ran;
                     let kept = reuse::Kept {
                         at: 0,
-                        code,
-                        ms,
+                        code: ran.code,
+                        ms: ran.ms,
                         log: log.clone(),
                     };
                     reuse::keep(key, &kept, reuse_s);
                 }
                 tree = after;
-                ran
+                (ran.code, ran.ms, ran.told)
             };
             suite.exit_code = Some(code);
             suite.duration_ms = Some(ms);
+            // Cut short: by the signal jouet was sent, by one that ended the
+            // command, or by a time limit the command ran under.
+            suite.stopped_by = if told {
+                Some("SIGTERM")
+            } else {
+                stopped_by(code)
+            };
+            suite.timed_out = suite.stopped_by.is_none() && code == TIMED_OUT;
+            let cut = suite.timed_out || suite.stopped_by.is_some();
             // A job is one command; one that runs several checks is not
             // split between them.
             let records = super::hook::checks(&job.dir, &command_line(&job.argv));
@@ -390,8 +414,11 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             let output = String::from_utf8_lossy(&output);
             let format_changes = code == 0 && gofmt_changes(&job.argv, &job.dir, &output);
             suite.format_changes = format_changes;
-            let mut digest =
-                testlog::digest_with(&output, code != 0 || format_changes, budget, &formats);
+            let mut digest = if cut {
+                testlog::digest_cut(&output, budget, &formats)
+            } else {
+                testlog::digest_with(&output, code != 0 || format_changes, budget, &formats)
+            };
             let incomplete_suite = digest.nextest_incomplete;
             nextest_incomplete |= incomplete_suite;
             if code == 0 && digest.passed_names.is_empty() && !digest.passed_all.is_empty() {
@@ -422,6 +449,7 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                     command,
                     ms,
                     code == 0
+                        && !cut
                         && !empty_test
                         && !contradictory
                         && !incomplete_suite
@@ -441,7 +469,10 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                         all
                     });
             }
-            if base.is_some() && code != 0 {
+            // A run that was cut short is not run again at the merge base:
+            // it would be cut short there too, and has no whole answer to
+            // compare.
+            if base.is_some() && code != 0 && !cut {
                 let ran = digest.passed + digest.failed + digest.skipped;
                 failed.push((
                     job,
@@ -459,7 +490,9 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
                 slowest_failure = slowest_failure.max(ms);
             }
             suite.digest = Some(digest);
-            let suite_exit = if format_changes || (incomplete_suite && code != 0) {
+            let suite_exit = if suite.timed_out {
+                Exit::Timeout
+            } else if format_changes || (incomplete_suite && code != 0) {
                 Exit::Failed
             } else if empty_test || contradictory || incomplete_suite {
                 Exit::Precondition
@@ -472,7 +505,24 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
             if !out.json {
                 emit(&outcome(suite, stream, empty_test, contradictory));
             }
+            if told {
+                stopped = true;
+                break;
+            }
         }
+    }
+    // Told to stop: what the run had said by then is out, and nothing more
+    // is run, compared or recorded, since whoever sent the signal is not
+    // waiting. jouet then ends as the signal would have ended it.
+    if stopped {
+        if runs {
+            super::hook::mark_own_run(&cwd, &own_command(), false);
+        }
+        report.ok = false;
+        if out.json {
+            out.result(&report, String::new);
+        }
+        die();
     }
     // Every failed suite blames the machine: said here, where the agent
     // reads it, and not run again at the merge base, which fails the same
@@ -535,6 +585,21 @@ pub(crate) fn run(args: &TestArgs, out: &Output) -> Exit {
     if args.baseline && failed.is_empty() && report.suites.iter().any(|suite| suite.format_changes)
     {
         let message = "baseline: not compared; gofmt reported formatting changes with exit 0, so compare them at the merge base separately";
+        if out.json {
+            eprintln!("{message}");
+        } else {
+            emit(&format!("{message}\n"));
+        }
+    }
+    if args.baseline
+        && failed.is_empty()
+        && report
+            .suites
+            .iter()
+            .any(|suite| suite.timed_out || suite.stopped_by.is_some())
+    {
+        let message =
+            "baseline: not compared; a run that was cut short is not run again at the merge base";
         if out.json {
             eprintln!("{message}");
         } else {
@@ -967,10 +1032,127 @@ fn prune_logs(dir: &Path) {
     }
 }
 
+/// The exit code of a command that ran into a time limit: `timeout`'s, and
+/// the shared table's.
+const TIMED_OUT: i32 = 124;
+
+/// The signals that stop a run from outside, by number, which Linux and
+/// macOS share: what a harness, `timeout` or the kernel sends, as against a
+/// crash such as SIGSEGV, which is the command's own failure.
+const STOP_SIGNALS: [(i32, &str); 4] = [
+    (1, "SIGHUP"),
+    (2, "SIGINT"),
+    (9, "SIGKILL"),
+    (15, "SIGTERM"),
+];
+
+/// How long a command has to end, once jouet is told to stop, before it is
+/// killed.
+const STOP_GRACE: Duration = Duration::from_secs(2);
+
+/// How long a command has to end by itself, once jouet is told to stop,
+/// before the signal is passed on to it: `timeout` and most harnesses signal
+/// the whole process group, so it usually has the signal already.
+const STOP_PASSED_ON: Duration = Duration::from_millis(100);
+
+/// The signal that stopped a run which ended with `code`: 128 plus the
+/// signal's number, as a shell reports a command a signal ended and as
+/// [`execute`] reports its own.
+fn stopped_by(code: i32) -> Option<&'static str> {
+    STOP_SIGNALS
+        .iter()
+        .find(|(signal, _)| 128 + signal == code)
+        .map(|(_, name)| *name)
+}
+
+/// SIGTERM while a command runs, which is what `timeout` and a harness send
+/// jouet at a time limit: in place of ending jouet at once it sets a flag, so
+/// the command can be stopped and what it had said by then reported. Outside
+/// a run, and once the flag is read, SIGTERM ends jouet as it always did.
+struct Stop {
+    told: Arc<AtomicBool>,
+    /// Whether SIGTERM ends jouet.
+    ends: Arc<AtomicBool>,
+}
+
+impl Stop {
+    fn new() -> Self {
+        let told = Arc::new(AtomicBool::new(false));
+        let ends = Arc::new(AtomicBool::new(true));
+        // The first ends jouet when `ends` is set; else the second sets `told`.
+        #[cfg(unix)]
+        {
+            let term = signal_hook::consts::SIGTERM;
+            let _ = signal_hook::flag::register_conditional_default(term, Arc::clone(&ends));
+            let _ = signal_hook::flag::register(term, Arc::clone(&told));
+        }
+        Self { told, ends }
+    }
+
+    /// Whether jouet was told to stop. From then on SIGTERM ends it, so a
+    /// second one is not held up by the report.
+    fn told(&self) -> bool {
+        let told = self.told.load(Ordering::Relaxed);
+        if told {
+            self.ends.store(true, Ordering::Relaxed);
+        }
+        told
+    }
+}
+
+/// Ends jouet the way the SIGTERM it was sent would have.
+fn die() -> ! {
+    #[cfg(unix)]
+    {
+        let _ = signal_hook::low_level::emulate_default_handler(signal_hook::consts::SIGTERM);
+    }
+    std::process::exit(i32::from(Exit::Failed.code()))
+}
+
+/// Passes the SIGTERM jouet was sent on to the command it runs.
+#[cfg(unix)]
+fn pass_on(child: &Child) {
+    if let Ok(pid) = libc::pid_t::try_from(child.id()) {
+        // SAFETY: kill(2) with a child's pid and a constant signal has no
+        // memory effects.
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
+    }
+}
+
+/// Nothing sends jouet a SIGTERM to pass on.
+#[cfg(not(unix))]
+fn pass_on(_child: &Child) {}
+
+/// How a job's run ended.
+struct Ran {
+    /// Its exit code: 128 plus the signal's number when one of
+    /// [`STOP_SIGNALS`] ended it, and 1 for any other signal.
+    code: i32,
+    ms: u64,
+    /// jouet was told to stop (SIGTERM) while it ran, and stopped it.
+    told: bool,
+}
+
+/// A finished command's exit code, as [`Ran`] has it.
+fn code_of(status: ExitStatus) -> i32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt as _;
+        if let Some(signal) = status.signal()
+            && stopped_by(128 + signal).is_some()
+        {
+            return 128 + signal;
+        }
+    }
+    status.code().unwrap_or(1)
+}
+
 /// Runs a job with its stdout and stderr in `log`, copied to stdout as it
-/// runs when `stream`. Its exit code (1 when a signal ended it) and how long
-/// it took.
-fn execute(job: &Job, log: &Path, stream: bool) -> Result<(i32, u64), String> {
+/// runs when `stream`. With `stop`, a SIGTERM sent to jouet stops the job in
+/// place of ending jouet with the job still running.
+fn execute(job: &Job, log: &Path, stream: bool, stop: Option<&Stop>) -> Result<Ran, String> {
     let saving = |e: std::io::Error| format!("saving the output to {}: {e}", log.display());
     if let Some(dir) = log.parent() {
         std::fs::create_dir_all(dir).map_err(saving)?;
@@ -984,8 +1166,15 @@ fn execute(job: &Job, log: &Path, stream: bool) -> Result<(i32, u64), String> {
         .stdin(Stdio::null())
         .stdout(file.try_clone().map_err(saving)?)
         .stderr(file);
+    // From before the command starts, so no SIGTERM ends jouet with it running.
+    let hold = |held: bool| {
+        if let Some(stop) = stop {
+            stop.ends.store(!held, Ordering::Relaxed);
+        }
+    };
+    hold(true);
     let started = Instant::now();
-    let mut child = command.spawn().map_err(|e| {
+    let spawned = command.spawn().map_err(|e| {
         let mut message = format!("running {}: {e}", job.argv[0]);
         if e.kind() == std::io::ErrorKind::NotFound {
             if let Some(other) = versioned_on_path(&job.argv[0]) {
@@ -995,15 +1184,23 @@ fn execute(job: &Job, log: &Path, stream: bool) -> Result<(i32, u64), String> {
             }
         }
         message
-    })?;
-    let status = if stream {
-        follow(&mut child, log)
-    } else {
-        child.wait()
-    }
-    .map_err(|e| format!("running {}: {e}", job.argv[0]))?;
+    });
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(e) => {
+            hold(false);
+            return Err(e);
+        }
+    };
+    let waited = follow(&mut child, log, stream, stop);
+    hold(false);
+    let (status, told) = waited.map_err(|e| format!("running {}: {e}", job.argv[0]))?;
     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    Ok((status.code().unwrap_or(1), ms))
+    Ok(Ran {
+        code: code_of(status),
+        ms,
+        told,
+    })
 }
 
 /// A program on PATH named `name` and a version, such as `python3` for
@@ -1258,25 +1455,55 @@ fn task_running(dir: &Path, program: &str) -> Option<String> {
     found.first().map(|name| (*name).to_string())
 }
 
-/// Copies what the child writes to its log onto stdout until it exits.
-fn follow(child: &mut Child, log: &Path) -> std::io::Result<ExitStatus> {
-    let mut reader = File::open(log)?;
-    let mut stdout = std::io::stdout();
+/// Waits for the child to exit, copying what it writes to its log onto
+/// stdout when `stream`. Once `stop` says jouet was told to stop, the child
+/// is too, and killed if it has not ended [`STOP_GRACE`] later; the flag
+/// returned says that happened.
+fn follow(
+    child: &mut Child,
+    log: &Path,
+    stream: bool,
+    stop: Option<&Stop>,
+) -> std::io::Result<(ExitStatus, bool)> {
+    let mut copy = if stream {
+        Some((File::open(log)?, std::io::stdout()))
+    } else {
+        None
+    };
     let mut buf = [0u8; 8192];
+    // Short at first, so a command that ends at once is not kept waiting.
+    let mut pause = Duration::from_millis(1);
+    let mut told: Option<Instant> = None;
+    let (mut passed_on, mut killed) = (false, false);
     loop {
         let status = child.try_wait()?;
-        loop {
-            let n = reader.read(&mut buf)?;
-            if n == 0 {
-                break;
+        if let Some((reader, stdout)) = &mut copy {
+            loop {
+                let n = reader.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                stdout.write_all(&buf[..n])?;
             }
-            stdout.write_all(&buf[..n])?;
+            stdout.flush()?;
         }
-        stdout.flush()?;
         if let Some(status) = status {
-            return Ok(status);
+            return Ok((status, told.is_some()));
         }
-        std::thread::sleep(Duration::from_millis(50));
+        if told.is_none() && stop.is_some_and(Stop::told) {
+            told = Some(Instant::now());
+        }
+        if let Some(at) = told {
+            if !killed && at.elapsed() >= STOP_GRACE {
+                killed = true;
+                let _ = child.kill();
+            } else if !passed_on && at.elapsed() >= STOP_PASSED_ON {
+                passed_on = true;
+                pass_on(child);
+            }
+        }
+        std::thread::sleep(pause);
+        pause = (pause * 2).min(Duration::from_millis(50));
     }
 }
 
@@ -1307,6 +1534,8 @@ fn given(cwd: &Path, args: &TestArgs) -> (Report, Vec<Option<Job>>) {
         digest: None,
         format_changes: false,
         reused: false,
+        timed_out: false,
+        stopped_by: None,
     };
     let job = Job {
         argv: args.extra.clone(),
@@ -1355,6 +1584,8 @@ fn full(cwd: &Path, args: &TestArgs) -> Result<(Report, Vec<Option<Job>>), affec
             digest: None,
             format_changes: false,
             reused: false,
+            timed_out: false,
+            stopped_by: None,
         };
         let job = Job {
             argv,
@@ -1565,6 +1796,8 @@ fn suite_report(suite: &Suite) -> SuiteReport {
         digest: None,
         format_changes: false,
         reused: false,
+        timed_out: false,
+        stopped_by: None,
     }
 }
 
@@ -1699,6 +1932,14 @@ fn text(report: &Report) -> String {
 /// agent (`!streamed`) the failures it found, cut to the budget.
 fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory: bool) -> String {
     let secs = suite.duration_ms.unwrap_or(0) as f64 / 1000.0;
+    // Cut short, whatever the command made of it: a command told to stop
+    // may still exit 0.
+    if let Some(signal) = suite.stopped_by {
+        return cut_outcome(suite, &format!("stopped by {signal}"), streamed);
+    }
+    if suite.timed_out {
+        return cut_outcome(suite, &format!("timed out (exit {TIMED_OUT})"), streamed);
+    }
     let incomplete = suite.digest.as_ref().is_some_and(|d| d.nextest_incomplete);
     let mut s = match suite.exit_code {
         Some(0) if incomplete => format!(
@@ -1800,31 +2041,105 @@ fn outcome(suite: &SuiteReport, streamed: bool, empty_test: bool, contradictory:
         return s;
     }
     s.push('\n');
+    failures(&mut s, digest, suite.format_changes);
+    let _ = writeln!(s, "full log: {log}");
+    s
+}
+
+/// A digest's failures as printed: each with its lines, then how many more
+/// there are and their names.
+fn failures(s: &mut String, digest: &Digest, format_changes: bool) {
     for failure in &digest.failures {
-        if suite.format_changes {
+        if format_changes {
             s.push_str("Formatting differences:\n");
         } else {
             let _ = writeln!(s, "FAIL {}", failure.name);
         }
-        for line in &failure.lines {
-            if line.is_empty() {
-                s.push('\n');
-            } else {
-                let _ = writeln!(s, "  {line}");
-            }
+        indented(s, &failure.lines);
+    }
+    more(
+        s,
+        if digest.more_failures.len() as u64 + digest.failures_omitted == 1 {
+            "failure"
+        } else {
+            "failures"
+        },
+        &digest.more_failures,
+        digest.failures_omitted,
+    );
+}
+
+/// `lines` under a failure or an unfinished test.
+fn indented(s: &mut String, lines: &[String]) {
+    for line in lines {
+        if line.is_empty() {
+            s.push('\n');
+        } else {
+            let _ = writeln!(s, "  {line}");
         }
     }
-    let more = digest.more_failures.len() as u64 + digest.failures_omitted;
-    if more > 0 {
-        let what = if more == 1 { "failure" } else { "failures" };
-        let _ = write!(s, "... {more} more {what}");
-        if !digest.more_failures.is_empty() {
-            let _ = write!(s, ": {}", digest.more_failures.join(", "));
-            if digest.failures_omitted > 0 {
-                let _ = write!(s, ", and {} more", digest.failures_omitted);
-            }
+}
+
+/// The marker for what did not fit the budget: `names`, and `omitted` more
+/// not even named.
+fn more(s: &mut String, what: &str, names: &[String], omitted: u64) {
+    let more = names.len() as u64 + omitted;
+    if more == 0 {
+        return;
+    }
+    let _ = write!(s, "... {more} more {what}");
+    if !names.is_empty() {
+        let _ = write!(s, ": {}", names.join(", "));
+        if omitted > 0 {
+            let _ = write!(s, ", and {omitted} more");
         }
-        s.push('\n');
+    }
+    s.push('\n');
+}
+
+/// How a run that was cut short ended, `how` being a time limit or a signal:
+/// that, after how long, and for an agent (`!streamed`) the tests that had
+/// passed and failed by then, then each test that had started and not
+/// finished with the command that runs it alone, or else the end of the
+/// output, which is where it stopped.
+fn cut_outcome(suite: &SuiteReport, how: &str, streamed: bool) -> String {
+    let secs = suite.duration_ms.unwrap_or(0) as f64 / 1000.0;
+    let mut s = format!("{}: {how} after {secs:.1}s", suite.adapter);
+    let log = suite.log.as_deref().unwrap_or("");
+    let Some(digest) = &suite.digest else {
+        return s + "\n";
+    };
+    let counts = counts(digest);
+    if !counts.is_empty() {
+        let _ = write!(s, ": {counts}");
+    }
+    // A person watching saw the rest go by.
+    if streamed {
+        let _ = writeln!(s, " (full log: {log})");
+        return s;
+    }
+    s.push('\n');
+    // What finished need not run again.
+    if !digest.passed_names.is_empty() {
+        let _ = writeln!(s, "passed: {}", digest.passed_names.join(", "));
+    }
+    failures(&mut s, digest, false);
+    for test in &digest.unfinished {
+        let _ = writeln!(s, "UNFINISHED {}", test.name);
+        indented(&mut s, &test.lines);
+        if let Some(rerun) = &test.rerun {
+            let _ = writeln!(s, "next: jouet test --cmd -- {rerun}");
+        }
+    }
+    more(
+        &mut s,
+        "unfinished",
+        &digest.more_unfinished,
+        digest.unfinished_omitted,
+    );
+    if !digest.output_end.is_empty() {
+        s.push_str("the output does not name the test that was running; its end:\n");
+        indented(&mut s, &digest.output_end);
     }
     let _ = writeln!(s, "full log: {log}");
     s

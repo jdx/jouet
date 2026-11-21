@@ -58,8 +58,15 @@ use usage_rs::Args;
 /// no changed file is in it) says so on an `unrelated:` line, is not run at
 /// the merge base, and does not hold up finishing; it still exits 1.
 ///
+/// A run that was cut short says so in place of a failure: `timed out` when
+/// the command exited 124, as `timeout` does at its limit, and `stopped by
+/// SIGTERM` when a signal ended the command or jouet itself, which then ends
+/// the command and prints this before it ends. It names the tests that had
+/// started and not finished where a declared format tells, with the command
+/// that runs each alone, and else shows the end of the output.
+///
 /// Exits 1 when tests fail, 2 for a usage error (the runner's too), 4 when
-/// no runner is found or installed.
+/// no runner is found or installed, 124 when the command timed out.
 #[derive(Args, Clone)]
 pub(crate) struct TestArgs {
     /// Run only the tests the changes affect

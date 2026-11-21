@@ -91,6 +91,21 @@ pub(crate) struct Digest {
     /// Nextest stopped before running all selected tests after a failure.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub(crate) nextest_incomplete: bool,
+    /// Of a run that was cut short, the tests that had started and not
+    /// finished, where a declared format can tell, within the budget the
+    /// failures left.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) unfinished: Vec<Unfinished>,
+    /// The names of the unfinished tests after those, which did not fit.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) more_unfinished: Vec<String>,
+    /// Unfinished tests past the budget even by name.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub(crate) unfinished_omitted: u64,
+    /// The end of the output of a run that was cut short, when it names no
+    /// unfinished test.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) output_end: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -166,6 +181,18 @@ pub(crate) struct Failure {
     pub(crate) lines: Vec<String>,
 }
 
+/// A test the output shows starting and neither passing nor failing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct Unfinished {
+    pub(crate) name: String,
+    /// What the output has since it started.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) lines: Vec<String>,
+    /// The command that runs it alone, when its format declares one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) rerun: Option<String>,
+}
+
 /// A failure where the output has it: the line it starts on.
 #[derive(Debug)]
 struct Found {
@@ -186,6 +213,9 @@ struct Parsed {
     passed_names: Vec<String>,
     /// Each compiler warning's headline and location.
     warning_names: Vec<String>,
+    /// The tests a declared format saw start and not end, which says
+    /// something only of a run that was cut short.
+    unfinished: Vec<Unfinished>,
 }
 
 impl Parsed {
@@ -570,6 +600,26 @@ pub(crate) fn digest(text: &str, failed: bool, budget: usize) -> Digest {
 /// output is shown instead. `budget` caps the bytes of failure text, 0 for
 /// no cap.
 pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Format]) -> Digest {
+    digest_of(text, failed, false, budget, formats)
+}
+
+/// [`digest_with`] for a run that was cut short, by a time limit or a
+/// signal: the failures it had by then, and the tests that had started and
+/// not finished, with the command that runs each alone, where a declared
+/// format tells; else the end of the output, which is where it stopped.
+pub(crate) fn digest_cut(text: &str, budget: usize, formats: &[Format]) -> Digest {
+    digest_of(text, true, true, budget, formats)
+}
+
+/// The bytes `failures` take as printed, as [`fit`] counts them.
+fn cost(failures: &[Failure]) -> usize {
+    failures
+        .iter()
+        .map(|f| f.name.len() + 6 + f.lines.iter().map(|l| l.len() + 3).sum::<usize>())
+        .sum()
+}
+
+fn digest_of(text: &str, failed: bool, cut: bool, budget: usize, formats: &[Format]) -> Digest {
     let lines = clean(text);
     let mut parsed = parse(&lines, formats);
     if failed {
@@ -580,7 +630,20 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
     let mut warnings_all = parsed.warning_names.clone();
     warnings_all.sort();
     warnings_all.dedup();
-    if found.is_empty() && failed {
+    let open = if cut {
+        std::mem::take(&mut parsed.unfinished)
+    } else {
+        Vec::new()
+    };
+    // Where a run that was cut short stopped, when no test is named for it.
+    let mut stopped_at = Vec::new();
+    if cut {
+        // Not a failure nobody recognised: the run stopped here.
+        if open.is_empty() {
+            let tail: Vec<String> = lines.iter().filter(|l| !l.is_empty()).cloned().collect();
+            stopped_at = trim_excerpt(tail, OUTPUT_TAIL).lines;
+        }
+    } else if found.is_empty() && failed {
         let tail: Vec<String> = lines.iter().filter(|l| !l.is_empty()).cloned().collect();
         let end = trim_excerpt(tail.clone(), OUTPUT_TAIL).lines;
         // A runner jouet doesn't know often names its failures first and
@@ -605,6 +668,50 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
         });
     }
     let (failures, more_failures, failures_omitted) = fit(found, budget);
+    // What the failures left of the budget: the first unfinished test, or
+    // the end of the output, is cut to it, and says so.
+    let left = if budget == 0 {
+        0
+    } else {
+        budget.saturating_sub(cost(&failures)).max(1)
+    };
+    // In the order of the tests, which `fit` keeps.
+    let reruns: Vec<Option<String>> = open.iter().map(|u| u.rerun.clone()).collect();
+    let open = open
+        .into_iter()
+        .enumerate()
+        .map(|(at, u)| Found {
+            at,
+            name: u.name,
+            lines: u.lines,
+        })
+        .collect();
+    let (shown, more_unfinished, unfinished_omitted) = fit(open, left);
+    let unfinished = shown
+        .into_iter()
+        .zip(reruns)
+        .map(|(f, rerun)| Unfinished {
+            name: f.name,
+            lines: f.lines,
+            rerun,
+        })
+        .collect();
+    let output_end = fit(
+        if stopped_at.is_empty() {
+            Vec::new()
+        } else {
+            vec![Found {
+                at: 0,
+                name: String::new(),
+                lines: stopped_at,
+            }]
+        },
+        left,
+    )
+    .0
+    .into_iter()
+    .flat_map(|f| f.lines)
+    .collect();
     let no_tests = parsed.passed + parsed.failed == 0 && no_tests(&lines);
     Digest {
         passed: parsed.passed,
@@ -638,6 +745,10 @@ pub(crate) fn digest_with(text: &str, failed: bool, budget: usize, formats: &[Fo
         warnings_changed: None,
         no_tests,
         nextest_incomplete: parsed.nextest_incomplete,
+        unfinished,
+        more_unfinished,
+        unfinished_omitted,
+        output_end,
     }
 }
 

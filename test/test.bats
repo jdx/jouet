@@ -2155,6 +2155,189 @@ TOML
 	refute_line 'FAIL cli/test_a'
 }
 
+@test "a command that ends at a time limit is said to have timed out, and exits 124" {
+	# What `timeout` leaves: its command's output so far, and exit 124.
+	run --separate-stderr jouet test --cmd -- sh -c 'echo "step 1"; echo "step 2"; exit 124'
+	assert_failure 124
+	assert_line --regexp '^cmd: timed out \(exit 124\) after [0-9.]+s$'
+	assert_line 'the output does not name the test that was running; its end:'
+	assert_line '  step 2'
+	assert_line --regexp '^full log: .+\.log$'
+	refute_output --partial 'no failure recognised'
+
+	run --separate-stderr jouet test --json --cmd -- sh -c 'echo "step 1"; exit 124'
+	assert_failure 124
+	assert_equal "$(jq -c '.suites[0] | [.timed_out, .exit_code, .output_end, .failures]' <<<"$output")" '[true,124,["step 1"],null]'
+	assert_equal "$(jq -r '.ok' <<<"$output")" false
+
+	# The real thing, where there is one (macOS has no `timeout`).
+	if command -v timeout >/dev/null; then
+		run --separate-stderr jouet test --cmd -- timeout 1 sh -c 'echo "step 1"; sleep 20; echo "step 2"'
+		assert_failure 124
+		assert_line --regexp '^cmd: timed out \(exit 124\) after 1\.[0-9]s$'
+		assert_line '  step 1'
+		refute_line '  step 2'
+	fi
+
+	# A run that fails any other way is read as before.
+	run --separate-stderr jouet test --cmd -- sh -c 'echo "step 1"; exit 2'
+	assert_failure 1
+	assert_line --regexp '^cmd: failed \(exit 2\) in [0-9.]+s$'
+	assert_line 'FAIL no failure recognised; the end of the output'
+}
+
+@test "a command a signal ended is said to have been stopped, and exits 1" {
+	# shellcheck disable=SC2016 # the script's own shell expands $$
+	run --separate-stderr jouet test --cmd -- sh -c 'echo "step 1"; kill -TERM $$'
+	assert_failure 1
+	assert_line --regexp '^cmd: stopped by SIGTERM after [0-9.]+s$'
+	assert_line 'the output does not name the test that was running; its end:'
+	assert_line '  step 1'
+	refute_output --partial 'no failure recognised'
+
+	# A shell says which signal ended what it ran with 128 + its number.
+	run --separate-stderr jouet test --json --cmd -- sh -c 'echo "step 1"; exit 137'
+	assert_failure 1
+	assert_equal "$(jq -c '.suites[0] | [.stopped_by, .exit_code, .timed_out, .output_end]' <<<"$output")" '["SIGKILL",137,null,["step 1"]]'
+
+	# A signal that is not one a run is stopped with is a failure like any other.
+	# shellcheck disable=SC2016
+	run --separate-stderr jouet test --cmd -- sh -c 'echo "step 1"; kill -USR1 $$'
+	assert_failure 1
+	assert_line --regexp '^cmd: failed \(exit 1\) in [0-9.]+s$'
+	assert_line 'FAIL no failure recognised; the end of the output'
+}
+
+# Runs `jouet test "$@"` in the background, sends it SIGTERM once the command
+# it runs has made the file `started`, and leaves its exit status in
+# `$stopped`, its stdout in `out`.
+stop_jouet_test() {
+	rm -f started
+	jouet test "$@" >out 2>err 3>&- &
+	local pid=$!
+	local _
+	for _ in $(seq 1 200); do
+		[[ -e started ]] && break
+		sleep 0.05
+	done
+	assert [ -e started ]
+	kill -TERM "$pid"
+	stopped=0
+	wait "$pid" || stopped=$?
+}
+
+@test "jouet sent SIGTERM ends the command, says where the run was, and ends by the signal" {
+	# What a harness does to a call at its limit: the signal goes to jouet.
+	# shellcheck disable=SC2016 # the script's own shell expands $$
+	stop_jouet_test --cmd -- sh -c 'echo "step 1"; echo $$ >pid; touch started; exec sleep 30'
+	assert_equal "$stopped" 143
+	run cat out
+	assert_line --regexp '^cmd: stopped by SIGTERM after [0-9.]+s$'
+	assert_line 'the output does not name the test that was running; its end:'
+	assert_line '  step 1'
+	assert_line --regexp '^full log: .+\.log$'
+	# The command is not left running.
+	run kill -0 "$(cat pid)"
+	assert_failure
+
+	# shellcheck disable=SC2016
+	stop_jouet_test --json --cmd -- sh -c 'echo "step 1"; touch started; exec sleep 30'
+	assert_equal "$stopped" 143
+	assert_equal "$(jq -c '[.ok, (.suites[0] | .stopped_by, .exit_code, .output_end)]' out)" '[false,"SIGTERM",143,["step 1"]]'
+
+	# A command that ignores the signal is killed after two seconds.
+	# shellcheck disable=SC2016
+	stop_jouet_test --cmd -- sh -c 'trap "" TERM; echo $$ >pid; echo "step 1"; touch started; while :; do sleep 1; done'
+	assert_equal "$stopped" 143
+	run cat out
+	assert_line --regexp '^cmd: stopped by SIGTERM after [2-9]\.[0-9]s$'
+	run kill -0 "$(cat pid)"
+	assert_failure
+}
+
+@test "a format that says when a test starts names the one a time limit cut short, and the command for it" {
+	mkdir -p "$HOME/.config/jouet/formats"
+	cat >"$HOME/.config/jouet/formats/e2e.toml" <<'TOML'
+failed = ['^ERROR: E2E test (?<name>\S+) failed']
+start = ['^>>> E2E (?<name>\S+)$']
+passed = ['^PASS: (?<name>\S+) \(']
+rerun = "app run test:e2e {name}"
+TOML
+	# A killed run's output, made up and trimmed: with a line where each test
+	# starts, and as a runner that prints none leaves it.
+	local logs="$PROJECT_ROOT/src/testlog/fixtures"
+
+	# shellcheck disable=SC2016 # sh expands $1
+	run --separate-stderr jouet test --cmd -- sh -c 'cat "$1"; exit 124' sh "$logs/e2e-cut-started.txt"
+	assert_failure 124
+	assert_line --regexp '^cmd: timed out \(exit 124\) after [0-9.]+s: 2 passed$'
+	assert_line 'passed: cli/test_sync, cli/test_sync_cache'
+	assert_line 'UNFINISHED cli/test_sync_remote_slow'
+	assert_line '  DEBUG: $ app sync status --wait'
+	assert_line 'next: jouet test --cmd -- app run test:e2e cli/test_sync_remote_slow'
+	refute_line 'the output does not name the test that was running; its end:'
+	refute_output --partial 'no failure recognised'
+
+	# shellcheck disable=SC2016
+	run --separate-stderr jouet test --json --cmd -- sh -c 'cat "$1"; exit 124' sh "$logs/e2e-cut-started.txt"
+	assert_failure 124
+	assert_equal "$(jq -c '.suites[0] | [.passed, .passed_names, (.unfinished[0] | .name, .rerun), .output_end]' <<<"$output")" \
+		'[2,["cli/test_sync","cli/test_sync_cache"],"cli/test_sync_remote_slow","app run test:e2e cli/test_sync_remote_slow",null]'
+
+	# The output cannot tell which test was running: the tests that finished
+	# are still named, and the end of the output is where it stopped.
+	# shellcheck disable=SC2016
+	run --separate-stderr jouet test --cmd -- sh -c 'cat "$1"; exit 124' sh "$logs/e2e-cut.txt"
+	assert_failure 124
+	assert_line 'passed: cli/test_sync, cli/test_sync_cache'
+	refute_output --partial 'UNFINISHED'
+	refute_output --partial 'next: '
+	assert_line 'the output does not name the test that was running; its end:'
+	assert_line '  Terminated'
+
+	# The same output of a run that failed another way names no unfinished test.
+	# shellcheck disable=SC2016
+	run --separate-stderr jouet test --cmd -- sh -c 'cat "$1"; exit 1' sh "$logs/e2e-cut-started.txt"
+	assert_failure 1
+	assert_line 'FAIL no failure recognised; the end of the output'
+	refute_output --partial 'UNFINISHED'
+}
+
+@test "a run that was cut short is not kept for reuse, nor run again at the merge base" {
+	enable_result_reuse
+	export CUT_RUNS_FILE="$BATS_TEST_TMPDIR/cut-runs"
+	# shellcheck disable=SC2016 # the script expands these, not this shell
+	printf '#!/bin/sh\necho run >>"$CUT_RUNS_FILE"\necho "step 1"\nexit "${1:-124}"\n' >limit-command
+	chmod +x limit-command
+	printf 'base\n' >tracked
+	git add tracked limit-command
+	git commit -qm base
+	git checkout -qb work
+	printf 'change\n' >>tracked
+
+	# An ordinary failure on the same files is answered from the first run.
+	run --separate-stderr jouet test --cmd -- ./limit-command 1
+	assert_failure 1
+	run --separate-stderr jouet test --cmd -- ./limit-command 1
+	assert_failure 1
+	assert_output --partial 'reused: '
+	assert_equal "$(wc -l <"$CUT_RUNS_FILE" | tr -d ' ')" 1
+
+	# One that timed out has no answer to keep.
+	run --separate-stderr jouet test --cmd -- ./limit-command
+	assert_failure 124
+	run --separate-stderr jouet test --cmd -- ./limit-command
+	assert_failure 124
+	refute_output --partial 'reused: '
+	assert_equal "$(wc -l <"$CUT_RUNS_FILE" | tr -d ' ')" 3
+
+	run --separate-stderr jouet test --baseline --cmd -- ./limit-command 143
+	assert_failure 1
+	assert_line --regexp '^cmd: stopped by SIGTERM after '
+	assert_line 'baseline: not compared; a run that was cut short is not run again at the merge base'
+	assert_equal "$(wc -l <"$CUT_RUNS_FILE" | tr -d ' ')" 4
+}
+
 @test "--baseline does not call failures new when the merge base's run names none, or reaches far fewer tests" {
 	# At the merge base the runner dies before any test, as when a tool it
 	# needs is missing from that checkout.
