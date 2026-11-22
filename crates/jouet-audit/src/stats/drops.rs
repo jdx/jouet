@@ -24,6 +24,9 @@ pub struct LedgerPrompt {
     pub dropped: bool,
     /// The pid of the watcher that covered it.
     pub watcher: Option<u32>,
+    /// The kinds of note the app sent in the same prompt, before it. A
+    /// prompt with any is never blocked.
+    pub notes: Vec<String>,
 }
 
 /// One arm of the drop toggle.
@@ -37,8 +40,11 @@ pub struct DropArm {
     pub app_turns: u64,
     /// `app_turns` per session.
     pub app_turns_per_session: f64,
-    /// Events jouet would drop.
+    /// Events jouet would drop: all of it noise, and alone in its prompt.
     pub would_drop: u64,
+    /// Events that are all noise but came with other notes of the app's in
+    /// the same prompt, so jouet lets the prompt through in either arm.
+    pub with_notes: u64,
     /// Events it dropped (the new arm only).
     pub dropped: u64,
     /// Would-drops that reached the agent and whose turn edited a file,
@@ -89,11 +95,12 @@ pub fn drop_arms(
     arms: &BTreeMap<String, BTreeMap<String, String>>,
     filter: &StatsFilter,
 ) -> Vec<DropArm> {
-    // Per session: app turns, would-drops, drops, and would-drops with work.
-    let mut sessions: BTreeMap<&str, [u64; 4]> = BTreeMap::new();
+    // Per session: app turns, would-drops, drops, would-drops with work, and
+    // noise that came with other notes.
+    let mut sessions: BTreeMap<&str, [u64; 5]> = BTreeMap::new();
     // The session's open would-drop turn, and whether it has done work.
     let mut open: BTreeMap<&str, bool> = BTreeMap::new();
-    let close = |session: &str, open: &mut BTreeMap<&str, bool>, counts: &mut [u64; 4]| {
+    let close = |session: &str, open: &mut BTreeMap<&str, bool>, counts: &mut [u64; 5]| {
         if open.remove(session) == Some(true) {
             counts[3] += 1;
         }
@@ -111,7 +118,10 @@ pub fn drop_arms(
             if prompt.class != "user" && !prompt.dropped {
                 counts[0] += 1;
             }
-            if prompt.would_drop.is_some() {
+            if prompt.would_drop.is_some() && !prompt.notes.is_empty() {
+                // Never dropped, so no drop would have hidden its turn's work.
+                counts[4] += 1;
+            } else if prompt.would_drop.is_some() {
                 counts[1] += 1;
                 if prompt.dropped {
                     counts[2] += 1;
@@ -144,6 +154,7 @@ pub fn drop_arms(
                 out.would_drop += counts[1];
                 out.dropped += counts[2];
                 out.would_drop_with_work += counts[3];
+                out.with_notes += counts[4];
             }
             if out.sessions == 0 {
                 return None;
@@ -188,6 +199,14 @@ mod tests {
         }
     }
 
+    /// The same prompt with a session's report before the event.
+    fn with_notes(mut e: LedgerEntry) -> LedgerEntry {
+        if let Some(p) = e.prompt.as_mut() {
+            p.notes = vec!["session-report".into()];
+        }
+        e
+    }
+
     #[test]
     fn each_arm_counts_app_turns_and_would_drops_that_did_work() {
         let arms: BTreeMap<String, BTreeMap<String, String>> =
@@ -229,6 +248,11 @@ mod tests {
             prompt("n1", "ci-monitor", true, true),
             entry("n1", "edit"),
             prompt("n1", "side-sessions", false, false),
+            // Noise that came with a session's report passes in either arm:
+            // an app turn, not a would-drop, whatever its turn went on to do.
+            with_notes(prompt("c2", "ci-monitor", true, false)),
+            entry("c2", "edit"),
+            with_notes(prompt("n1", "ci-monitor", true, false)),
             // Not in the experiment.
             prompt("other", "ci-monitor", true, false),
         ];
@@ -240,18 +264,19 @@ mod tests {
             DropArm {
                 arm: "control".into(),
                 sessions: 2,
-                app_turns: 5,
-                app_turns_per_session: 2.5,
+                app_turns: 6,
+                app_turns_per_session: 3.0,
                 would_drop: 4,
+                with_notes: 1,
                 dropped: 0,
                 would_drop_with_work: 2,
             }
         );
         assert_eq!(
             (new.sessions, new.app_turns, new.would_drop, new.dropped),
-            (1, 1, 1, 1)
+            (1, 2, 1, 1)
         );
-        assert_eq!(new.would_drop_with_work, 0);
+        assert_eq!((new.would_drop_with_work, new.with_notes), (0, 1));
         assert!(drop_arms(&entries, &BTreeMap::new(), &StatsFilter::default()).is_empty());
     }
 }

@@ -13,12 +13,18 @@
 //! harness that would run the hook in the foreground, any error, and a
 //! panic. A watcher that cannot go on gives its lease back, so no event is
 //! held with nothing left to report it.
+//!
+//! Claude Code wakes the agent with everything the hook wrote to stderr, so
+//! what the wait prints on the way (a rejected token, a retry) goes to the
+//! log of a watcher that fails ([`Log`]), with the error that stopped it, and
+//! nowhere otherwise. The ledger has that error's class.
 
 use super::wait::{PushWatch, Tuning};
 use crate::cli::WatchArgs;
 use crate::ledger::{self, Entry, Settle};
 use crate::settings::Settings;
 use crate::setup::Harness;
+use jouet_output::exit::Exit;
 use jouet_output::time::parse_duration;
 use jouet_rules::Call;
 use serde_json::Value;
@@ -75,9 +81,15 @@ fn watch(args: &WatchArgs) -> Option<String> {
     }
     // The PR is the one of the branch checked out where the agent pushed.
     if let Some(cwd) = call.cwd.as_deref().filter(|cwd| !cwd.is_empty())
-        && std::env::set_current_dir(cwd).is_err()
+        && let Err(e) = std::env::set_current_dir(cwd)
     {
-        record(&settings, session, "error");
+        let class = Exit::Precondition.name();
+        Log::open().error(
+            "started no watcher",
+            class,
+            &format!("cannot enter {cwd}, the directory the call ran in: {e}"),
+        );
+        record_why(&settings, session, "error", Some(class));
         return None;
     }
     if !backgrounded() {
@@ -88,13 +100,29 @@ fn watch(args: &WatchArgs) -> Option<String> {
         settings.entire.enabled,
         std::time::Duration::from_millis(settings.entire.timeout_ms),
     );
+    // From here to the digest, what is printed to stderr is kept for the
+    // log: stderr is put back when the log is dropped, as this returns.
+    let mut log = Log::open();
     match PushWatch::claim(session, pushed_at) {
         Ok(watcher) => {
             record(&settings, session, "started");
-            watcher.run(&tuning)
+            log.say(&format!("watching {}", watcher.pr()));
+            let ended = watcher.run(&tuning);
+            if let Some(stop) = &ended.error {
+                log.error("stopped on an error", stop.exit.name(), &stop.message);
+            }
+            ended.wake
         }
-        Err(outcome) => {
-            record(&settings, session, outcome);
+        Err(no) => {
+            if let Some(stop) = &no.error {
+                log.error("started no watcher", stop.exit.name(), &stop.message);
+            }
+            record_why(
+                &settings,
+                session,
+                no.outcome,
+                no.error.as_ref().map(|stop| stop.exit.name()),
+            );
             None
         }
     }
@@ -103,6 +131,11 @@ fn watch(args: &WatchArgs) -> Option<String> {
 /// Records what became of a push in the settle arm, unless the ledger is
 /// turned off.
 fn record(settings: &Settings, session: &str, outcome: &str) {
+    record_why(settings, session, outcome, None);
+}
+
+/// The same, with the class of the error that kept a watcher from starting.
+fn record_why(settings: &Settings, session: &str, outcome: &str, error: Option<&str>) {
     let Some(dir) = ledger::dir().filter(|_| settings.hooks.ledger) else {
         return;
     };
@@ -113,9 +146,111 @@ fn record(settings: &Settings, session: &str, outcome: &str) {
     entry.settle = Some(Settle {
         result: outcome.into(),
         watcher: Some(std::process::id()),
+        error: error.map(String::from),
         ..Settle::default()
     });
     ledger::append(&dir, &entry);
+}
+
+/// What a watcher that failed leaves behind, `watch-STAMP-PID.log` in
+/// jouet's log directory: the PR it watched, what the wait printed on the way
+/// (on Unix) and the error that stopped it or kept it from starting. On Unix
+/// it stands in for stderr until it is dropped, so the agent is woken with
+/// the digest alone. The file is written only for an error: a watcher that
+/// ends any other way, also one the session's end stops, leaves none.
+struct Log {
+    path: std::path::PathBuf,
+    said: String,
+    #[cfg(unix)]
+    diverted: Option<Diverted>,
+}
+
+impl Log {
+    fn open() -> Self {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        let path = jouet_output::paths::log_dir()
+            .join(format!("watch-{stamp}-{}.log", std::process::id()));
+        Self {
+            #[cfg(unix)]
+            diverted: Diverted::start(&path),
+            path,
+            said: String::new(),
+        }
+    }
+
+    fn say(&mut self, line: &str) {
+        use std::fmt::Write;
+        let now = jouet_output::time::format_utc(jouet_output::time::now());
+        let _ = writeln!(self.said, "{now} jouet watch: {line}");
+    }
+
+    /// Writes the log, ending with what went wrong; `class` is the exit
+    /// code's name, which the ledger records.
+    fn error(&mut self, what: &str, class: &str, message: &str) {
+        #[cfg(unix)]
+        if let Some(diverted) = self.diverted.as_mut() {
+            self.said.push_str(&diverted.printed());
+        }
+        self.say(&format!("{what} ({class}): {message}"));
+        if let Some(dir) = self.path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&self.path, &self.said);
+    }
+}
+
+/// This process's stderr sent to a file with no name, which is gone with the
+/// process, until this is dropped. Nothing is diverted when that file cannot
+/// be made; the watcher goes on as it did.
+#[cfg(unix)]
+struct Diverted {
+    printed: std::fs::File,
+    /// The hook's own stderr, to put back.
+    stderr: std::os::fd::OwnedFd,
+}
+
+#[cfg(unix)]
+impl Diverted {
+    /// `path` names the file only until it is open.
+    fn start(path: &std::path::Path) -> Option<Self> {
+        use std::os::fd::{AsFd, AsRawFd};
+        std::fs::create_dir_all(path.parent()?).ok()?;
+        let printed = std::fs::OpenOptions::new()
+            .read(true)
+            .append(true)
+            .create_new(true)
+            .open(path)
+            .ok()?;
+        std::fs::remove_file(path).ok()?;
+        let stderr = std::io::stderr().as_fd().try_clone_to_owned().ok()?;
+        // SAFETY: dup2(2) on two descriptors this process has open; it makes
+        // descriptor 2 name the file and touches no memory.
+        let done = unsafe { libc::dup2(printed.as_raw_fd(), libc::STDERR_FILENO) };
+        (done != -1).then_some(Self { printed, stderr })
+    }
+
+    /// What was printed so far.
+    fn printed(&mut self) -> String {
+        use std::io::Seek;
+        let mut text = Vec::new();
+        if self.printed.rewind().is_ok() {
+            let _ = self.printed.read_to_end(&mut text);
+        }
+        String::from_utf8_lossy(&text).into_owned()
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Diverted {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+        // SAFETY: as in `start`: both descriptors are open and owned here.
+        unsafe {
+            libc::dup2(self.stderr.as_raw_fd(), libc::STDERR_FILENO);
+        }
+    }
 }
 
 /// Whether Claude Code runs this hook in the background, where a long wait

@@ -313,6 +313,7 @@ fn settle_watch(
         path.as_deref().map(|path| (path, lease)),
         reporter,
     );
+    let error = waited.as_ref().err().map(|stop| stop.exit.name().into());
     let (exit, doc) = remote::report(&w, waited, &mut reporter);
     let Some(path) = path else {
         return exit;
@@ -333,6 +334,7 @@ fn settle_watch(
             wake_after_first_held_s: doc.as_ref().and_then(|d| d.wake_after_first_held_s),
             watcher: Some(std::process::id()),
             woke: !parked,
+            error,
         },
     );
     if parked {
@@ -422,20 +424,55 @@ pub(crate) struct PushWatch {
     path: PathBuf,
 }
 
+/// Why a push got no watcher.
+pub(crate) struct NoWatch {
+    /// `no-pr` (nothing to watch: the branch has no PR, or no branch of a
+    /// repository jouet can read is checked out), `watching` (a live watcher
+    /// of the session has it) or `error`.
+    pub outcome: &'static str,
+    /// For an `error`, what went wrong.
+    pub error: Option<Stop>,
+}
+
+impl NoWatch {
+    fn of(outcome: &'static str) -> Self {
+        Self {
+            outcome,
+            error: None,
+        }
+    }
+
+    fn error(exit: Exit, message: String) -> Self {
+        Self {
+            outcome: "error",
+            error: Some(Stop { exit, message }),
+        }
+    }
+}
+
+/// How a push's watcher ended.
+pub(crate) struct Ended {
+    /// What to wake the agent with, if anything.
+    pub wake: Option<String>,
+    /// Why the wait failed, when it did.
+    pub error: Option<Stop>,
+}
+
 impl PushWatch {
     /// Takes the lease for the PR of the branch checked out here, pushed at
     /// `since`: comments from then on are new to the watcher, also one
     /// posted while it was finding the PR. The error is why no watcher
-    /// starts: `no-pr` (nothing to watch: the branch has no PR, or no branch
-    /// of a repository jouet can read is checked out), `watching` (a live
-    /// watcher of the session has it) or `error`.
-    pub(crate) fn claim(session: &str, since: i64) -> Result<Self, &'static str> {
-        let target = target(None, None).map_err(|_| "no-pr")?;
-        let mut remote = Remote::connect(target.repo()).map_err(|_| "error")?;
-        let (repo, number) = remote.resolve(target).map_err(|halt| match halt {
-            Halt::Stop(stop) if stop.exit == Exit::NotFound => "no-pr",
-            _ => "error",
-        })?;
+    /// starts.
+    pub(crate) fn claim(session: &str, since: i64) -> Result<Self, NoWatch> {
+        let target = target(None, None).map_err(|_| NoWatch::of("no-pr"))?;
+        let mut remote = Remote::connect(target.repo())
+            .map_err(|message| NoWatch::error(Exit::Precondition, message))?;
+        let (repo, number) = remote
+            .resolve(target)
+            .map_err(|halt| match halt_stop(halt) {
+                stop if stop.exit == Exit::NotFound => NoWatch::of("no-pr"),
+                stop => NoWatch::error(stop.exit, stop.message),
+            })?;
         let now = jouet_output::time::now();
         let lease = Lease {
             pid: std::process::id(),
@@ -447,7 +484,12 @@ impl PushWatch {
             since,
             heartbeat: now,
         };
-        let dir = lease::dir().ok_or("error")?;
+        let dir = lease::dir().ok_or_else(|| {
+            NoWatch::error(
+                Exit::Precondition,
+                "no state directory to keep the watcher's lease in".into(),
+            )
+        })?;
         match lease.claim(&dir, now, crate::git::head().as_deref()) {
             Ok(Some(path)) => Ok(Self {
                 remote,
@@ -455,17 +497,28 @@ impl PushWatch {
                 lease,
                 path,
             }),
-            Ok(None) => Err("watching"),
-            Err(_) => Err("error"),
+            Ok(None) => Err(NoWatch::of("watching")),
+            Err(e) => Err(NoWatch::error(
+                Exit::Failed,
+                format!(
+                    "could not write the watcher's lease in {}: {e}",
+                    dir.display()
+                ),
+            )),
         }
+    }
+
+    /// The PR it watches, as `owner/name#N`.
+    pub(crate) fn pr(&self) -> String {
+        format!("{}#{}", self.lease.repo, self.lease.pr)
     }
 
     /// Waits as `wait pr --until needs-agent` does, gives the lease back,
     /// and returns what to wake the agent with: the digest, held events
     /// included. `None` when the PR closed or the wait ran out with nothing
     /// held, which is not worth a turn. A wait that failed still reports
-    /// the events held for it.
-    pub(crate) fn run(mut self, tuning: &Tuning) -> Option<String> {
+    /// the events held for it, and says why it failed.
+    pub(crate) fn run(mut self, tuning: &Tuning) -> Ended {
         let number = self.lease.pr;
         let options = settle::Options {
             quiet: tuning.quiet.unwrap_or(DEFAULT_QUIET),
@@ -492,7 +545,10 @@ impl PushWatch {
             // Quiet: what this process prints is what the agent is woken with.
             |label| Reporter::new(Mode::Agent, false, false, true, label),
         );
-        let doc = waited.ok();
+        let (doc, error) = match waited {
+            Ok(doc) => (Some(doc), None),
+            Err(stop) => (None, Some(stop)),
+        };
         let held = give_back(&self.path);
         let reported = doc.as_ref().map_or(&[][..], |d| &d.held[..]);
         let result = doc.as_ref().map_or("error", settle::Doc::result);
@@ -506,7 +562,11 @@ impl PushWatch {
                 Some(text)
             }
             Some(_) => None,
-            None => crate::settle::lost_note(&self.lease, &held),
+            None => crate::settle::lost_note(
+                &self.lease,
+                &held,
+                error.as_ref().map(|stop| stop.message.as_str()),
+            ),
         };
         let accounted = match &doc {
             Some(_) => reported.iter().filter(|h| h.accounted).count(),
@@ -522,9 +582,10 @@ impl PushWatch {
                 wake_after_first_held_s: doc.as_ref().and_then(|d| d.wake_after_first_held_s),
                 watcher: Some(self.lease.pid),
                 woke: wake.is_some(),
+                error: error.as_ref().map(|stop| stop.exit.name().into()),
             },
         );
-        wake
+        Ended { wake, error }
     }
 }
 

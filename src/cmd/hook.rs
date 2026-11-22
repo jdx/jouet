@@ -274,6 +274,12 @@ fn handle(
         // this hook as prompts, and nothing else tells them apart from what
         // the user typed. An Auto-fix event that is only noise is marked in
         // every session, and blocked in the drop arm.
+        //
+        // A block takes the whole prompt, and the app's other notes (a
+        // session's report, the linked sessions' status) come in the same
+        // one as an event. So only a prompt that is nothing but the event is
+        // held or dropped; one with notes passes whole, and its entry names
+        // them.
         "user-prompt-submit" => {
             let prompt = payload.get("prompt").and_then(Value::as_str)?;
             let mut shape = crate::prompt::classify(prompt);
@@ -297,12 +303,14 @@ fn handle(
                 shape.would_drop = Some("covered".into());
                 shape.watcher = Some(*pid);
             }
-            shape.dropped = match &covered {
-                Some((path, _, event)) => {
-                    arm.settle && lost.is_empty() && crate::settle::hold(path, event, &shape)
-                }
-                None => arm.drop && noise && lost.is_empty(),
-            };
+            shape.dropped = shape.notes.is_empty()
+                && lost.is_empty()
+                && match &covered {
+                    Some((path, _, event)) => {
+                        arm.settle && crate::settle::hold(path, event, &shape)
+                    }
+                    None => arm.drop && noise,
+                };
             let dropped = shape.dropped;
             let mut entry = log.entry("prompt");
             entry.prompt = Some(shape);
