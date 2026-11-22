@@ -845,6 +845,9 @@ fn drop_arms_text(s: &mut String, arms: &[stats::DropArm]) {
             "  {}: {} sessions, {:.1} turns started by app events a session, {} would-drops",
             a.arm, a.sessions, a.app_turns_per_session, a.would_drop
         );
+        if a.with_notes > 0 {
+            let _ = write!(s, " ({} more passed with other notes)", a.with_notes);
+        }
         if a.arm == "new" {
             let _ = writeln!(s, ", {} dropped", a.dropped);
         } else {
@@ -880,6 +883,13 @@ fn settle_arms_text(s: &mut String, arms: &[stats::SettleArm]) {
             let _ = write!(s, " (watchers: {})", counts(&a.watchers));
         }
         let _ = write!(s, ", {} covered by a watcher, {} held", a.covered, a.held);
+        if a.passed_with_notes > 0 {
+            let _ = write!(
+                s,
+                ", {} passed with other notes ({} with only the linked sessions' status)",
+                a.passed_with_notes, a.passed_with_status_only
+            );
+        }
         if !a.settles.is_empty() {
             let _ = write!(
                 s,
@@ -887,6 +897,9 @@ fn settle_arms_text(s: &mut String, arms: &[stats::SettleArm]) {
                 counts(&a.settles),
                 a.wakes
             );
+        }
+        if !a.errors.is_empty() {
+            let _ = write!(s, "; errors: {}", counts(&a.errors));
         }
         if a.held > 0 {
             let _ = write!(
@@ -1177,6 +1190,7 @@ mod tests {
             app_turns: 10,
             app_turns_per_session: 2.5,
             would_drop: 3,
+            with_notes: 0,
             dropped,
             would_drop_with_work: 1,
         };
@@ -1190,6 +1204,19 @@ mod tests {
                 "  control: 4 sessions, 2.5 turns started by app events a session, 3 would-drops, 1 of them followed by an edit, commit or reply",
                 "  new: 4 sessions, 2.5 turns started by app events a session, 3 would-drops, 3 dropped",
             ]
+        );
+        // Noise that came with other notes is counted apart: it passed.
+        let mut s = String::new();
+        let with_notes = stats::DropArm {
+            with_notes: 2,
+            ..arm("new", 3)
+        };
+        drop_arms_text(&mut s, &[with_notes]);
+        assert_eq!(
+            s.lines().nth(2),
+            Some(
+                "  new: 4 sessions, 2.5 turns started by app events a session, 3 would-drops (2 more passed with other notes), 3 dropped"
+            )
         );
     }
 
@@ -1209,7 +1236,10 @@ mod tests {
                     wakes: 2,
                     covered: 5,
                     held: 4,
+                    passed_with_notes: 0,
+                    passed_with_status_only: 0,
                     settles: [("needs_agent".to_string(), 2), ("timeout".to_string(), 1)].into(),
+                    errors: BTreeMap::new(),
                     accounted: 3,
                     silent_drops: 0,
                     lease_lost: 1,
@@ -1231,6 +1261,29 @@ mod tests {
                 "  new: 2 sessions, 6 pushes (watchers: 4 started, 2 watching), 5 covered by a watcher, 4 held; watchers ended: 2 needs_agent, 1 timeout; 2 wakes; 3 accounted for, 0 silent drops, 1 lease-lost (1 held), 0 orphaned holds; median 10m from the first hold to the wake",
                 "  off: 3 sessions, 0 pushes, 7 covered by a watcher, 0 held",
             ]
+        );
+        // Events that came with other notes passed, and the line says how
+        // many of them had only the linked sessions' status beside them.
+        let mut s = String::new();
+        settle_arms_text(
+            &mut s,
+            &[stats::SettleArm {
+                arm: "new".into(),
+                sessions: 1,
+                covered: 9,
+                held: 3,
+                passed_with_notes: 6,
+                passed_with_status_only: 1,
+                settles: [("error".to_string(), 1)].into(),
+                errors: [("remote".to_string(), 1)].into(),
+                ..stats::SettleArm::default()
+            }],
+        );
+        assert_eq!(
+            s.lines().nth(2),
+            Some(
+                "  new: 1 sessions, 0 pushes, 9 covered by a watcher, 3 held, 6 passed with other notes (1 with only the linked sessions' status); watchers ended: 1 error; 0 wakes; errors: 1 remote; 0 accounted for, 0 silent drops, 0 lease-lost (0 held), 0 orphaned holds"
+            )
         );
     }
 }
