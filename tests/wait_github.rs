@@ -1902,6 +1902,37 @@ mod watch {
     }
 
     #[test]
+    fn a_directory_that_cannot_be_entered_is_an_error_with_a_class_and_a_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        checkout(dir);
+        let claude = Claude::interactive();
+        let fake = serve(World::default());
+        let gone = dir.join("gone");
+        let out = run(
+            &fake,
+            dir,
+            &claude,
+            &payload(&gone, "t1", "git push"),
+            &FAST,
+        );
+        assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+        assert_eq!((stdout(&out), stderr(&out)), (String::new(), String::new()));
+        assert!(leases(dir).is_empty());
+        assert_eq!(results(dir, "watch"), ["error"]);
+        assert_eq!(recorded(dir, "watch")[0]["error"], "precondition");
+        let logs = logs(dir);
+        assert_eq!(logs.len(), 1, "{logs:?}");
+        assert!(
+            logs[0].contains(&format!(
+                "jouet watch: started no watcher (precondition): cannot enter {}, the directory the call ran in: ",
+                gone.display()
+            )),
+            "{logs:?}"
+        );
+    }
+
+    #[test]
     fn a_watcher_that_fails_says_why_in_the_wake_the_ledger_and_its_log() {
         let dir = tempfile::tempdir().unwrap();
         let dir = dir.path();

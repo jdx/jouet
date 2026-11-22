@@ -24,6 +24,7 @@ use crate::cli::WatchArgs;
 use crate::ledger::{self, Entry, Settle};
 use crate::settings::Settings;
 use crate::setup::Harness;
+use jouet_output::exit::Exit;
 use jouet_output::time::parse_duration;
 use jouet_rules::Call;
 use serde_json::Value;
@@ -80,9 +81,15 @@ fn watch(args: &WatchArgs) -> Option<String> {
     }
     // The PR is the one of the branch checked out where the agent pushed.
     if let Some(cwd) = call.cwd.as_deref().filter(|cwd| !cwd.is_empty())
-        && std::env::set_current_dir(cwd).is_err()
+        && let Err(e) = std::env::set_current_dir(cwd)
     {
-        record(&settings, session, "error");
+        let class = Exit::Precondition.name();
+        Log::open().error(
+            "started no watcher",
+            class,
+            &format!("cannot enter {cwd}, the directory the call ran in: {e}"),
+        );
+        record_why(&settings, session, "error", Some(class));
         return None;
     }
     if !backgrounded() {
