@@ -135,22 +135,35 @@ fn record_slow(
 /// How long a hook's payload is remembered, to answer it once.
 const RUN_ONCE: Duration = Duration::from_secs(5);
 
+/// How long a stop's payload is remembered. A stop has no id of its own, so
+/// the window is what keeps two stops apart: the harness starts the two
+/// hooks of one stop together, while the next stop waits for the model to
+/// answer. In two weeks of Claude Code transcripts (5,521 stops that
+/// followed another in their session) none came within 2.9 seconds of the
+/// one before, and none with the same closing message within 8.3.
+const STOP_ONCE: Duration = Duration::from_secs(2);
+
 /// Whether this is the first time this hook got this payload. jouet's hooks
 /// installed twice, at user scope and in a project's committed settings with
 /// an older guard, are two commands to the harness, so it runs both on the
-/// same payload: the agent then reads the primer, and every warning and
-/// denial, twice, and the ledger counts everything twice. Only the first
-/// answers. A payload counts only with what makes it one call: a tool call's
-/// `tool_use_id`, a subagent's `agent_id`, a prompt's `prompt_id`, or a session start's transcript, which cannot start twice
-/// within [`RUN_ONCE`] otherwise. A stop has no such id, and two stops of a
-/// short turn can look the same, so each is answered.
+/// same payload: the agent then reads the primer, and every warning, denial
+/// and stop-gate block, twice, and the ledger counts everything twice. Only
+/// the first answers. A payload counts only with what makes it one call: a
+/// tool call's `tool_use_id`, a subagent's `agent_id`, a prompt's
+/// `prompt_id`, or a session start's transcript, which cannot start twice
+/// within [`RUN_ONCE`] otherwise. A stop counts by the message it ends
+/// (`last_assistant_message`, which Claude Code and Codex send), and only
+/// within [`STOP_ONCE`]: the stop after a block differs in
+/// `stop_hook_active`, and any other comes later or ends another message, so
+/// each of those is answered.
 pub(crate) fn first_run(harness: Harness, event: &str, payload: &Value) -> bool {
     use std::hash::{Hash, Hasher};
-    let key = match event {
-        "session-start" => "transcript_path",
-        "subagent-start" => "agent_id",
-        "user-prompt-submit" => "prompt_id",
-        _ => "tool_use_id",
+    let (key, window) = match event {
+        "session-start" => ("transcript_path", RUN_ONCE),
+        "subagent-start" => ("agent_id", RUN_ONCE),
+        "user-prompt-submit" => ("prompt_id", RUN_ONCE),
+        "stop" => ("last_assistant_message", STOP_ONCE),
+        _ => ("tool_use_id", RUN_ONCE),
     };
     let id = payload.get(key).and_then(Value::as_str).is_some();
     let Some(dir) = jouet_output::paths::state_dir().map(|d| d.join("hook-runs")) else {
@@ -160,14 +173,14 @@ pub(crate) fn first_run(harness: Harness, event: &str, payload: &Value) -> bool 
         return true;
     }
     let now = SystemTime::now();
-    let stale = |path: &Path| {
+    let older = |path: &Path, than: Duration| {
         std::fs::metadata(path)
             .and_then(|m| m.modified())
-            .is_ok_and(|at| now.duration_since(at).unwrap_or_default() > RUN_ONCE)
+            .is_ok_and(|at| now.duration_since(at).unwrap_or_default() > than)
     };
     if event == "session-start" {
         for marker in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-            if stale(&marker.path()) {
+            if older(&marker.path(), RUN_ONCE) {
                 let _ = std::fs::remove_file(marker.path());
             }
         }
@@ -175,7 +188,7 @@ pub(crate) fn first_run(harness: Harness, event: &str, payload: &Value) -> bool 
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     (harness.name(), event, payload.to_string()).hash(&mut hasher);
     let path = dir.join(format!("{:016x}", hasher.finish()));
-    if stale(&path) {
+    if older(&path, window) {
         let _ = std::fs::remove_file(&path);
     }
     match std::fs::OpenOptions::new()
