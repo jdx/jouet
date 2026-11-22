@@ -1564,7 +1564,7 @@ lease() {
 	assert_line --index 15 '["ci-monitor","rate_limit",true,null]'
 	assert_equal "${#lines[@]}" 16
 	run wc -l <"$held"
-	assert_output 1
+	assert_output --regexp '^ *1$'
 	# The notes' kinds are recorded, never their text.
 	run grep -c 'demo\|local_\|tidy\|pushed' "$ledger"
 	assert_output 0
