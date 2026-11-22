@@ -46,7 +46,12 @@ const GOOD: &str = "good-token";
 /// The recorded responses: a batch of PRs, the failing checks of one, and a
 /// search. Any other token gets a 401.
 fn github(request: &Request, _: usize) -> (u16, String) {
-    if request.token != GOOD {
+    answer(request, GOOD)
+}
+
+/// The recorded response to `request`, or a 401 unless it carries `token`.
+fn answer(request: &Request, token: &str) -> (u16, String) {
+    if request.token != token {
         return (401, r#"{"message":"Bad credentials"}"#.into());
     }
     let q = query(request);
@@ -285,22 +290,45 @@ fn no_token_at_all_is_a_remote_failure() {
     assert!(fake.requests().is_empty());
 }
 
+/// Puts a `gh` in `dir` that runs `script`, a shell script with `$asks` set
+/// to how many times gh has been run, this one included. `dir` is the whole
+/// `PATH`, so the script has only what the shell has built in.
+#[cfg(unix)]
+fn fake_gh(dir: &Path, script: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let gh = dir.join("gh");
+    let count = "echo asked >>\"$0.asks\"\nasks=0\n\
+                 while read -r line; do asks=$((asks + 1)); done <\"$0.asks\"";
+    std::fs::write(&gh, format!("#!/bin/sh\n{count}\n{script}\n")).unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// How many times the `gh` in `dir` was run.
+#[cfg(unix)]
+fn gh_asks(dir: &Path) -> usize {
+    std::fs::read_to_string(dir.join("gh.asks"))
+        .unwrap_or_default()
+        .lines()
+        .count()
+}
+
+/// A GitHub where the token `first` works for one request and only `second`
+/// after it, as when gh's stored token expires and gh replaces it.
+#[cfg(unix)]
+fn github_whose_token_expires(first: &'static str, second: &'static str) -> Fake {
+    serve(move |request, index| answer(request, if index == 0 { first } else { second }))
+}
+
 #[cfg(unix)]
 #[test]
 fn gh_is_asked_for_its_own_token_after_the_environment_fails() {
-    use std::os::unix::fs::PermissionsExt;
     let fake = serve(github);
     let dir = tempfile::tempdir().unwrap();
     // gh prints GH_TOKEN when it is set; jouet must clear it to get gh's own.
-    let gh = dir.path().join("gh");
-    std::fs::write(
-        &gh,
-        format!(
-            "#!/bin/sh\nif [ -n \"$GH_TOKEN\" ]; then echo \"$GH_TOKEN\"; else echo {GOOD}; fi\n"
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    fake_gh(
+        dir.path(),
+        &format!("if [ -n \"$GH_TOKEN\" ]; then echo \"$GH_TOKEN\"; else echo {GOOD}; fi"),
+    );
     let out = jouet(
         &fake,
         dir.path(),
@@ -321,6 +349,70 @@ fn gh_is_asked_for_its_own_token_after_the_environment_fails() {
         stderr(&out).trim(),
         "jouet: GH_TOKEN was rejected (401); using gh auth token"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn gh_is_asked_again_when_the_token_it_gave_stops_working() {
+    let fake = github_whose_token_expires("gh-token-1", "gh-token-2");
+    let dir = tempfile::tempdir().unwrap();
+    fake_gh(dir.path(), "echo \"gh-token-$asks\"");
+    let args = [BATCH_ARGS, &["--json"]].concat();
+    let out = jouet(&fake, dir.path(), &[], &args);
+    // The batch was read with gh's first token; the names of the failing
+    // checks, a second request, needed the one gh had by then.
+    assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
+    assert_eq!(
+        json(&out)["prs"][0]["checks"]["failing"],
+        json!(["untrusted / lint", "untrusted / test-ci", "test-ci"])
+    );
+    assert_eq!(
+        stderr(&out).trim(),
+        "jouet: gh auth token was rejected (401); using the token gh has now"
+    );
+    let tokens: Vec<String> = fake.requests().into_iter().map(|r| r.token).collect();
+    assert_eq!(tokens, ["gh-token-1", "gh-token-1", "gh-token-2"]);
+    assert_eq!(gh_asks(dir.path()), 2);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_gh_that_still_has_the_rejected_token_is_a_remote_failure() {
+    let fake = github_whose_token_expires("gh-token-1", "gh-token-2");
+    let dir = tempfile::tempdir().unwrap();
+    fake_gh(dir.path(), "echo gh-token-1");
+    let args = [BATCH_ARGS, &["--json"]].concat();
+    let out = jouet(&fake, dir.path(), &[], &args);
+    assert_eq!(out.status.code(), Some(5), "{}", stderr(&out));
+    assert_eq!(
+        json(&out)["error"]["message"],
+        "GitHub rejected every token (401): gh auth token; \
+         run `gh auth login` or set JOUET_GITHUB_TOKEN"
+    );
+    // The token gh repeated was not sent a second time.
+    let tokens: Vec<String> = fake.requests().into_iter().map(|r| r.token).collect();
+    assert_eq!(tokens, ["gh-token-1", "gh-token-1"]);
+    assert_eq!(gh_asks(dir.path()), 2);
+}
+
+#[cfg(unix)]
+#[test]
+fn gh_is_asked_again_only_once_for_a_request() {
+    // gh has a new token every time, and GitHub takes none after the first.
+    let fake = github_whose_token_expires("gh-token-1", "no such token");
+    let dir = tempfile::tempdir().unwrap();
+    fake_gh(dir.path(), "echo \"gh-token-$asks\"");
+    let args = [BATCH_ARGS, &["--json"]].concat();
+    let out = jouet(&fake, dir.path(), &[], &args);
+    assert_eq!(out.status.code(), Some(5), "{}", stderr(&out));
+    assert_eq!(
+        json(&out)["error"]["message"],
+        "GitHub rejected every token (401): gh auth token; \
+         run `gh auth login` or set JOUET_GITHUB_TOKEN"
+    );
+    let tokens: Vec<String> = fake.requests().into_iter().map(|r| r.token).collect();
+    assert_eq!(tokens, ["gh-token-1", "gh-token-1", "gh-token-2"]);
+    assert_eq!(gh_asks(dir.path()), 2);
 }
 
 #[test]

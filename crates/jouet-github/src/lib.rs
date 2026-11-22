@@ -5,8 +5,11 @@
 //! `GITHUB_TOKEN`, then `gh auth token`. There is no separate probe: the
 //! first real request checks the token, and a 401 moves on to the next
 //! source, so a stale `GH_TOKEN` costs one rejected request rather than a
-//! failed command. `JOUET_GITHUB_API_URL` points the client at another API
-//! root, such as a GitHub Enterprise server or a test's fake server.
+//! failed command. The token gh stores can be replaced while a process runs,
+//! as one that expires is, so when the token gh gave is rejected gh is asked
+//! once more, and a process that outlives the token carries on with the new
+//! one. `JOUET_GITHUB_API_URL` points the client at another API root, such
+//! as a GitHub Enterprise server or a test's fake server.
 //!
 //! [`Client::put`] is the REST write for the merge and update-branch
 //! endpoints GraphQL has no safe equivalent of; [`Client::write`] sends any
@@ -297,6 +300,7 @@ impl Client {
         etag: Option<&str>,
         idempotent: bool,
     ) -> Result<Sent, Failure> {
+        let mut asked_gh_again = false;
         loop {
             let token = match self.token.take() {
                 Some(token) => token,
@@ -312,16 +316,32 @@ impl Client {
                 }
             };
             if sent.status == 401 {
-                self.rejected.push(token.source);
+                if !self.rejected.contains(&token.source) {
+                    self.rejected.push(token.source);
+                }
+                // The token gh stores can be replaced under a long wait, as
+                // one that expires is, so gh is asked what it holds now: once
+                // for each request, and `read` passes over a token already
+                // tried.
+                if token.source == GH_SOURCE && !asked_gh_again {
+                    asked_gh_again = true;
+                    self.token = self.read(GH_SOURCE);
+                }
                 continue;
             }
             if !self.rejected.is_empty() {
                 let rejected = std::mem::take(&mut self.rejected);
                 let verb = if rejected.len() == 1 { "was" } else { "were" };
-                eprintln!(
-                    "jouet: {} {verb} rejected (401); using {}",
-                    join_and(&rejected),
+                // Only a token gh gave on being asked again gets this far
+                // once gh has been asked again.
+                let using = if asked_gh_again {
+                    "the token gh has now"
+                } else {
                     token.source
+                };
+                eprintln!(
+                    "jouet: {} {verb} rejected (401); using {using}",
+                    join_and(&rejected)
                 );
             }
             self.token = Some(token);
@@ -329,26 +349,28 @@ impl Client {
         }
     }
 
+    /// The token `source` holds now: none when it holds nothing, or a token
+    /// already tried, since the same token under two names, or from gh a
+    /// second time, would only be rejected twice.
+    fn read(&mut self, source: &'static str) -> Option<Token> {
+        let value = if source == GH_SOURCE {
+            gh_auth_token()
+        } else {
+            std::env::var(source).ok()
+        };
+        let value = value
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty() && !self.tried.contains(v))?;
+        self.tried.push(value.clone());
+        Some(Token { source, value })
+    }
+
     fn next_token(&mut self) -> Result<Token, String> {
         while !self.sources.is_empty() {
             let source = self.sources.remove(0);
-            let value = if source == GH_SOURCE {
-                gh_auth_token()
-            } else {
-                std::env::var(source).ok()
-            };
-            let Some(value) = value
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-            else {
-                continue;
-            };
-            // The same token under two names would only be rejected twice.
-            if self.tried.contains(&value) {
-                continue;
+            if let Some(token) = self.read(source) {
+                return Ok(token);
             }
-            self.tried.push(value.clone());
-            return Ok(Token { source, value });
         }
         Err(if self.rejected.is_empty() {
             "no GitHub token: set JOUET_GITHUB_TOKEN, GH_TOKEN or GITHUB_TOKEN, or run `gh auth login`"
