@@ -121,7 +121,7 @@ GitHub computes mergeability lazily, so a pull request that has not been looked 
 
 ## GitHub access
 
-- **Tokens** are tried in order: `JOUET_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, then `gh auth token`. A token GitHub rejects moves on to the next one, with a warning such as `GH_TOKEN was rejected (401); using gh auth token`, so a stale `GH_TOKEN` no longer needs `GH_TOKEN= gh …`.
+- **Tokens** are tried in order: `JOUET_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, then `gh auth token`. A token GitHub rejects moves on to the next one, with a warning such as `GH_TOKEN was rejected (401); using gh auth token`, so a stale `GH_TOKEN` no longer needs `GH_TOKEN= gh …`. When the rejected token came from `gh auth token`, gh is asked once more, since the token it stores can be replaced while jouet runs, as one that expires is: a long `jouet wait` carries on with the new one, saying `gh auth token was rejected (401); using the token gh has now`. If gh still holds the rejected token, the command fails with `GitHub rejected every token (401)`.
 - **One query** fetches up to 50 pull requests. The names of failing checks come from a second query, made only when some check failed. Review threads, failing checks and search results past the first page are always fetched, never cut off.
 - **Retries.** Server errors, dropped connections and GitHub's secondary rate limits are retried with backoff. Each request times out after 30 seconds.
 - **`JOUET_GITHUB_API_URL`** points jouet at another API root, such as a GitHub Enterprise server.
