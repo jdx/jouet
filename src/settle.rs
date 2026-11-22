@@ -222,6 +222,27 @@ fn alternative(commands: &[shell::Command], at: usize) -> bool {
         .is_some_and(|c| c.op == Some(Op::Or))
 }
 
+/// Whether the shell may have passed over the push at `at` while an earlier
+/// push worked, as in `git push; false && git -C other push; true`: it comes
+/// after `&&` or `||` in its list, and the script goes on after it with more
+/// than `&&` and pipes, so a script that worked does not say the push ran. A
+/// script's only push is followed either way: had it not run, none did, and
+/// the session's directory would be no better a guess.
+fn passed_over(commands: &[shell::Command], at: usize) -> bool {
+    let joined = |c: &shell::Command| matches!(c.op, Some(Op::And | Op::Or | Op::Pipe));
+    let list = commands[..at]
+        .iter()
+        .rposition(|c| !joined(c))
+        .map_or(0, |i| i + 1);
+    let conditional = commands[list..at]
+        .iter()
+        .any(|c| matches!(c.op, Some(Op::And | Op::Or)));
+    let shown = commands[at..commands.len() - 1]
+        .iter()
+        .all(|c| matches!(c.op, Some(Op::And | Op::Pipe)));
+    conditional && !shown && commands[..at].iter().any(is_push)
+}
+
 /// Whether a shell command pushes a branch or opens a PR.
 pub(crate) fn pushes(command: &str) -> bool {
     let words: Vec<&str> = command.split_whitespace().collect();
@@ -284,8 +305,10 @@ fn stated_dir(command: &str, cwd: &Path) -> Option<PathBuf> {
     // The last push is the one whose PR is new. One after `||` ran only if
     // something failed, and a script that worked does not say whether it
     // did, or an earlier push instead.
+    // Nor does it say whether one after `&&` ran, when an earlier push may
+    // be the one that worked.
     let at = script.commands.iter().rposition(is_push)?;
-    if alternative(&script.commands, at) {
+    if alternative(&script.commands, at) || passed_over(&script.commands, at) {
         return None;
     }
     let (before, push) = (&script.commands[..at], &script.commands[at]);
@@ -667,6 +690,17 @@ mod tests {
                 "/src/other",
             ),
             ("cd /src/a && git push; cd /src/b && git push", "/src/b"),
+            // A script that worked ran its last push: nothing but `&&` and a
+            // pipe come after it.
+            (
+                "git push; cd /src/b && git push 2>&1 | tail -2 && echo ok",
+                "/src/b",
+            ),
+            // The only push: had it not run, no push did.
+            (
+                "test -d /src/other && git -C /src/other push; true",
+                "/src/other",
+            ),
             // Words a later command only prints are not the push.
             (
                 "git -C /src/other push && echo git push complete",
@@ -770,6 +804,12 @@ mod tests {
             "cd /src/a && git push || git -C /src/b push",
             "git -C /src/a push && echo ok || git -C /src/b push",
             "git fetch || cat log | git -C /src/other push",
+            // The last push may not have run, and the first is the one that
+            // worked: what follows hides how the last one's list ended.
+            "git push; false && git -C /src/other push; true",
+            "git push && git -C /src/other push; true",
+            "git push; test -d /src/b && git -C /src/b push || true",
+            "git push; cd /src/b && git push; echo done",
             "cd /src/other && gh api pr create",
             "env -C /src/other git push",
             // No command of its own is the push.
