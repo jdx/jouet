@@ -43,7 +43,7 @@ pub(crate) fn run(args: &HookArgs) -> jouet_output::exit::Exit {
         let mut input = String::new();
         std::io::stdin().read_to_string(&mut input).ok()?;
         let payload: Value = serde_json::from_str(&input).ok()?;
-        if !first_run(harness, event, &payload) {
+        if !first_run(harness, event, args.hk.as_deref(), &payload) {
             return None;
         }
         let payload = harness::normalize(harness, event, payload);
@@ -156,7 +156,11 @@ const STOP_ONCE: Duration = Duration::from_secs(2);
 /// within [`STOP_ONCE`]: the stop after a block differs in
 /// `stop_hook_active`, and any other comes later or ends another message, so
 /// each of those is answered.
-pub(crate) fn first_run(harness: Harness, event: &str, payload: &Value) -> bool {
+///
+/// `hk` is the hk stop hook this one runs too (`--hk`). It is part of what
+/// is remembered: of a plain stop hook and a merged one, only the merged one
+/// runs hk, so neither stands in for the other and both answer.
+pub(crate) fn first_run(harness: Harness, event: &str, hk: Option<&str>, payload: &Value) -> bool {
     use std::hash::{Hash, Hasher};
     let (key, window) = match event {
         "session-start" => ("transcript_path", RUN_ONCE),
@@ -172,6 +176,17 @@ pub(crate) fn first_run(harness: Harness, event: &str, payload: &Value) -> bool 
     if !id || std::fs::create_dir_all(&dir).is_err() {
         return true;
     }
+    // Held until this returns: two hooks that both find a marker too old to
+    // count would otherwise each replace it, the second taking the first's
+    // new one for the old, and both would answer. Without the lock the
+    // check still runs.
+    let _lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.with_extension("lock"))
+        .ok()
+        .filter(|lock| lock.lock().is_ok());
     let now = SystemTime::now();
     let older = |path: &Path, than: Duration| {
         std::fs::metadata(path)
@@ -186,7 +201,7 @@ pub(crate) fn first_run(harness: Harness, event: &str, payload: &Value) -> bool 
         }
     }
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    (harness.name(), event, payload.to_string()).hash(&mut hasher);
+    (harness.name(), event, hk, payload.to_string()).hash(&mut hasher);
     let path = dir.join(format!("{:016x}", hasher.finish()));
     if older(&path, window) {
         let _ = std::fs::remove_file(&path);

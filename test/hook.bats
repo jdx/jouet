@@ -1438,10 +1438,12 @@ E"
 		jq -cn --arg m "$1" --argjson active "${2:-false}" \
 			'{session_id: "s1", hook_event_name: "Stop", stop_hook_active: $active, last_assistant_message: $m}'
 	}
-	# The harness starts both hooks of one stop together, on one payload.
+	# The harness starts both hooks of one stop together, on one payload:
+	# `both HARNESS PAYLOAD [HK [HK]]`, each HK the hk stop hook merged into
+	# the first and the second.
 	both() {
-		jouet hook "$1" stop <<<"$2" >"$BATS_TEST_TMPDIR/first" &
-		jouet hook "$1" stop <<<"$2" >"$BATS_TEST_TMPDIR/second"
+		jouet hook "$1" stop ${3:+--hk "$3"} <<<"$2" >"$BATS_TEST_TMPDIR/first" &
+		jouet hook "$1" stop ${4:+--hk "$4"} <<<"$2" >"$BATS_TEST_TMPDIR/second"
 		wait
 		cat "$BATS_TEST_TMPDIR/first" "$BATS_TEST_TMPDIR/second"
 	}
@@ -1494,6 +1496,22 @@ E"
 	run both claude '{"session_id":"s2","stop_hook_active":false}'
 	run jq -c 'select(.event == "stop" and .session == "s2")' "$ledger"
 	assert_equal "${#lines[@]}" 2
+
+	# A hook merged with hk's stop hook is not skipped for a plain one, which
+	# does not run hk: both answer, and hk's verdict reaches the agent.
+	printf '#!/bin/sh\ncat >/dev/null\necho '\''{"decision":"block","reason":"hk check failed: todo"}'\''\n' >"$BATS_TEST_TMPDIR/bin/hk-stop"
+	chmod +x "$BATS_TEST_TMPDIR/bin/hk-stop"
+	merged='{"session_id":"s3","hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"Done."}'
+	# The plain one goes first here, so it is the one that would be remembered.
+	run --separate-stderr jouet hook claude stop <<<"$merged"
+	assert_output ''
+	run --separate-stderr jouet hook claude stop --hk hk-stop <<<"$merged"
+	run jq -r .reason <<<"$output"
+	assert_output 'hk check failed: todo [hk]'
+	# Merged into both, hk runs once.
+	run both claude "${merged/Done./Both merged.}" hk-stop hk-stop
+	assert_equal "${#lines[@]}" 1
+	assert_output --partial 'hk check failed: todo [hk]'
 
 	# Codex runs the hooks of every hooks.json too. Its stop always prints
 	# JSON, so the ledger tells whether both ran.
