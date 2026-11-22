@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# shellcheck disable=SC2016 # a `$VAR` in single quotes is the agent's command, as the hook is given it
 
 # `jouet watch`: the PR watcher Claude Code's background hook starts after a
 # push. These are the calls that end at once; the wait itself, against a fake
@@ -95,6 +96,70 @@ watched() {
 	assert_output 'foreground
 foreground'
 	assert [ ! -e "$XDG_STATE_HOME/jouet/watch" ]
+}
+
+# The work tree each push was looked up in, as the ledger's hash of it.
+watched_in() {
+	jq -r 'select(.event == "watch") | .repo // "none"' "$ledger"
+}
+
+# The session's own checkout, where the test runs, and another one under the
+# home directory. Sets `here` and `there` to what the ledger calls them.
+two_checkouts() {
+	git init -q
+	git init -q "$HOME/src/other"
+	mkdir -p "$HOME/src/other/docs"
+	in_arm jouet watch claude <<<"$(payload here 'git push')"
+	(cd "$HOME/src/other" && in_arm jouet watch claude <<<"$(payload there 'git push')")
+	here=$(watched_in | sed -n 1p)
+	there=$(watched_in | sed -n 2p)
+	assert [ -n "$here" ] && assert [ -n "$there" ]
+	assert [ "$here" != none ] && assert [ "$there" != none ]
+	assert [ "$here" != "$there" ]
+}
+
+# Runs the hook for each COMMAND as a call in the session's own directory and
+# expects the ledger to record it for the work tree REPO.
+recorded_for() {
+	local repo=$1 command said n=0
+	shift
+	for command in "$@"; do
+		n=$((n + 1))
+		said=$(in_arm jouet watch claude <<<"$(payload "$repo-$n" "$command")" 2>&1)
+		assert_equal "$said" ''
+		assert_equal "$(watched_in | tail -n 1) after: $command" "$repo after: $command"
+	done
+	assert_equal "$(watched_in | grep -c '')" "$((n + 2))"
+}
+
+@test "a push is looked up in the checkout it ran in, which a cd or git -C before it names" {
+	two_checkouts
+	# The first three are pushes the watcher looked for in the session's
+	# directory on its first day.
+	recorded_for "$there" \
+		'cd ~/src/other && git add tasks.md && git commit -q -m "docs(tasks): say what lint runs" && git push 2>&1 | tail -2 && jouet pr threads reply PRRT_1 --body done' \
+		'cd ~/src/other && git push -u origin claude/fix-silent-otlp-export' \
+		'cd ~/src/other && gh pr create --base main --head claude/fix-silent-otlp-export --fill' \
+		'cd $HOME/src/other; git add a.rs; git commit -q -m m; git push' \
+		'cd ../home/src/other/docs && gh stack submit' \
+		"cd '$HOME/src/other' || exit 1
+git push" \
+		'git -C ~/src/other push' \
+		"git -C $HOME/src/other/docs push -u origin feat"
+	run watched
+	assert_equal "$(sort -u <<<"$output")" foreground
+}
+
+@test "a push whose directory the command does not settle is looked up in the session's" {
+	two_checkouts
+	recorded_for "$here" \
+		'cd "$DIR" && git push' \
+		'git -C "$DIR" push' \
+		'(cd ~/src/other && git push)' \
+		'cd ~/src/other | cat; git push' \
+		'cd ~/src/gone && git push' \
+		'cd ~ && git push' \
+		'git -C ~/src/other status && git push'
 }
 
 @test "watch is a hook entry, not a command jouet lists" {
