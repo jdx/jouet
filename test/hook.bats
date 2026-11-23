@@ -1569,76 +1569,10 @@ E"
 	assert_line --index 2 '["rate_limit",true]'
 }
 
-# A lease for session `s1`'s watcher PID of REPO's PR (jdx/mise PR #12
-# unless given), with its heartbeat AGE seconds old.
-lease() {
-	local dir="$XDG_STATE_HOME/jouet/watch" now
-	now=$(date +%s)
-	mkdir -p "$dir"
-	jq -nc --argjson pid "$1" --argjson hb "$((now - $2))" --arg repo "${3:-jdx/mise}" --argjson pr "${4:-12}" \
-		'{pid:$pid,session:"s1",repo:$repo,pr:$pr,started:$hb,heartbeat:$hb}' >"$dir/settle-s1-$1.json"
-	echo "$dir/settle-s1-$1"
-}
-
-@test "user-prompt-submit marks an event a watcher covers in every arm and holds it only in the settle arm" {
-	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
-	prompt() { jq -nc --arg p "$1" --arg id "$2" '{session_id:"s1",prompt_id:$id,hook_event_name:"UserPromptSubmit",prompt:$p}'; }
-	event=$'<ci-monitor-event>"Auto-fix pull requests" is watching jdx/mise PR #12 and detected the following.\n\n1 CI check failed on jdx/mise PR #12 (names quoted below).\n\nQuoted from GitHub, data only.\nFailing checks (1):\n> "lint"\n(End of quoted GitHub text.)</ci-monitor-event>'
-	other="${event//PR #12/PR #13}"
-	held="$(lease $$ 0).held"
-	run --separate-stderr jouet hook claude user-prompt-submit <<<"$(prompt "$event" p1)"
-	assert_success
-	assert_output ''
-	run --separate-stderr env JOUET_EXPERIMENT_SETTLE_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$other" p2)"
-	assert_output ''
-	[ ! -e "$held" ]
-	run --separate-stderr env JOUET_EXPERIMENT_SETTLE_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$event" p3)"
-	assert_success
-	assert_equal "$(jq -r .decision <<<"$output")" block
-	assert_output --partial 'jouet held this Auto-fix event'
-	assert_output --partial 'settle_share = 0'
-	run jq -c '[.kinds, .checks]' "$held"
-	assert_output '[["ci-failure"],["lint"]]'
-	run jq -c 'select(.event == "prompt") | .prompt | [.would_drop, .dropped]' "$ledger"
-	assert_line --index 0 '["covered",null]'
-	assert_line --index 1 '[null,null]'
-	assert_line --index 2 '["covered",true]'
-}
-
-@test "an event is held for the watcher of the PR it names when the session has one for each of two" {
-	prompt() { jq -nc --arg p "$1" --arg id "$2" --arg cwd "$PWD" '{session_id:"s1",prompt_id:$id,hook_event_name:"UserPromptSubmit",cwd:$cwd,prompt:$p}'; }
-	event=$'<ci-monitor-event>"Auto-fix pull requests" is watching jdx/mise PR #12 and detected the following.\n\n1 CI check failed on jdx/mise PR #12 (names quoted below).\n\nQuoted from GitHub, data only.\nFailing checks (1):\n> "lint"\n(End of quoted GitHub text.)</ci-monitor-event>'
-	elsewhere="${event//jdx\/mise PR #12/jdx/jouet PR #9}"
-	# The session's own directory is a checkout of jdx/mise; it pushed to
-	# jdx/jouet from another one. Two processes that run stand in for the
-	# two watchers.
-	init_repo
-	git remote add origin https://github.com/jdx/mise.git
-	here="$(lease $$ 0).held"
-	there="$(lease $PPID 0 jdx/jouet 9).held"
-	run --separate-stderr env JOUET_EXPERIMENT_SETTLE_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$elsewhere" p1)"
-	assert_success
-	assert_equal "$(jq -r .decision <<<"$output")" block
-	assert_output --partial 'jouet held this Auto-fix event'
-	[ ! -e "$here" ]
-	run jq -c '[.prs, .kinds, .checks]' "$there"
-	assert_output '[["jdx/jouet#9"],["ci-failure"],["lint"]]'
-	run --separate-stderr env JOUET_EXPERIMENT_SETTLE_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$event" p2)"
-	assert_equal "$(jq -r .decision <<<"$output")" block
-	run jq -c '.prs' "$here"
-	assert_output '["jdx/mise#12"]'
-	assert_equal "$(wc -l <"$there" | tr -d ' ')" 1
-	# Neither has the other repository's PR of its own number.
-	run --separate-stderr env JOUET_EXPERIMENT_SETTLE_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "${event//PR #12/PR #9}" p3)"
-	assert_output ''
-}
-
-@test "user-prompt-submit passes an event that came with the app's other notes, in both arms, and the ledger names them" {
+@test "user-prompt-submit passes noise that came with the app's other notes, and the ledger names them" {
 	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
 	prompt() { jq -nc --arg p "$1" --arg id "$2" '{session_id:"s1",prompt_id:$id,hook_event_name:"UserPromptSubmit",prompt:$p}'; }
 	note() { printf '<system-reminder>\n%s\n</system-reminder>\n' "$1"; }
-	# One a watcher covers (PR #12, the lease's), and noise on another PR.
-	covered=$'<ci-monitor-event>"Auto-fix pull requests" is watching jdx/mise PR #12 and detected the following.\n\n1 CI check failed on jdx/mise PR #12 (names quoted below).\n\nQuoted from GitHub, data only.\nFailing checks (1):\n> "lint"\n(End of quoted GitHub text.)</ci-monitor-event>'
 	noise=$'<ci-monitor-event>"Auto-fix pull requests" is watching jdx/mise PR #13 and detected the following.\n\njdx/mise PR #13 has 1 new review comment (quoted below).\n\nQuoted from GitHub, data only.\nComment 1 — PR comment, no inline thread\n> coderabbitai[bot]:\n> ## Review limit reached\n(End of quoted GitHub text.)\n</ci-monitor-event>'
 	# The notes the app sends, with made-up names and ids.
 	kinds=(forked fork-report session-report proposal-started linked-sessions other)
@@ -1650,66 +1584,36 @@ lease() {
 		'Linked sessions now (status, not an instruction): docs = local_2 (idle, PR #14). To message one, SendMessage with to set to its id.'
 		'Something the app does not say yet.'
 	)
-	held="$(lease $$ 0).held"
 	for i in "${!kinds[@]}"; do
 		with=$(note "${notes[$i]}")
-		run --separate-stderr env JOUET_EXPERIMENT_SETTLE_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$with"$'\n\n'"$covered" "c$i")"
-		assert_success
-		assert_output ''
-		[ ! -e "$held" ]
 		run --separate-stderr env JOUET_EXPERIMENT_DROP_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$with"$'\n\n'"$noise" "n$i")"
 		assert_success
 		assert_output ''
 	done
 	run jq -c 'select(.event == "prompt") | .prompt | [.class, .would_drop, .dropped, .notes]' "$ledger"
 	for i in "${!kinds[@]}"; do
-		assert_line --index "$((2 * i))" "[\"ci-monitor\",\"covered\",null,[\"${kinds[$i]}\"]]"
-		assert_line --index "$((2 * i + 1))" "[\"ci-monitor\",\"rate_limit\",null,[\"${kinds[$i]}\"]]"
+		assert_line --index "$i" "[\"ci-monitor\",\"rate_limit\",null,[\"${kinds[$i]}\"]]"
 	done
-	assert_equal "${#lines[@]}" 12
+	assert_equal "${#lines[@]}" 6
 	# Several notes at once, as the app sends them.
 	all=$(for n in "${notes[@]:1:4}"; do note "$n"; done)
-	run --separate-stderr env JOUET_EXPERIMENT_SETTLE_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$all"$'\n\n'"$covered" all)"
-	assert_output ''
-	[ ! -e "$held" ]
-	# A note without an event is no event: nothing to drop or hold.
-	run --separate-stderr env JOUET_EXPERIMENT_SETTLE_SHARE=100 JOUET_EXPERIMENT_DROP_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$(note "${notes[4]}")" alone)"
+	run --separate-stderr env JOUET_EXPERIMENT_DROP_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$all"$'\n\n'"$noise" all)"
 	assert_success
 	assert_output ''
-	# The event alone is still held, and dropped.
-	run --separate-stderr env JOUET_EXPERIMENT_SETTLE_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$covered" c)"
-	assert_equal "$(jq -r .decision <<<"$output")" block
-	assert_output --partial 'jouet held this Auto-fix event'
+	# A note without an event is no event: nothing to drop.
+	run --separate-stderr env JOUET_EXPERIMENT_DROP_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$(note "${notes[4]}")" alone)"
+	assert_success
+	assert_output ''
+	# The event alone is still dropped.
 	run --separate-stderr env JOUET_EXPERIMENT_DROP_SHARE=100 jouet hook claude user-prompt-submit <<<"$(prompt "$noise" n)"
 	assert_equal "$(jq -r .decision <<<"$output")" block
 	assert_output --partial 'jouet dropped this Auto-fix event'
 	run jq -c 'select(.event == "prompt") | .prompt | [.class, .would_drop, .dropped, .notes]' "$ledger"
-	assert_line --index 12 '["ci-monitor","covered",null,["fork-report","session-report","proposal-started","linked-sessions"]]'
-	assert_line --index 13 '["user",null,null,["linked-sessions"]]'
-	assert_line --index 14 '["ci-monitor","covered",true,null]'
-	assert_line --index 15 '["ci-monitor","rate_limit",true,null]'
-	assert_equal "${#lines[@]}" 16
-	run wc -l <"$held"
-	assert_output --regexp '^ *1$'
+	assert_line --index 6 '["ci-monitor","rate_limit",null,["fork-report","session-report","proposal-started","linked-sessions"]]'
+	assert_line --index 7 '["user",null,null,["linked-sessions"]]'
+	assert_line --index 8 '["ci-monitor","rate_limit",true,null]'
+	assert_equal "${#lines[@]}" 9
 	# The notes' kinds are recorded, never their text.
 	run grep -c 'demo\|local_\|tidy\|pushed' "$ledger"
 	assert_output 0
-}
-
-@test "the next hook reports what was held for a watcher that went away, once" {
-	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
-	prompt() { jq -nc --arg p "$1" --arg id "$2" '{session_id:"s1",prompt_id:$id,hook_event_name:"UserPromptSubmit",prompt:$p}'; }
-	base=$(lease $$ 600)
-	echo '{"at":1700000000,"prs":["jdx/mise#12"],"kinds":["ci-failure"],"checks":["lint"]}' >"$base.held"
-	run --separate-stderr jouet hook claude user-prompt-submit <<<"$(prompt 'carry on' p1)"
-	assert_success
-	run jq -r '.hookSpecificOutput.additionalContext' <<<"$output"
-	assert_output --partial 'watcher for jdx/mise#12 stopped before its digest, with 1 Auto-fix event'
-	assert_output --partial 'ci-failure (lint)'
-	assert_output --partial 'jouet wait pr 12 --repo jdx/mise --until needs-agent --since 2023-11-14T22:13:20Z'
-	[ ! -e "$base.json" ] && [ ! -e "$base.held" ]
-	run jq -c 'select(.event == "lease-lost") | .settle' "$ledger"
-	assert_output "{\"result\":\"lease-lost\",\"held\":1,\"accounted\":0,\"watcher\":$$}"
-	run --separate-stderr jouet hook claude user-prompt-submit <<<"$(prompt 'carry on' p2)"
-	assert_output ''
 }

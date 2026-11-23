@@ -462,6 +462,34 @@ sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude stop'"
 	assert_golden "$HOME/.claude/settings.json" claude-hooks.json
 }
 
+@test "setup removes the push watcher an older version installed, and so does --uninstall" {
+	mkdir -p "$HOME/.claude"
+	# What `jouet setup claude` wrote while jouet had the settle experiment:
+	# a second PostToolUse group that ran `jouet watch claude` in the background.
+	watch="sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch claude'"
+	jq --arg command "$watch" '.hooks.PostToolUse += [{matcher: "Bash", hooks: [
+		"git push", "pr create", "stack submit", "git -C * push"
+		| {type: "command", command: $command, if: "Bash(*\(.)*)", timeout: 86700, asyncRewake: true,
+			rewakeMessage: "jouet watched the PR you pushed to and reports:",
+			rewakeSummary: "jouet: the PR needs a look"}]}]' \
+		"$PROJECT_ROOT/test/fixtures/setup/claude-hooks.json" >"$HOME/.claude/settings.json"
+	run grep -c 'jouet watch claude' "$HOME/.claude/settings.json"
+	assert_output 4
+	cp "$HOME/.claude/settings.json" "$BATS_TEST_TMPDIR/old.json"
+
+	run --separate-stderr jouet setup claude
+	assert_success
+	assert_line "updated $HOME/.claude/settings.json"
+	assert_golden "$HOME/.claude/settings.json" claude-hooks.json
+
+	cp "$BATS_TEST_TMPDIR/old.json" "$HOME/.claude/settings.json"
+	run --separate-stderr jouet setup claude --uninstall
+	assert_success
+	assert_line "updated $HOME/.claude/settings.json"
+	run grep -c 'jouet' "$HOME/.claude/settings.json"
+	assert_output 0
+}
+
 @test "setup --uninstall removes jouet's hooks from either project file" {
 	init_repo
 	work=$(pwd -P) # macOS reports /private/tmp for /tmp

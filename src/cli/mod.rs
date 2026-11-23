@@ -40,7 +40,6 @@ mod test;
 mod threads;
 mod trust;
 mod wait;
-mod watch;
 mod wind;
 
 pub(crate) use agent_help::*;
@@ -79,7 +78,6 @@ pub(crate) use test::*;
 pub(crate) use threads::*;
 pub(crate) use trust::*;
 pub(crate) use wait::*;
-pub(crate) use watch::*;
 pub(crate) use wind::*;
 
 // `joue` is a view of `jouet run`: argv[0] `joue` parses as `jouet run`,
@@ -186,7 +184,4 @@ pub(crate) enum Cmd {
     /// Answer a harness's hook
     #[usage(hide)]
     Hook(HookArgs),
-    /// Watch the PR a push went to, from a harness's background hook
-    #[usage(hide)]
-    Watch(WatchArgs),
 }

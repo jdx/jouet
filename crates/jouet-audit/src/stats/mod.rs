@@ -13,7 +13,6 @@ mod costs;
 mod decisions;
 mod drops;
 mod ledger;
-mod settles;
 mod summary;
 
 use arms::quantile;
@@ -72,7 +71,6 @@ fn issued_ms<'a>(
 pub use decisions::{DecisionSpan, DecisionsAfter, after_decisions, request_times};
 pub use drops::{DropArm, LedgerPrompt, drop_arms};
 pub use ledger::{Ledger, LedgerDecision, LedgerEntry};
-pub use settles::{LedgerSettle, ORPHANED_AFTER_S, SettleArm, settle_arms};
 pub use summary::{SummaryStyle, summary};
 
 use crate::analyze::HarnessReport;

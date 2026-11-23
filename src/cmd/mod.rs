@@ -41,7 +41,6 @@ pub(crate) mod test;
 pub(crate) mod threads;
 pub(crate) mod trust;
 pub(crate) mod wait;
-pub(crate) mod watch;
 pub(crate) mod wind;
 
 pub(crate) use jouet_output::Output;

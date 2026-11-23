@@ -22,8 +22,6 @@ pub struct LedgerPrompt {
     pub would_drop: Option<String>,
     /// The drop arm blocked it.
     pub dropped: bool,
-    /// The pid of the watcher that covered it.
-    pub watcher: Option<u32>,
     /// The kinds of note the app sent in the same prompt, before it. A
     /// prompt with any is never blocked.
     pub notes: Vec<String>,

@@ -7,7 +7,6 @@ use crate::cli::{
 };
 use jouet_github::host::Feature;
 use jouet_github::pr::target::{self, Arg, Repo, Target};
-use jouet_output::display::Mode;
 use jouet_output::exit::Exit;
 use jouet_output::time::parse_duration;
 use jouet_wait::checks::Selection;
@@ -15,7 +14,6 @@ use jouet_wait::ci::{self, CiWait};
 use jouet_wait::daemon::{self, Answer, DaemonWait};
 use jouet_wait::host::Remote;
 use jouet_wait::job;
-use jouet_wait::lease::{self, Lease};
 use jouet_wait::local::{CmdWait, FileWait, HttpWait, LogWait, PidWait, PortWait};
 use jouet_wait::pr::{PrWait, Until};
 use jouet_wait::remote::{self, Halt, Watch};
@@ -24,10 +22,8 @@ use jouet_wait::settle::{self, SettleWait};
 use jouet_wait::triage::Acks;
 use jouet_wait::{self as wait, Reporter, Stop, Subject, Timing};
 use regex::Regex;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::time::Duration;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(10);
@@ -40,15 +36,6 @@ const SETTLE_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 /// The quiet window once every check has finished and no review bot says
 /// it is still reviewing, unless `--quiet-for` is given.
 const SHORT_QUIET: Duration = Duration::from_secs(5 * 60);
-/// A watcher in an agent's session holds Auto-fix events, so it waits up
-/// to a day, polling every 5 minutes once the PR has settled.
-pub(crate) const LEASE_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
-const SETTLED_INTERVAL: Duration = Duration::from_secs(5 * 60);
-/// How long a watcher waits, after removing its lease, for a hook that
-/// was holding an event as it did.
-const HOLD_GRACE: Duration = Duration::from_secs(1);
-/// How often a parked watcher looks for its session.
-const PARK_STEP: Duration = Duration::from_secs(60);
 
 pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
     if out.json && args.jsonl {
@@ -96,22 +83,18 @@ pub(crate) fn run(args: WaitArgs, out: &Output) -> Exit {
             }
         }
         WaitCmd::Pr(a) if a.until == "needs-agent" => {
-            let session = jouet_git::session::id_from_env();
             let timing = Timing {
-                timeout: match (&args.timeout, &session) {
-                    (Some(_), _) => timing.timeout,
-                    (None, Some(_)) => LEASE_TIMEOUT,
-                    (None, None) => SETTLE_TIMEOUT,
+                timeout: if args.timeout.is_none() {
+                    SETTLE_TIMEOUT
+                } else {
+                    timing.timeout
                 },
                 ..timing
             };
             match settle_args(&a, confirm_conflict) {
-                Ok((t, options)) => match session {
-                    Some(session) => settle_watch(reporter, &timing, t, options, &session),
-                    None => watch(reporter, &timing, &t.repo().clone(), |_| {
-                        Ok(SettleWait::new(t, options))
-                    }),
-                },
+                Ok((t, options)) => watch(reporter, &timing, &t.repo().clone(), |_| {
+                    Ok(SettleWait::new(t, options))
+                }),
                 Err(message) => out.error(Exit::Usage, &message),
             }
         }
@@ -244,486 +227,17 @@ fn watch<W: Watch>(
             let mut reporter = reporter(w.label());
             remote::run(&mut w, &mut remote, timing, &mut reporter)
         }
-        Err(halt) => reporter(String::new()).fail(&halt_stop(halt)),
-    }
-}
-
-fn halt_stop(halt: Halt) -> Stop {
-    match halt {
-        Halt::Stop(stop) => stop,
-        Halt::RateLimited { reset } => Stop {
-            exit: Exit::Remote,
-            message: github_failure(reset),
-        },
-    }
-}
-
-/// `wait pr --until needs-agent` in an agent's session: the watcher holds a
-/// lease, so the hooks can hold the Auto-fix events about its PR for its
-/// digest, and records in the ledger what it did with them. A push that
-/// finds it watching starts no watcher of its own, so a digest about a
-/// commit older than that push is not printed: the wait goes on. Anything
-/// that keeps it from writing the lease leaves a plain wait.
-fn settle_watch(
-    reporter: impl Fn(String) -> Reporter,
-    timing: &Timing,
-    target: Target,
-    mut options: settle::Options,
-    session: &str,
-) -> Exit {
-    let started = Instant::now();
-    let mut remote = match Remote::connect(target.repo()) {
-        Ok(remote) => remote,
-        Err(message) => {
-            return reporter(String::new()).fail(&Stop {
-                exit: Exit::Precondition,
-                message,
-            });
-        }
-    };
-    // The lease names its PR, so the target is resolved first.
-    let (repo, number) = match remote.resolve(target) {
-        Ok(resolved) => resolved,
-        Err(halt) => return reporter(String::new()).fail(&halt_stop(halt)),
-    };
-    let now = jouet_output::time::now();
-    let lease = Lease {
-        pid: std::process::id(),
-        session: session.to_string(),
-        repo: repo.to_string(),
-        pr: number,
-        branch: None,
-        started: now,
-        since: options.since,
-        heartbeat: now,
-    };
-    let path = lease::dir()
-        .and_then(|dir| Lease::path(&dir, session, lease.pid))
-        .filter(|path| lease.write(path).is_ok());
-    if path.is_some() {
-        options.lease.clone_from(&path);
-        options.settled_interval = Some(SETTLED_INTERVAL);
-    }
-    let (w, mut reporter, waited) = settle_rounds(
-        &mut remote,
-        &repo,
-        number,
-        &options,
-        timing,
-        path.as_deref().map(|path| (path, lease)),
-        reporter,
-    );
-    let error = waited.as_ref().err().map(|stop| stop.exit.name().into());
-    let (exit, doc) = remote::report(&w, waited, &mut reporter);
-    let Some(path) = path else {
-        return exit;
-    };
-    let held = give_back(&path);
-    let reported = doc.as_ref().map_or(&[][..], |d| &d.held[..]);
-    if let Some(late) = late_note(held.len().saturating_sub(reported.len()), number) {
-        eprintln!("{late}");
-    }
-    let result = doc.as_ref().map_or("error", settle::Doc::result);
-    let parked = result == "closed" && held.is_empty();
-    record_settle(
-        session,
-        crate::ledger::Settle {
-            result: if parked { "parked" } else { result }.into(),
-            held: held.len() as u64,
-            accounted: reported.iter().filter(|h| h.accounted).count() as u64,
-            wake_after_first_held_s: doc.as_ref().and_then(|d| d.wake_after_first_held_s),
-            watcher: Some(std::process::id()),
-            woke: !parked,
-            error,
-        },
-    );
-    if parked {
-        // Nothing for the agent: a wake would only start a turn to read
-        // that the PR closed. The wait stays until its session ends.
-        let parent = parent();
-        while started.elapsed() < timing.timeout && !orphaned(parent) {
-            std::thread::sleep(PARK_STEP.min(timing.timeout.saturating_sub(started.elapsed())));
+        Err(halt) => {
+            let stop = match halt {
+                Halt::Stop(stop) => stop,
+                Halt::RateLimited { reset } => Stop {
+                    exit: Exit::Remote,
+                    message: github_failure(reset),
+                },
+            };
+            reporter(String::new()).fail(&stop)
         }
     }
-    exit
-}
-
-/// Waits for the PR to settle, in rounds under `timing`'s one time limit,
-/// and returns the last round, not yet reported. With a lease, its heartbeat
-/// runs until the last round ends, and a round that ends on a commit older
-/// than one a push left this watcher is followed by another: that push
-/// found the PR watched, so jouet started no watcher for it.
-fn settle_rounds(
-    remote: &mut Remote,
-    repo: &Repo,
-    number: u64,
-    options: &settle::Options,
-    timing: &Timing,
-    lease: Option<(&Path, Lease)>,
-    reporter: impl Fn(String) -> Reporter,
-) -> (SettleWait, Reporter, Result<settle::Doc, Stop>) {
-    let started = Instant::now();
-    let path = lease.as_ref().map(|(path, _)| *path);
-    let mut beat = lease.map(|(path, lease)| Heartbeat::start(path.to_path_buf(), lease));
-    loop {
-        let round = Timing {
-            timeout: timing.timeout.saturating_sub(started.elapsed()),
-            interval: timing.interval,
-        };
-        // The digest says how long the whole wait took, not its last round.
-        let mut w =
-            SettleWait::new(Target::Number(repo.clone(), number), options.clone()).started(started);
-        let mut reporter = reporter(w.label());
-        let waited = remote::wait(&mut w, remote, &round, &mut reporter);
-        let Some(path) = path else {
-            return (w, reporter, waited);
-        };
-        let head = waited.as_ref().ok().map(settle::Doc::head_sha);
-        let stop = || beat.take().into_iter().for_each(Heartbeat::stop);
-        if Lease::retire(path, head, stop) {
-            return (w, reporter, waited);
-        }
-    }
-}
-
-/// Gives a watcher's lease back and returns the events held for it. No hook
-/// holds an event once the lease is gone; one that was holding as it went
-/// has the grace to finish.
-fn give_back(path: &Path) -> Vec<lease::Held> {
-    let _ = std::fs::remove_file(path);
-    std::thread::sleep(HOLD_GRACE);
-    let held = lease::held(path);
-    Lease::remove(path);
-    held
-}
-
-/// What to say about events held after the digest was put together.
-fn late_note(late: usize, number: u64) -> Option<String> {
-    (late > 0).then(|| {
-        format!(
-            "jouet: {late} Auto-fix event{} held as this wait ended; look at the PR: `jouet wait pr {number} --until needs-agent` or `jouet pr threads {number}`",
-            if late == 1 { "" } else { "s" }
-        )
-    })
-}
-
-/// How long the watcher jouet starts after a push waits, when the defaults
-/// are not wanted.
-#[derive(Default)]
-pub(crate) struct Tuning {
-    pub quiet: Option<Duration>,
-    pub timeout: Option<Duration>,
-    pub interval: Option<Duration>,
-}
-
-/// The watcher jouet starts after a push (`jouet watch`), holding its lease.
-pub(crate) struct PushWatch {
-    remote: Remote,
-    repo: Repo,
-    lease: Lease,
-    path: PathBuf,
-}
-
-/// Why a push got no watcher.
-pub(crate) struct NoWatch {
-    /// `no-pr` (nothing to watch: the branch has no PR, or no branch of a
-    /// repository jouet can read is checked out), `watching` (a live watcher
-    /// of the session has it) or `error`.
-    pub outcome: &'static str,
-    /// For an `error`, what went wrong.
-    pub error: Option<Stop>,
-}
-
-impl NoWatch {
-    fn of(outcome: &'static str) -> Self {
-        Self {
-            outcome,
-            error: None,
-        }
-    }
-
-    fn error(exit: Exit, message: String) -> Self {
-        Self {
-            outcome: "error",
-            error: Some(Stop { exit, message }),
-        }
-    }
-}
-
-/// How a push's watcher ended.
-pub(crate) struct Ended {
-    /// What to wake the agent with, if anything.
-    pub wake: Option<String>,
-    /// Why the wait failed, when it did.
-    pub error: Option<Stop>,
-}
-
-impl PushWatch {
-    /// Takes the lease for the PR of the branch checked out here, pushed at
-    /// `since`: comments from then on are new to the watcher, also one
-    /// posted while it was finding the PR. The error is why no watcher
-    /// starts.
-    pub(crate) fn claim(session: &str, since: i64) -> Result<Self, NoWatch> {
-        let target = target(None, None).map_err(|_| NoWatch::of("no-pr"))?;
-        let mut remote = Remote::connect(target.repo())
-            .map_err(|message| NoWatch::error(Exit::Precondition, message))?;
-        let (repo, number) = remote
-            .resolve(target)
-            .map_err(|halt| match halt_stop(halt) {
-                stop if stop.exit == Exit::NotFound => NoWatch::of("no-pr"),
-                stop => NoWatch::error(stop.exit, stop.message),
-            })?;
-        let now = jouet_output::time::now();
-        let lease = Lease {
-            pid: std::process::id(),
-            session: session.to_string(),
-            repo: repo.to_string(),
-            pr: number,
-            branch: None,
-            started: now,
-            since,
-            heartbeat: now,
-        };
-        let dir = lease::dir().ok_or_else(|| {
-            NoWatch::error(
-                Exit::Precondition,
-                "no state directory to keep the watcher's lease in".into(),
-            )
-        })?;
-        match lease.claim(&dir, now, crate::git::head().as_deref()) {
-            Ok(Some(path)) => Ok(Self {
-                remote,
-                repo,
-                lease,
-                path,
-            }),
-            Ok(None) => Err(NoWatch::of("watching")),
-            Err(e) => Err(NoWatch::error(
-                Exit::Failed,
-                format!(
-                    "could not write the watcher's lease in {}: {e}",
-                    dir.display()
-                ),
-            )),
-        }
-    }
-
-    /// The PR it watches, as `owner/name#N`.
-    pub(crate) fn pr(&self) -> String {
-        format!("{}#{}", self.lease.repo, self.lease.pr)
-    }
-
-    /// Waits as `wait pr --until needs-agent` does, gives the lease back,
-    /// and returns what to wake the agent with: the digest, held events
-    /// included. `None` when the PR closed or the wait ran out with nothing
-    /// held, which is not worth a turn. A wait that failed still reports
-    /// the events held for it, and says why it failed.
-    pub(crate) fn run(mut self, tuning: &Tuning) -> Ended {
-        let number = self.lease.pr;
-        let options = settle::Options {
-            quiet: tuning.quiet.unwrap_or(DEFAULT_QUIET),
-            quiet_short: tuning.quiet.is_none().then_some(SHORT_QUIET),
-            acks: Acks::Loose,
-            since: self.lease.since,
-            log_lines: Some(DEFAULT_LOG_LINES),
-            confirm_conflict: jouet_wait::CONFLICT_CONFIRM,
-            lease: Some(self.path.clone()),
-            settled_interval: Some(SETTLED_INTERVAL),
-            restarts: true,
-        };
-        let timing = Timing {
-            timeout: tuning.timeout.unwrap_or(LEASE_TIMEOUT),
-            interval: tuning.interval.unwrap_or(DEFAULT_INTERVAL),
-        };
-        let (w, reporter, waited) = settle_rounds(
-            &mut self.remote,
-            &self.repo,
-            number,
-            &options,
-            &timing,
-            Some((&self.path, self.lease.clone())),
-            // Quiet: what this process prints is what the agent is woken with.
-            |label| Reporter::new(Mode::Agent, false, false, true, label),
-        );
-        let (doc, error) = match waited {
-            Ok(doc) => (Some(doc), None),
-            Err(stop) => (None, Some(stop)),
-        };
-        let held = give_back(&self.path);
-        let reported = doc.as_ref().map_or(&[][..], |d| &d.held[..]);
-        let result = doc.as_ref().map_or("error", settle::Doc::result);
-        let wake = match &doc {
-            Some(doc) if result == "needs_agent" || !held.is_empty() => {
-                let mut text = w.text(doc, &reporter);
-                if let Some(late) = late_note(held.len().saturating_sub(reported.len()), number) {
-                    text.push_str(&late);
-                    text.push('\n');
-                }
-                Some(text)
-            }
-            Some(_) => None,
-            None => crate::settle::lost_note(
-                &self.lease,
-                &held,
-                error.as_ref().map(|stop| stop.message.as_str()),
-            ),
-        };
-        let accounted = match &doc {
-            Some(_) => reported.iter().filter(|h| h.accounted).count(),
-            // The note that stands in for the digest names each one.
-            None => held.len(),
-        };
-        record_settle(
-            &self.lease.session,
-            crate::ledger::Settle {
-                result: result.into(),
-                held: held.len() as u64,
-                accounted: accounted as u64,
-                wake_after_first_held_s: doc.as_ref().and_then(|d| d.wake_after_first_held_s),
-                watcher: Some(self.lease.pid),
-                woke: wake.is_some(),
-                error: error.as_ref().map(|stop| stop.exit.name().into()),
-            },
-        );
-        Ended { wake, error }
-    }
-}
-
-/// Records a watcher's `settle` entry, unless the ledger is turned off.
-fn record_settle(session: &str, settle: crate::ledger::Settle) {
-    let settings = crate::settings::Settings::load();
-    let Some(dir) = crate::ledger::dir().filter(|_| settings.hooks.ledger) else {
-        return;
-    };
-    let mut entry = crate::ledger::Entry::new("jouet", Some(session), "settle");
-    entry.repo = std::env::current_dir()
-        .ok()
-        .and_then(|cwd| crate::ledger::repo_key(&cwd));
-    entry.settle = Some(settle);
-    crate::ledger::append(&dir, &entry);
-}
-
-/// The process that started this one: the agent's shell.
-fn parent() -> u32 {
-    #[cfg(unix)]
-    {
-        std::os::unix::process::parent_id()
-    }
-    #[cfg(not(unix))]
-    {
-        0
-    }
-}
-
-/// Whether the process that started this one has gone: it was reparented.
-fn orphaned(parent: u32) -> bool {
-    #[cfg(unix)]
-    {
-        std::os::unix::process::parent_id() != parent
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = parent;
-        false
-    }
-}
-
-/// The thread that keeps a lease's heartbeat fresh. When the session that
-/// started the watcher is gone, or the watcher is told to stop (SIGTERM,
-/// which a harness sends a hook's watcher when its session closes), it ends
-/// the process: with nothing held, it removes the lease first; with events
-/// held, it leaves the lease to go stale, so the session's next hook reports
-/// them.
-struct Heartbeat {
-    stop: Arc<AtomicBool>,
-    thread: std::thread::JoinHandle<()>,
-}
-
-impl Heartbeat {
-    fn start(path: PathBuf, mut lease: Lease) -> Self {
-        let stop = Arc::new(AtomicBool::new(false));
-        let stopped = Arc::clone(&stop);
-        let told = told_to_stop(&stop);
-        let parent = parent();
-        let thread = std::thread::spawn(move || {
-            let mut beat = Instant::now();
-            while !stopped.load(Ordering::Relaxed) {
-                std::thread::sleep(Duration::from_millis(250));
-                if told.load(Ordering::Relaxed) {
-                    leave(&path, &lease);
-                    die();
-                }
-                if beat.elapsed() < lease::HEARTBEAT || stopped.load(Ordering::Relaxed) {
-                    continue;
-                }
-                beat = Instant::now();
-                if orphaned(parent) {
-                    leave(&path, &lease);
-                    std::process::exit(i32::from(Exit::Failed.code()));
-                }
-                lease.heartbeat = jouet_output::time::now();
-                let _ = lease.write(&path);
-            }
-        });
-        Self { stop, thread }
-    }
-
-    /// Stops it, so it never writes the lease again.
-    fn stop(self) {
-        self.stop.store(true, Ordering::Relaxed);
-        let _ = self.thread.join();
-    }
-}
-
-/// A flag SIGTERM sets while a watcher holds its lease, in place of ending
-/// the process, so the heartbeat thread can give the lease back first. Once
-/// `stopped` is set, SIGTERM ends the process as it always did.
-fn told_to_stop(stopped: &Arc<AtomicBool>) -> Arc<AtomicBool> {
-    let told = Arc::new(AtomicBool::new(false));
-    #[cfg(unix)]
-    {
-        let term = signal_hook::consts::SIGTERM;
-        let _ = signal_hook::flag::register_conditional_default(term, Arc::clone(stopped));
-        let _ = signal_hook::flag::register(term, Arc::clone(&told));
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = stopped;
-    }
-    told
-}
-
-/// Ends the process the way the SIGTERM it was sent would have.
-fn die() -> ! {
-    #[cfg(unix)]
-    {
-        let _ = signal_hook::low_level::emulate_default_handler(signal_hook::consts::SIGTERM);
-    }
-    std::process::exit(i32::from(Exit::Failed.code()))
-}
-
-/// A watcher that stops before its digest: with nothing held it takes its
-/// lease along; a lease with held events stays, stale, for the hook that
-/// reports them (`lease-lost`).
-fn leave(path: &Path, lease: &Lease) {
-    // A lease that is not live holds no new event, and it is still there
-    // for a hook that was holding one as it went stale, which has the grace
-    // to finish. Removing it first would leave that event with no lease if
-    // the process were killed meanwhile. No hook takes it for lost while
-    // this process runs (`Lease::leaving`).
-    let _ = lease.leaving(jouet_output::time::now()).write(path);
-    std::thread::sleep(HOLD_GRACE);
-    if lease::held(path).is_empty() {
-        Lease::remove(path);
-    }
-    record_settle(
-        &lease.session,
-        crate::ledger::Settle {
-            result: "stopped".into(),
-            watcher: Some(lease.pid),
-            ..crate::ledger::Settle::default()
-        },
-    );
 }
 
 fn github_failure(reset: i64) -> String {
@@ -857,9 +371,6 @@ fn settle_args(
         since,
         log_lines: log_lines(a.log_lines, a.no_logs)?,
         confirm_conflict,
-        lease: None,
-        settled_interval: None,
-        restarts: false,
     };
     Ok((target(a.pr.as_deref(), a.repo.as_deref())?, options))
 }

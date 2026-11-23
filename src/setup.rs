@@ -47,8 +47,6 @@ const TIMEOUT: u64 = 10;
 /// Claude Code's default for a command hook, which a merged hk stop hook
 /// without a timeout of its own had.
 const HK_TIMEOUT: u64 = 600;
-/// Seconds the harness gives the PR watcher beyond the watcher's own limit.
-const WATCH_MARGIN: u64 = 300;
 /// Gemini CLI's tools that jouet steers: the shell, reading, searching and
 /// editing. Its matchers are unanchored regular expressions.
 const GEMINI_TOOLS: &str =
@@ -307,46 +305,6 @@ impl Harness {
         }
     }
 
-    /// The matcher group that starts jouet's PR watcher after a push
-    /// (`jouet watch`, see `crate::cmd::watch`), and its event. Claude Code
-    /// alone has what it needs: `asyncRewake` runs the hook in the
-    /// background and wakes the agent when it exits 2.
-    ///
-    /// One handler per kind of push, each behind an `if`, so no process
-    /// starts for any other Bash call. The filter is looser than
-    /// `settle::pushes`, which decides; a command that matches two starts
-    /// two, and the second finds the first's mark. The time limit is the
-    /// watcher's own and a margin, so it ends itself and reports what it
-    /// held rather than being killed.
-    fn watch_group(self) -> Option<(&'static str, Value)> {
-        if self != Self::Claude {
-            return None;
-        }
-        let command = format!(
-            "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch {}'",
-            self.name()
-        );
-        let timeout = crate::cmd::wait::LEASE_TIMEOUT.as_secs() + WATCH_MARGIN;
-        let handlers: Vec<Value> = crate::settle::push_patterns()
-            .iter()
-            .map(|pattern| {
-                json!({
-                    "type": "command",
-                    "command": command,
-                    "if": format!("Bash(*{pattern}*)"),
-                    "timeout": timeout,
-                    "asyncRewake": true,
-                    "rewakeMessage": "jouet watched the PR you pushed to and reports:",
-                    "rewakeSummary": "jouet: the PR needs a look",
-                })
-            })
-            .collect();
-        Some((
-            "PostToolUse",
-            json!({ "matcher": "Bash", "hooks": handlers }),
-        ))
-    }
-
     /// The handler for one hook, in the harness's own fields. Cursor and
     /// Gemini CLI have one command for every platform, run with PowerShell
     /// on Windows, so a global install there gets the PowerShell form; a
@@ -414,9 +372,11 @@ impl Harness {
 }
 
 /// Whether a handler is one jouet installed: its command (or Copilot's
-/// `bash` or `powershell`) runs `jouet hook` or `jouet watch`, directly (as
-/// older versions installed `jouet hook`), inside `sh -c`, or behind
-/// PowerShell's guard.
+/// `bash` or `powershell`) runs `jouet hook`, directly (as older versions
+/// installed it), inside `sh -c`, or behind PowerShell's guard. So is one
+/// that runs `jouet watch`, a command jouet no longer has: versions with the
+/// settle experiment installed it on Claude Code, and a re-run or
+/// `--uninstall` takes it out.
 fn is_jouet(handler: &Value) -> bool {
     ["command", "bash", "powershell"].iter().any(|field| {
         handler
@@ -600,14 +560,6 @@ pub(crate) fn install(doc: &mut Value, harness: Harness, scope: Scope) {
             .as_array_mut()
             .expect("validated as an array")
             .push(Value::Object(entry));
-    }
-    if let Some((event, group)) = harness.watch_group() {
-        hooks
-            .entry(event)
-            .or_insert_with(|| Value::Array(Vec::new()))
-            .as_array_mut()
-            .expect("validated as an array")
-            .push(group);
     }
     // A re-run would move jouet's groups after any added since; when they
     // are already right, where they sit is left alone.
@@ -993,47 +945,6 @@ mod tests {
             "timeout": 10
           }
         ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch claude'",
-            "if": "Bash(*git push*)",
-            "timeout": 86700,
-            "asyncRewake": true,
-            "rewakeMessage": "jouet watched the PR you pushed to and reports:",
-            "rewakeSummary": "jouet: the PR needs a look"
-          },
-          {
-            "type": "command",
-            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch claude'",
-            "if": "Bash(*pr create*)",
-            "timeout": 86700,
-            "asyncRewake": true,
-            "rewakeMessage": "jouet watched the PR you pushed to and reports:",
-            "rewakeSummary": "jouet: the PR needs a look"
-          },
-          {
-            "type": "command",
-            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch claude'",
-            "if": "Bash(*stack submit*)",
-            "timeout": 86700,
-            "asyncRewake": true,
-            "rewakeMessage": "jouet watched the PR you pushed to and reports:",
-            "rewakeSummary": "jouet: the PR needs a look"
-          },
-          {
-            "type": "command",
-            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch claude'",
-            "if": "Bash(*git -C * push*)",
-            "timeout": 86700,
-            "asyncRewake": true,
-            "rewakeMessage": "jouet watched the PR you pushed to and reports:",
-            "rewakeSummary": "jouet: the PR needs a look"
-          }
-        ]
       }
     ],
     "PostToolUseFailure": [
@@ -1172,6 +1083,47 @@ mod tests {
         );
     }
 
+    /// What versions with the settle experiment added to Claude Code's
+    /// `PostToolUse`: a group of background handlers that ran `jouet watch`,
+    /// one for each kind of push.
+    fn watch_group() -> Value {
+        let handlers: Vec<Value> = ["git push", "pr create", "stack submit", "git -C * push"]
+            .iter()
+            .map(|pattern| {
+                json!({
+                    "type": "command",
+                    "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch claude'",
+                    "if": format!("Bash(*{pattern}*)"),
+                    "timeout": 86700,
+                    "asyncRewake": true,
+                    "rewakeMessage": "jouet watched the PR you pushed to and reports:",
+                    "rewakeSummary": "jouet: the PR needs a look",
+                })
+            })
+            .collect();
+        json!({ "matcher": "Bash", "hooks": handlers })
+    }
+
+    #[test]
+    fn the_push_watcher_an_older_version_installed_is_removed() {
+        let now = installed(existing(), Harness::Claude);
+        let mut old = now.clone();
+        old["hooks"]["PostToolUse"]
+            .as_array_mut()
+            .unwrap()
+            .push(watch_group());
+        assert!(pretty(&old).contains("jouet watch claude"));
+        // A re-run leaves what this version installs, and nothing else moves.
+        assert_eq!(installed(old.clone(), Harness::Claude), now);
+        // So does an uninstall, which takes the rest of jouet's with it.
+        let mut gone = old;
+        uninstall(&mut gone);
+        let mut clean = now;
+        uninstall(&mut clean);
+        assert_eq!(gone, clean);
+        assert!(!pretty(&gone).contains("jouet"));
+    }
+
     /// What versions before the guard installed: bare `jouet hook` commands,
     /// after another tool's hook.
     fn bare() -> Value {
@@ -1285,47 +1237,6 @@ mod tests {
             "type": "command",
             "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet hook claude post-edit'",
             "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch claude'",
-            "if": "Bash(*git push*)",
-            "timeout": 86700,
-            "asyncRewake": true,
-            "rewakeMessage": "jouet watched the PR you pushed to and reports:",
-            "rewakeSummary": "jouet: the PR needs a look"
-          },
-          {
-            "type": "command",
-            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch claude'",
-            "if": "Bash(*pr create*)",
-            "timeout": 86700,
-            "asyncRewake": true,
-            "rewakeMessage": "jouet watched the PR you pushed to and reports:",
-            "rewakeSummary": "jouet: the PR needs a look"
-          },
-          {
-            "type": "command",
-            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch claude'",
-            "if": "Bash(*stack submit*)",
-            "timeout": 86700,
-            "asyncRewake": true,
-            "rewakeMessage": "jouet watched the PR you pushed to and reports:",
-            "rewakeSummary": "jouet: the PR needs a look"
-          },
-          {
-            "type": "command",
-            "command": "sh -c 'jouet --version >/dev/null 2>&1 || exit 0; exec jouet watch claude'",
-            "if": "Bash(*git -C * push*)",
-            "timeout": 86700,
-            "asyncRewake": true,
-            "rewakeMessage": "jouet watched the PR you pushed to and reports:",
-            "rewakeSummary": "jouet: the PR needs a look"
           }
         ]
       }
@@ -1456,6 +1367,8 @@ mod tests {
             &json!({"command": "/usr/local/bin/jouet hook codex stop"})
         ));
         assert!(!is_jouet(&json!({"command": "jouet edit"})));
+        // The push watcher of the settle experiment, which is gone.
+        assert!(is_jouet(&watch_group()["hooks"][0]));
         assert!(is_jouet(
             &json!({"command": Harness::Claude.command("stop", None)})
         ));

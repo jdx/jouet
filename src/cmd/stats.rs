@@ -217,13 +217,6 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
         .as_ref()
         .map(|l| stats::drop_arms(&l.entries, &session_arms, &filter))
         .unwrap_or_default();
-    let settle_arms = ledger
-        .as_ref()
-        .map(|l| {
-            let now = u64::try_from(time::now()).unwrap_or(0);
-            stats::settle_arms(&l.entries, &session_arms, &filter, now)
-        })
-        .unwrap_or_default();
     if let Some(m) = measured.as_mut() {
         let times: HashMap<String, Vec<i64>> = transcripts
             .iter()
@@ -252,7 +245,6 @@ pub(crate) fn run(args: &StatsArgs, out: &Output) -> Exit {
         after_setup_scan: after_scan,
         arms: &arms,
         drop_arms: &drop_arms,
-        settle_arms: &settle_arms,
     };
     out.result(&doc, || text(&doc));
     Exit::Ok
@@ -453,11 +445,6 @@ struct Doc<'a> {
     /// and the events jouet would drop.
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     drop_arms: &'a [stats::DropArm],
-    /// The settle toggle's arms (`off` for sessions it assigns none): the
-    /// Auto-fix events a watcher covered, those jouet held, and what
-    /// became of them.
-    #[serde(skip_serializing_if = "<[_]>::is_empty")]
-    settle_arms: &'a [stats::SettleArm],
 }
 
 #[derive(Serialize)]
@@ -552,7 +539,6 @@ fn text(doc: &Doc<'_>) -> String {
     }
     arms_text(&mut s, doc.arms);
     drop_arms_text(&mut s, doc.drop_arms);
-    settle_arms_text(&mut s, doc.settle_arms);
     if doc.measured.is_some() {
         costs_text(&mut s, doc.costs);
         let totals = format!(
@@ -860,65 +846,6 @@ fn drop_arms_text(s: &mut String, arms: &[stats::DropArm]) {
     }
 }
 
-/// The settle toggle's arms, over every repository.
-fn settle_arms_text(s: &mut String, arms: &[stats::SettleArm]) {
-    if arms.is_empty() {
-        return;
-    }
-    let _ = writeln!(
-        s,
-        "\nsettle arm (new: jouet starts a PR watcher after a push and holds Auto-fix events for it):"
-    );
-    let counts = |by: &std::collections::BTreeMap<String, u64>| {
-        let each: Vec<String> = by.iter().map(|(what, n)| format!("{n} {what}")).collect();
-        each.join(", ")
-    };
-    for a in arms {
-        let _ = write!(
-            s,
-            "  {}: {} sessions, {} pushes",
-            a.arm, a.sessions, a.pushes
-        );
-        if !a.watchers.is_empty() {
-            let _ = write!(s, " (watchers: {})", counts(&a.watchers));
-        }
-        let _ = write!(s, ", {} covered by a watcher, {} held", a.covered, a.held);
-        if a.passed_with_notes > 0 {
-            let _ = write!(
-                s,
-                ", {} passed with other notes ({} with only the linked sessions' status)",
-                a.passed_with_notes, a.passed_with_status_only
-            );
-        }
-        if !a.settles.is_empty() {
-            let _ = write!(
-                s,
-                "; watchers ended: {}; {} wakes",
-                counts(&a.settles),
-                a.wakes
-            );
-        }
-        if !a.errors.is_empty() {
-            let _ = write!(s, "; errors: {}", counts(&a.errors));
-        }
-        if a.held > 0 {
-            let _ = write!(
-                s,
-                "; {} accounted for, {} silent drops, {} lease-lost ({} held), {} orphaned holds",
-                a.accounted, a.silent_drops, a.lease_lost, a.lease_lost_held, a.orphaned_holds
-            );
-        }
-        if let Some(wake) = a.median_wake_after_first_held_s {
-            let _ = write!(
-                s,
-                "; median {} from the first hold to the wake",
-                duration(wake * 1000)
-            );
-        }
-        let _ = writeln!(s);
-    }
-}
-
 /// One toggle's arms within a repository.
 fn arm_text(s: &mut String, a: &stats::ArmComparison) {
     let _ = writeln!(
@@ -1216,73 +1143,6 @@ mod tests {
             s.lines().nth(2),
             Some(
                 "  new: 4 sessions, 2.5 turns started by app events a session, 3 would-drops (2 more passed with other notes), 3 dropped"
-            )
-        );
-    }
-
-    #[test]
-    fn the_settle_arm_shows_what_became_of_held_events() {
-        let mut s = String::new();
-        settle_arms_text(&mut s, &[]);
-        assert!(s.is_empty());
-        settle_arms_text(
-            &mut s,
-            &[
-                stats::SettleArm {
-                    arm: "new".into(),
-                    sessions: 2,
-                    pushes: 6,
-                    watchers: [("started".to_string(), 4), ("watching".to_string(), 2)].into(),
-                    wakes: 2,
-                    covered: 5,
-                    held: 4,
-                    passed_with_notes: 0,
-                    passed_with_status_only: 0,
-                    settles: [("needs_agent".to_string(), 2), ("timeout".to_string(), 1)].into(),
-                    errors: BTreeMap::new(),
-                    accounted: 3,
-                    silent_drops: 0,
-                    lease_lost: 1,
-                    lease_lost_held: 1,
-                    orphaned_holds: 0,
-                    median_wake_after_first_held_s: Some(600),
-                },
-                stats::SettleArm {
-                    arm: "off".into(),
-                    sessions: 3,
-                    covered: 7,
-                    ..stats::SettleArm::default()
-                },
-            ],
-        );
-        assert_eq!(
-            s.lines().skip(2).collect::<Vec<_>>(),
-            [
-                "  new: 2 sessions, 6 pushes (watchers: 4 started, 2 watching), 5 covered by a watcher, 4 held; watchers ended: 2 needs_agent, 1 timeout; 2 wakes; 3 accounted for, 0 silent drops, 1 lease-lost (1 held), 0 orphaned holds; median 10m from the first hold to the wake",
-                "  off: 3 sessions, 0 pushes, 7 covered by a watcher, 0 held",
-            ]
-        );
-        // Events that came with other notes passed, and the line says how
-        // many of them had only the linked sessions' status beside them.
-        let mut s = String::new();
-        settle_arms_text(
-            &mut s,
-            &[stats::SettleArm {
-                arm: "new".into(),
-                sessions: 1,
-                covered: 9,
-                held: 3,
-                passed_with_notes: 6,
-                passed_with_status_only: 1,
-                settles: [("error".to_string(), 1)].into(),
-                errors: [("remote".to_string(), 1)].into(),
-                ..stats::SettleArm::default()
-            }],
-        );
-        assert_eq!(
-            s.lines().nth(2),
-            Some(
-                "  new: 1 sessions, 0 pushes, 9 covered by a watcher, 3 held, 6 passed with other notes (1 with only the linked sessions' status); watchers ended: 1 error; 0 wakes; errors: 1 remote; 0 accounted for, 0 silent drops, 0 lease-lost (0 held), 0 orphaned holds"
             )
         );
     }
