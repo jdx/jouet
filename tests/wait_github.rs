@@ -1389,3 +1389,49 @@ fn needs_agent_timing_out_unsettled_keeps_since_for_the_next_wait() {
     assert_eq!(doc["state"], "the PR had not settled");
     assert_eq!(doc["next_since"], since);
 }
+
+#[test]
+fn needs_agent_timing_out_names_the_checks_that_had_already_failed() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut world = World::default();
+    world.checks.insert(
+        SHA_A,
+        vec![
+            check(101, "unit", "completed", Some("failure")),
+            check(102, "lint", "in_progress", None),
+        ],
+    );
+    let fake = serve(world);
+    let args = [
+        "wait",
+        "pr",
+        "7",
+        "--repo",
+        "jdx/demo",
+        "--until",
+        "needs-agent",
+        "--interval",
+        "100ms",
+        "--timeout",
+        "1s",
+    ];
+    let out = jouet(&fake, dir.path(), &[&args[..], &["--json"]].concat());
+    assert_eq!(
+        out.status.code(),
+        Some(124),
+        "{}{}",
+        stdout(&out),
+        stderr(&out)
+    );
+    let doc = json_doc(&out);
+    assert_eq!(doc["result"], "timeout");
+    // The check still running is not one to act on yet.
+    let checks = doc["checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 1, "{checks:?}");
+    assert_eq!(checks[0]["name"], "unit");
+    let out = jouet(&fake, dir.path(), &args);
+    assert_eq!(out.status.code(), Some(124), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.starts_with("TIMEOUT "), "{text}");
+    assert!(text.contains("FAIL unit"), "{text}");
+}

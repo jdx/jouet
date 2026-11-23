@@ -207,6 +207,8 @@ pub struct SettleWait {
     conflict: ConflictCheck,
     items: Vec<Item>,
     dropped: BTreeMap<&'static str, usize>,
+    /// The conflict the latest poll confirmed.
+    conflicted: Option<String>,
     /// When the PR last settled with nothing for the agent (Unix seconds).
     settled_at: Option<i64>,
     /// Whether the latest poll found it so.
@@ -257,6 +259,7 @@ impl SettleWait {
             conflict,
             items: Vec::new(),
             dropped: BTreeMap::new(),
+            conflicted: None,
             settled_at: None,
             last_poll_settled: false,
         }
@@ -390,6 +393,7 @@ impl Watch for SettleWait {
             .conflict
             .confirmed(pr.conflicted(), now_ms())
             .then(|| format!("{repo}#{number} conflicts with {}", pr.base_ref));
+        self.conflicted.clone_from(&conflict);
         let pending = self
             .snap
             .checks
@@ -451,7 +455,17 @@ impl Watch for SettleWait {
                 self.settled_at.unwrap_or(self.options.since),
             ),
         };
-        let mut doc = self.doc("timeout", state, None, Vec::new());
+        // A wait that runs out of time still says what the latest poll found
+        // failing and whether the PR conflicts, so the agent can act on those
+        // without waiting for the rest.
+        let failed = self
+            .snap
+            .checks
+            .iter()
+            .filter(|c| c.state.failed() && !c.derived())
+            .cloned()
+            .collect();
+        let mut doc = self.doc("timeout", state, self.conflicted.clone(), failed);
         doc.next_since = format_utc(next);
         doc
     }
