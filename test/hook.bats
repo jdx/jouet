@@ -1425,6 +1425,104 @@ E"
 	assert_output --partial 'git-add-all'
 }
 
+@test "a hook installed twice evaluates a stop once, and the next stop again" {
+	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
+	test_fails() {
+		jq -cn --arg c "cargo test --workspace $1" \
+			'{session_id: "s1", hook_event_name: "PostToolUseFailure", tool_name: "Bash",
+			tool_input: {command: $c}, error: "Exit code 101\ntest result: FAILED", is_interrupt: false}' |
+			jouet hook claude post-tool-use-failure
+	}
+	# A stop that ends the message $1, as Claude Code sends it.
+	stop_ending() {
+		jq -cn --arg m "$1" --argjson active "${2:-false}" \
+			'{session_id: "s1", hook_event_name: "Stop", stop_hook_active: $active, last_assistant_message: $m}'
+	}
+	# The harness starts both hooks of one stop together, on one payload:
+	# `both HARNESS PAYLOAD [HK [HK]]`, each HK the hk stop hook merged into
+	# the first and the second.
+	both() {
+		jouet hook "$1" stop ${3:+--hk "$3"} <<<"$2" >"$BATS_TEST_TMPDIR/first" &
+		jouet hook "$1" stop ${4:+--hk "$4"} <<<"$2" >"$BATS_TEST_TMPDIR/second"
+		wait
+		cat "$BATS_TEST_TMPDIR/first" "$BATS_TEST_TMPDIR/second"
+	}
+	stops() { jq -c 'select(.event == "stop") | .decisions // [] | map(.action + ":" + .scope)' "$ledger"; }
+
+	test_fails one
+	run both claude "$(stop_ending Done.)"
+	assert_success
+	assert_equal "${#lines[@]}" 1
+	run jq -r .decision <<<"$output"
+	assert_output block
+	run stops
+	assert_output '["block:failed-test"]'
+	run --separate-stderr jouet stats --json
+	run jq -c '.measured.gate | map([.reason, .action, .stops])' <<<"$output"
+	assert_output '[["failed-test","block",1]]'
+
+	# The agent answers the block and stops again: another stop, though it
+	# ends the same words.
+	run both claude "$(stop_ending Done. true)"
+	assert_output ''
+	run stops
+	assert_equal "${#lines[@]}" 2
+
+	# So is a later turn's, and it blocks for a new failure.
+	test_fails two
+	run both claude "$(stop_ending 'Done again.')"
+	assert_equal "${#lines[@]}" 1
+	assert_output --partial '"decision":"block"'
+	# Even one with a payload seen before, once the two hooks of that stop
+	# cannot still be starting.
+	sleep 3
+	test_fails three
+	run both claude "$(stop_ending Done.)"
+	assert_equal "${#lines[@]}" 1
+	assert_output --partial '"decision":"block"'
+	run stops
+	assert_equal "${#lines[@]}" 4
+
+	# A marker that cannot be written leaves both hooks answering, as before.
+	rm -r "$XDG_STATE_HOME/jouet/hook-runs"
+	: >"$XDG_STATE_HOME/jouet/hook-runs"
+	run both claude "$(stop_ending Third.)"
+	assert_success
+	run stops
+	assert_equal "${#lines[@]}" 6
+	rm "$XDG_STATE_HOME/jouet/hook-runs"
+
+	# Without the message nothing tells two stops apart: each is answered.
+	run both claude '{"session_id":"s2","stop_hook_active":false}'
+	run jq -c 'select(.event == "stop" and .session == "s2")' "$ledger"
+	assert_equal "${#lines[@]}" 2
+
+	# A hook merged with hk's stop hook is not skipped for a plain one, which
+	# does not run hk: both answer, and hk's verdict reaches the agent.
+	printf '#!/bin/sh\ncat >/dev/null\necho '\''{"decision":"block","reason":"hk check failed: todo"}'\''\n' >"$BATS_TEST_TMPDIR/bin/hk-stop"
+	chmod +x "$BATS_TEST_TMPDIR/bin/hk-stop"
+	merged='{"session_id":"s3","hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"Done."}'
+	# The plain one goes first here, so it is the one that would be remembered.
+	run --separate-stderr jouet hook claude stop <<<"$merged"
+	assert_output ''
+	run --separate-stderr jouet hook claude stop --hk hk-stop <<<"$merged"
+	run jq -r .reason <<<"$output"
+	assert_output 'hk check failed: todo [hk]'
+	# Merged into both, hk runs once.
+	run both claude "${merged/Done./Both merged.}" hk-stop hk-stop
+	assert_equal "${#lines[@]}" 1
+	assert_output --partial 'hk check failed: todo [hk]'
+
+	# Codex runs the hooks of every hooks.json too. Its stop always prints
+	# JSON, so the ledger tells whether both ran.
+	codex='{"session_id":"c1","turn_id":"t1","hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"Done."}'
+	run both codex "$codex"
+	assert_equal "$output" $'{}\n{}'
+	run both codex "${codex/t1/t2}"
+	run jq -c 'select(.event == "stop" and .harness == "codex")' "$ledger"
+	assert_equal "${#lines[@]}" 2
+}
+
 @test "user-prompt-submit records what started the turn and passes every prompt on" {
 	ledger="$XDG_STATE_HOME/jouet/ledger/ledger.jsonl"
 	prompt() { jq -nc --arg p "$1" --arg id "$2" '{session_id:"s1",prompt_id:$id,hook_event_name:"UserPromptSubmit",prompt:$p}'; }

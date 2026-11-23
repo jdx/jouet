@@ -82,7 +82,7 @@ fn watch(args: &WatchArgs) -> Option<String> {
     }
     // One watcher for a call, however many hook entries it started: one per
     // filter the command matches, and one per scope jouet is installed in.
-    if !super::hook::first_run(Harness::Claude, "watch", &payload) {
+    if !super::hook::first_run(Harness::Claude, "watch", None, &payload) {
         return None;
     }
     // The PR is the one of the branch checked out where the agent pushed:
