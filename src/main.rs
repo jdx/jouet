@@ -30,7 +30,6 @@ mod reads;
 mod redact;
 mod rules;
 mod settings;
-mod settle;
 mod setup;
 mod share;
 mod sources;
@@ -61,11 +60,6 @@ fn main() -> ExitCode {
     // hook exit 2, which a harness reads as "block".
     if let Cmd::Hook(args) = &cli.cmd {
         return cmd::hook::run(args).into();
-    }
-    // A hook's command too: it exits 2 only to wake the agent, never for a
-    // bad flag or setting.
-    if let Cmd::Watch(args) = &cli.cmd {
-        return cmd::watch::run(args);
     }
     let entire = settings::Settings::load().entire;
     jouet_github::entire::configure(
@@ -112,7 +106,7 @@ fn main() -> ExitCode {
         Cmd::Skill(args) => cmd::skill::run(&args, &out),
         Cmd::Setup(args) => cmd::setup::run(&args, &out),
         Cmd::Completion(args) => cmd::completion::run(&args, &out),
-        Cmd::Hook(_) | Cmd::Watch(_) => unreachable!("handled above"),
+        Cmd::Hook(_) => unreachable!("handled above"),
     };
     recorded(exit.into())
 }

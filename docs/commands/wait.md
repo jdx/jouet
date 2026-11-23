@@ -144,75 +144,13 @@ jouet wait pr 123 --until needs-agent
 - **Needs the agent** means a failed check, a conflict, or an unresolved review thread or top-level review comment whose newest comment was posted since `--since` (default: when the wait starts) by someone other than the token's user, and is not bot noise.
 - **Bot noise** is a bot's rate-limit notice, "review in progress" or "review skipped" notice, review summary with no findings, perf report with no regression, stale Bugbot notice, a summary that only counts findings it also posts as threads, or a reply on a thread that opens with thanks or agreement and carries no severity marker. `--acks strict` keeps such a reply when its opening also hedges or asks ("…but X remains", "could you add a test?"); the default is `loose`. A person's comment is never noise.
 
-When the PR needs the agent, the wait exits `0` with one digest: each failed check with its log excerpt (`--log-lines`, `--no-logs`), the conflict, and each thread or comment with its first comment and newest reply. It also counts what it left out as noise, and prints the `--since` for the next wait, so nothing posted in between is missed. A PR that settles with nothing for the agent is still watched. A merged or closed PR exits `1`. The timeout defaults to `2h` here; a timeout exits `124`.
+When the PR needs the agent, the wait exits `0` with one digest: each failed check with its log excerpt (`--log-lines`, `--no-logs`), the conflict, and each thread or comment with its first comment and newest reply. It also counts what it left out as noise, and prints the `--since` for the next wait, so nothing posted in between is missed. A PR that settles with nothing for the agent is still watched. A merged or closed PR exits `1`. The timeout defaults to `2h` here; a timeout exits `124`, and still lists the checks that had failed by then and a conflict, so those can be acted on before the rest finishes.
 
 It reads review threads, so it works on GitHub only (exit `4` elsewhere). Run it in the background, as with any long wait: `run_in_background` in Claude Code, or a foreground call with a long timeout where the agent cannot be woken.
 
 The defaults were chosen from a replay of five weeks of Claude Code Auto-fix events, and are not final. With the loose rule and a 20-minute window, the replay dropped or merged 42% of wake-ups. 0.4–0.5% of the events an agent acted on would have been dropped wrongly, some of them requests for a code change. The strict rule with a 10-minute window drops fewer (35%), wrongly drops fewer (0.1–0.2%), and wakes the agent 10 minutes sooner.
 
 Once every check has finished and no review bot says it is still reviewing, the window shortens to 5 minutes. Given `--quiet-for`, the wait keeps to that window instead.
-
-#### Held events {#held-events}
-
-Started in an agent's session (`JOUET_SESSION_ID` or `CLAUDE_CODE_SESSION_ID` is set), the wait writes a lease under `$XDG_STATE_HOME/jouet/watch/` naming its PR, and refreshes its heartbeat every 15 seconds. With no `--timeout` it waits up to `24h`, and polls every 5 minutes while the PR stays settled.
-
-In the settle arm of [`jouet stats`](/commands/stats#experiment-arms), off by default, jouet's hook holds a desktop-app Auto-fix event (a failed check, a conflict or review comments) about that PR alone instead of letting it start a turn, and the block reason says so. A hook can only block a whole prompt, and the app sends its other notes (a session's report, the linked sessions' status) in the same prompt as an event. So jouet holds a prompt only when it is nothing but the event; one that carries anything else passes whole and starts a turn, and the watcher's digest reports the same thing again later. The digest then lists each held event and what became of it:
-
-```text
-  held for this wait (jouet kept these Auto-fix events from starting a turn):
-    2026-11-15T10:02:11Z ci-failure on jdx/jouet#12: trusted / lint: shown above
-    2026-11-15T10:09:40Z review-comment on jdx/jouet#12: its comments were left out as bot noise
-```
-
-A PR that closes with held events wakes the agent. A PR that closes with nothing held records `parked` and stays quiet until the session ends or the timeout. Anything that keeps the wait from writing its lease leaves a plain wait, and an event jouet cannot match to one live lease starts a turn as before. When a watcher ends without its digest, the session's next hook says what was held for it and how to start the wait again. A wait that fails with events held (GitHub stopped answering, its token was rejected) prints that itself in place of the digest, and ends it with the error that stopped it.
-
-#### The watcher jouet starts after a push {#push-watcher}
-
-In the settle arm, on Claude Code, the agent does not start the wait: jouet does. `jouet setup claude` installs a second `PostToolUse` entry that runs `jouet watch claude` in the background (Claude Code's `asyncRewake` hook option). For every session outside the arm it exits at once. In the arm, after a foreground `git push` (also `git -C DIR push`), `gh pr create` or `stack submit` that exited 0, it:
-
-1. finds the PR of the branch checked out [where the push ran](#push-directory), and does nothing more when there is none, or when a live watcher of the session already has that PR. It leaves that watcher, whether jouet or the agent started it, the commit now checked out, so a watcher that was about to end with a digest about an older commit waits once more instead;
-2. takes the lease and waits as `jouet wait pr --until needs-agent` does, for up to `24h`, counting comments as new from the push on;
-3. exits `2` with the digest on stderr when the PR needs the agent, or when it ends for any other reason (settled with nothing to do, closed, the time limit) with events held. Claude Code then starts one turn with the digest, whether the session was idle or working.
-
-What the agent is woken with, here from jouet's own tests (a fake GitHub, so the times are short); the first line is the entry's `rewakeMessage`:
-
-```text
-jouet watched the PR you pushed to and reports: NEEDS_AGENT jdx/demo#7 @ aaaaaaa: 1 failed check (2s)
-
-FAIL unit  step "cargo nextest"
-  https://github.com/jdx/demo/actions/runs/900/job/101
-  Run cargo nextest run
-  thread 'trust_root' panicked at src/config.rs:812:9:
-  assertion `left == right` failed
-  error: test run failed, 1 of 2210 tests failed
-  ##[error]Process completed with exit code 100.
-  full log: /home/you/.local/state/jouet/logs/jdx-demo-job-101.log
-  held for this wait (jouet kept these Auto-fix events from starting a turn):
-    2023-11-14T22:13:20Z ci-failure on jdx/demo#7: unit: shown above
-  next: jouet watches this PR again after your next push
-```
-
-A watcher that ends with nothing held and nothing for the agent says nothing. One that fails (no token, GitHub unreachable, a lease it cannot write) gives its lease back, so no event is held with nothing left to report it. With nothing held it exits `0`; with events held it exits `2`, and the wake lists them and ends with the error that stopped it. The error is also kept in a log, `<log dir>/watch-<time>-<pid>.log`, with the PR it watched; a watcher that ends any other way, also one the session's end stops, leaves no log. The ledger's `watch` or `settle` entry records only the error's class, as `error`: the name of the exit code it stands for (`remote`, `precondition`, `failed`). Claude Code wakes the agent with everything the hook wrote to stderr, so on Unix what the wait prints on the way (a rejected token, a retry) goes to that log and not into the wake; on Windows it is still part of the wake. When the session closes, Claude Code stops the watcher with SIGTERM: it stops covering the PR at once, takes a second for a hook that was holding an event to finish, then removes its lease, or leaves it when events are held, for the next hook of the session to report.
-
-##### Which checkout a push is watched in {#push-directory}
-
-An agent often pushes from a checkout other than the one its session runs in, in one call:
-
-```sh
-cd ~/src/other && git add tasks.md && git commit -q -m "docs: say what lint runs" && git push 2>&1 | tail -2
-git -C ../other push -u origin fix-export
-cd ~/src/other && gh pr create --base main --fill
-```
-
-jouet reads the directory the push ran in from the command's text, and looks the PR up there. It starts from the session's directory and follows each `cd DIR` before the push and git's own `-C DIR`, with `~`, `$HOME` and relative paths resolved. It runs no part of the command, and takes a directory only when it exists and is inside a git work tree. The lease, the commit left for a watcher that already has the PR, and the ledger's `repo` for the push all belong to that checkout. A session that pushes to several PRs has one watcher for each, and each holds only the Auto-fix events of its own PR.
-
-When the text does not settle the directory, jouet uses the session's, as it does for a push with no `cd`. That is the case for a directory in a variable other than `$HOME` (`cd "$DIR" && git push`) or with a glob or a command substitution in it, a `cd` in a subshell, a group, a loop, an `if` or a function, one that may not have run (after `||`, or after `&&` in an earlier list) or that ran in a pipeline or the background, `pushd`, `eval` and `source`, a script on a heredoc before the push, a `..` after a symbolic link (which the shell and git read differently), and `--git-dir`, `--work-tree`, `GIT_DIR` or `env -C`. Only a command that is itself the push counts, not one that prints the words (`echo git push done`). When the last push comes right after `||`, it ran only if what is before it failed, which a call that worked does not say (the push of `a || b && git push` is followed, as it runs when either worked); then, and after a command that sets `HOME`, the session's directory is used. So it is when a call has several pushes and the last one comes after `&&` in a call that goes on after it with `;` or `||` (`git push; test -d ../other && git -C ../other push; true`): the last push may not have run, and an earlier one may be the push that worked. With nothing but `&&` and pipes after it, a call that worked ran it, and it is followed. Such a push is watched as the PR of the session's directory, or not at all when that directory has no PR. A call with several pushes is one watcher's: the last push's directory counts.
-
-##### What it does not cover
-
-A push of a branch other than the one checked out, every PR but the current branch's after a `stack submit`, every push but the last of a call that pushes from several checkouts, a push run with `run_in_background`, and a one-shot run (`claude -p PROMPT`), where Claude Code runs the hook in the foreground and the wait would hold the run. It needs Claude Code 2.1.318 or later, the oldest version it was tried with, and reads the Claude Code process's command line to tell a one-shot run, which it cannot do on Windows. On macOS that command line comes from `ps`, which does not keep the arguments apart, so every run with `-p` or `--print` counts as one-shot there, also one fed a stream (`--input-format stream-json`). Each of these leaves the push with no watcher, and Auto-fix events about the PR start turns as before.
-
-`jouet watch` is not a command to run by hand; it reads the hook's JSON on stdin, and is the one hook entry of jouet's that exits `2`.
 
 ## Local conditions {#local-subjects}
 
